@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Remove-Item \"c:\\\\Users\\\\goyos\\\\OneDrive\\\\ドキュメント\\\\VSCode_Dev\\\\PythonDev\\\\ic-test-ai-agent\\\\CallAzureApi.ps1\" -Force)",
+      "Bash(powershell.exe -Command \"Remove-Item ''c:\\\\Users\\\\goyos\\\\OneDrive\\\\ドキュメント\\\\VSCode_Dev\\\\PythonDev\\\\ic-test-ai-agent\\\\CallAzureApi.ps1'' -Force\")",
+      "Bash(powershell.exe:*)",
+      "Bash(cmd /c \"type %TEMP%\\\\excel_to_api_output.json\")",
+      "Bash(func azure functionapp publish func-ic-test-evaluation)",
+      "Bash(az functionapp config appsettings set:*)",
+      "Bash(curl:*)",
+      "Bash(python:*)",
+      "Bash(Start-Sleep -Seconds 15)",
+      "Bash(Invoke-RestMethod -Uri \"https://func-ic-test-evaluation.azurewebsites.net/api/health\" -Method GET)",
+      "Bash(ConvertTo-Json -Depth 5)",
+      "Bash(az functionapp keys list:*)",
+      "Bash(dir:*)",
+      "Bash(az functionapp list:*)",
+      "Bash(az functionapp log tail:*)",
+      "Bash(func azure functionapp logstream func-ic-test-evaluation --timeout 20)"
+    ]
+  }
+}

@@ -1,0 +1,132 @@
+{
+    "_comment": "=== このファイルは設定のサンプル・ガイドです。実際の設定はsetting.jsonに記載してください ===",
+
+    "_dataStartRow": "データの開始行（ヘッダー行の次）",
+    "dataStartRow": 2,
+
+    "_sheetName": "対象シート名（空の場合はアクティブシートを使用）",
+    "sheetName": "",
+
+    "_columns": "Excel入力列の定義",
+    "columns": {
+        "ID": "A",
+        "ControlDescription": "C",
+        "TestProcedure": "D",
+        "EvidenceLink": "E"
+    },
+
+    "_api": "=== APIプロバイダー設定 ===",
+    "_api_provider": "AZURE / GCP / AWS のいずれかを指定",
+    "_api_authHeader": "認証ヘッダー名（省略時はプロバイダーのデフォルト値を使用）",
+    "api": {
+        "provider": "AZURE",
+        "endpoint": "https://your-function-app.azurewebsites.net/api/YourFunction",
+        "apiKey": "your-api-key-here",
+        "authHeader": ""
+    },
+
+    "_api_examples": "=== プロバイダー別の設定例 ===",
+
+    "_azure_example": {
+        "_description": "Azure Functions の設定例",
+        "provider": "AZURE",
+        "endpoint": "https://your-app.azurewebsites.net/api/FunctionName",
+        "apiKey": "your-function-key",
+        "authHeader": "x-functions-key"
+    },
+
+    "_gcp_example": {
+        "_description": "Google Cloud Functions の設定例",
+        "provider": "GCP",
+        "endpoint": "https://region-project.cloudfunctions.net/function-name",
+        "apiKey": "your-bearer-token",
+        "authHeader": "Authorization"
+    },
+
+    "_aws_example": {
+        "_description": "AWS Lambda (API Gateway) の設定例",
+        "provider": "AWS",
+        "endpoint": "https://xxxxx.execute-api.ap-northeast-1.amazonaws.com/prod/resource",
+        "apiKey": "your-api-key",
+        "authHeader": "x-api-key"
+    },
+
+    "_responseMapping": "=== APIレスポンスのExcel出力列マッピング ===",
+    "_responseMapping_note": "APIから返されるJSONキー名と出力先のExcel列を対応付け",
+    "responseMapping": {
+        "evaluationResult": "F",
+        "judgmentBasis": "G",
+        "documentReference": "H",
+        "fileName": "I"
+    },
+
+    "_booleanDisplay": "=== Boolean値の表示設定 ===",
+    "_booleanDisplay_note": "evaluationResultがtrue/falseの場合の表示テキスト",
+    "booleanDisplayTrue": "有効",
+    "booleanDisplayFalse": "非有効",
+
+    "_expected_request": "=== APIに送信されるJSON形式 ===",
+    "_request_note": "EvidenceLinkフォルダ内のファイルは自動的にBase64変換されてEvidenceFilesに追加される",
+    "_request_example": [
+        {
+            "ID": "IC-001",
+            "ControlDescription": "アクセス権限の承認プロセス",
+            "TestProcedure": "承認記録を確認する",
+            "EvidenceLink": "C:\\Evidence\\IC-001",
+            "EvidenceFiles": [
+                {
+                    "fileName": "approval_record.pdf",
+                    "extension": ".pdf",
+                    "mimeType": "application/pdf",
+                    "base64": "JVBERi0xLjQK..."
+                },
+                {
+                    "fileName": "screenshot.png",
+                    "extension": ".png",
+                    "mimeType": "image/png",
+                    "base64": "iVBORw0KGgo..."
+                }
+            ]
+        }
+    ],
+
+    "_mimeType_usage": "=== API側でのmimeType活用例 ===",
+    "_mimeType_note": "mimeTypeでファイル種別を判定し、適切な処理に分岐可能",
+    "_mimeType_examples": {
+        "application/pdf": "PDF解析またはOCR",
+        "image/*": "画像OCR (Vision API等)",
+        "application/vnd.ms-outlook": "Outlookメール解析（.msg）- 承認メール等",
+        "message/rfc822": "メール解析（.eml/.mht）",
+        "application/vnd.openxmlformats-officedocument.*": "Office文書解析",
+        "application/vnd.ms-excel*": "Excel解析（マクロ有無含む）",
+        "text/*": "テキスト/ログ直接処理",
+        "application/vnd.ms-access": "Accessデータベース",
+        "application/octet-stream": "バイナリ（ERPログ、監査証跡等）"
+    },
+
+    "_supported_extensions": "=== 対応ファイル形式一覧 ===",
+    "_extensions_list": {
+        "文書": [".pdf", ".doc", ".docx", ".rtf"],
+        "表計算": [".xls", ".xlsx", ".xlsm", ".csv"],
+        "プレゼン": [".ppt", ".pptx"],
+        "メール": [".msg", ".eml", ".oft", ".pst"],
+        "画像": [".jpg", ".png", ".gif", ".bmp", ".tiff", ".heic"],
+        "Web保存": [".html", ".mht", ".mhtml"],
+        "ログ": [".txt", ".log", ".evt", ".evtx", ".aud"],
+        "ERP出力": [".spool", ".alv"],
+        "DB/レポート": [".mdb", ".accdb", ".rpt"],
+        "図面": [".vsd", ".vsdx"],
+        "圧縮": [".zip", ".7z", ".rar"]
+    },
+
+    "_expected_response": "=== 期待するAPIレスポンス形式 ===",
+    "_response_example": [
+        {
+            "ID": "IC-001",
+            "evaluationResult": true,
+            "judgmentBasis": "承認記録が適切に保存されている",
+            "documentReference": "内部統制規程 第3条",
+            "fileName": "approval_record.pdf"
+        }
+    ]
+}

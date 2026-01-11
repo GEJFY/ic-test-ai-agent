@@ -1,0 +1,3 @@
+﻿timestamp,system,user_id,operation,operator,result,reference
+2025-12-21 10:12:33,ERP,u0555,DISABLE,sysops_taguchi,SUCCESS,RECERT-2025Q4-ERP
+2025-12-22 09:03:55,GL,gl_tmp03,DELETE,sysops_taguchi,SUCCESS,RECERT-2025Q4-GL

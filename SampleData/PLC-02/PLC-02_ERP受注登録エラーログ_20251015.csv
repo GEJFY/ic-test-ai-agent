@@ -1,0 +1,3 @@
+timestamp,user_id,client,order_no,credit_limit,current_exposure,order_amount,result_code,message
+2025-10-15 10:14:05,sales_u013,NEO-RETAIL,SO-251015-0008,"30,000,000","29,200,000","1,500,000",BLK-CRD-001,与信限度額を超過しています。経理部へ承認申請してください。
+2025-10-15 10:14:06,sales_u013,NEO-RETAIL,SO-251015-0008,"30,000,000","29,200,000","1,500,000",BLK-CRD-001,受注登録がブロックされました（信用限度超過）。

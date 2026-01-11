@@ -1,0 +1,5 @@
+﻿timestamp,user,host,action,result,ticket
+2025-12-05 22:03:12,admin_erp,ERP-APP01,ApplyPatch KB-XXXX,SUCCESS,CR-202512-033
+2025-12-05 22:18:44,admin_erp,ERP-APP01,RestartService ERPApp,SUCCESS,CR-202512-033
+2025-12-05 22:47:10,admin_erp,ERP-APP01,CheckEventLog,SUCCESS,CR-202512-033
+2025-12-05 23:01:02,admin_erp,ERP-APP01,Logout,SUCCESS,CR-202512-033

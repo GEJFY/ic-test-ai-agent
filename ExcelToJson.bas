@@ -1,0 +1,1494 @@
+'===============================================================================
+' ExcelToJson.bas - 内部統制テスト評価システム Excel VBAモジュール
+'===============================================================================
+' 【機能概要】
+' このVBAモジュールは、Excelに入力された内部統制テスト項目を、
+' クラウドAI（Azure Functions）に送信して自動評価を行い、
+' 結果をExcelに書き戻すプログラムです。
+'
+' 【主な機能】
+' 1. Excelデータ → JSON形式への変換
+' 2. クラウドAPIへのバッチ送信（タイムアウト対策）
+' 3. AI評価結果のExcelへの書き戻し
+'
+' 【対応クラウドプロバイダー】
+' - AZURE: Azure Functions（推奨）
+' - GCP: Google Cloud Platform
+' - AWS: Amazon Web Services
+'
+' 【設定ファイル】
+' setting.json - 列マッピング、API設定等を定義
+'
+' 【必要なファイル】
+' - ExcelToJson.bas（本ファイル）
+' - setting.json（設定ファイル）
+' - CallCloudApi.ps1（PowerShellスクリプト）
+'
+' 【使い方】
+' 1. setting.jsonでAPI設定と列マッピングを設定
+' 2. Excelにテスト項目データを入力
+' 3. ProcessWithApiマクロを実行
+'
+' 【作成者】 goyos
+' 【更新日】 2025年
+'===============================================================================
+Option Explicit
+
+'===============================================================================
+' 定数定義セクション
+' システム全体で使用する固定値を定義します
+'===============================================================================
+
+' ログ出力先パス（%TEMP%フォルダ配下）
+Private Const LOG_FILE_NAME As String = "\ExcelToJson_Log.txt"
+
+' ログレベル定数
+' ログの重要度を示す値。数字が大きいほど重要
+Private Const LOG_LEVEL_DEBUG As Integer = 1    ' デバッグ情報（開発時のみ）
+Private Const LOG_LEVEL_INFO As Integer = 2     ' 通常の情報
+Private Const LOG_LEVEL_WARNING As Integer = 3  ' 警告（処理は継続可能）
+Private Const LOG_LEVEL_ERROR As Integer = 4    ' エラー（処理が失敗）
+Private Const LOG_LEVEL_CRITICAL As Integer = 5 ' 致命的エラー（即時停止）
+
+' 現在のログ出力レベル（これ以上のレベルのみ出力）
+' 本番環境ではLOG_LEVEL_INFO以上を推奨
+Private Const CURRENT_LOG_LEVEL As Integer = LOG_LEVEL_INFO
+
+' エラーコード定数
+' エラーの種類を識別するための一意の番号
+Private Const ERR_SETTING_NOT_FOUND As Long = 1001      ' 設定ファイルが見つからない
+Private Const ERR_SETTING_PARSE_FAILED As Long = 1002   ' 設定ファイルの解析に失敗
+Private Const ERR_API_ENDPOINT_EMPTY As Long = 1003     ' APIエンドポイントが未設定
+Private Const ERR_SHEET_NOT_FOUND As Long = 1004        ' 指定されたシートが見つからない
+Private Const ERR_NO_DATA As Long = 1005                ' 処理対象データがない
+Private Const ERR_JSON_FILE_CREATE As Long = 1006       ' JSONファイル作成に失敗
+Private Const ERR_POWERSHELL_SCRIPT_NOT_FOUND As Long = 1007  ' PSスクリプトが見つからない
+Private Const ERR_API_CALL_FAILED As Long = 1008        ' API呼び出しに失敗
+Private Const ERR_RESPONSE_READ_FAILED As Long = 1009   ' レスポンス読み取りに失敗
+Private Const ERR_API_RETURNED_ERROR As Long = 1010     ' APIがエラーを返した
+Private Const ERR_FILE_READ_FAILED As Long = 1011       ' ファイル読み取りに失敗
+Private Const ERR_FILE_WRITE_FAILED As Long = 1012      ' ファイル書き込みに失敗
+
+'===============================================================================
+' 設定情報を格納する構造体（ユーザー定義型）
+' setting.jsonから読み込んだ設定値を保持します
+'===============================================================================
+Private Type SettingConfig
+    '--- 基本設定 ---
+    DataStartRow As Long        ' データ開始行（通常は2行目、ヘッダーが1行目のため）
+    SheetName As String         ' 対象シート名（空欄の場合はアクティブシート）
+    BatchSize As Long           ' 一度に処理する項目数（タイムアウト対策用）
+
+    '--- 入力列マッピング（ExcelのどのB列にどのデータがあるか）---
+    ColID As String                  ' ID列（例："A"）
+    ColControlDescription As String  ' 統制記述列（例："C"）
+    ColTestProcedure As String       ' テスト手続き列（例："D"）
+    ColEvidenceLink As String        ' エビデンスリンク列（例："E"）
+
+    '--- API接続設定 ---
+    ApiProvider As String       ' プロバイダー名（AZURE/GCP/AWS）
+    ApiEndpoint As String       ' APIのURL
+    ApiKey As String            ' 認証用APIキー
+    ApiAuthHeader As String     ' 認証ヘッダー名（例：x-functions-key）
+
+    '--- 出力列マッピング（APIの応答をどの列に書き込むか）---
+    ColEvaluationResult As String    ' 評価結果列（True/False → 有効/非有効）
+    ColJudgmentBasis As String       ' 判断根拠列
+    ColDocumentReference As String   ' 文書参照列
+    ColFileName As String            ' ファイル名列
+
+    '--- 表示設定 ---
+    BooleanDisplayTrue As String     ' Trueの表示文字列（例："有効"）
+    BooleanDisplayFalse As String    ' Falseの表示文字列（例："非有効"）
+End Type
+
+'===============================================================================
+' モジュールレベル変数
+' モジュール全体で共有する変数
+'===============================================================================
+Private m_LogFilePath As String     ' ログファイルのフルパス
+Private m_SessionId As String       ' 処理セッションの一意識別子
+
+'===============================================================================
+' メイン処理: ProcessWithApi
+'===============================================================================
+' 【機能】
+' Excelデータをクラウドに送信し、AI評価結果を取得してExcelに書き戻します。
+' 大量データの場合は自動的にバッチ分割して処理します。
+'
+' 【処理フロー】
+' 1. 設定ファイル（setting.json）を読み込む
+' 2. 対象シートのデータ行を収集
+' 3. バッチサイズごとに分割してAPIを呼び出し
+' 4. レスポンスをExcelに書き戻し
+' 5. 完了メッセージを表示
+'
+' 【エラー処理】
+' - 設定ファイルが見つからない → 処理中止
+' - APIエラー → エラーメッセージ表示、途中結果は保持
+' - バッチ途中でエラー → 処理済み件数を表示
+'
+' 【使用例】
+' Excelのマクロダイアログから「ProcessWithApi」を選択して実行
+'===============================================================================
+Public Sub ProcessWithApi()
+    '--- 変数宣言 ---
+    Dim config As SettingConfig       ' 設定情報を格納する変数
+    Dim ws As Worksheet               ' 処理対象のワークシート
+    Dim lastRow As Long               ' データの最終行番号
+    Dim totalItems As Long            ' 処理対象の総項目数
+    Dim processedItems As Long        ' 処理完了した項目数
+    Dim batchNum As Long              ' 現在のバッチ番号
+    Dim totalBatches As Long          ' 総バッチ数
+    Dim startIdx As Long              ' バッチ内の開始インデックス
+    Dim endIdx As Long                ' バッチ内の終了インデックス
+    Dim rowIndices() As Long          ' データがある行番号の配列
+    Dim rowCount As Long              ' データがある行の数
+    Dim i As Long                     ' ループカウンター
+    Dim jsonText As String            ' API送信用JSON文字列
+    Dim inputJsonPath As String       ' 入力JSONファイルのパス
+    Dim outputJsonPath As String      ' 出力JSONファイルのパス
+    Dim responseJson As String        ' APIからのレスポンスJSON
+    Dim success As Boolean            ' API呼び出し成功フラグ
+    Dim hasError As Boolean           ' エラー発生フラグ
+    Dim startTime As Double           ' 処理開始時刻
+    Dim elapsedTime As Double         ' 経過時間
+
+    '--- セッション初期化 ---
+    ' 各実行を一意に識別するためのセッションIDを生成
+    InitializeSession
+
+    '--- ログ出力開始 ---
+    WriteLog LOG_LEVEL_INFO, "ProcessWithApi", "===== 処理開始 ====="
+    startTime = Timer  ' 処理時間計測のため開始時刻を記録
+
+    '--- ステップ1: 設定ファイルの読み込み ---
+    WriteLog LOG_LEVEL_INFO, "ProcessWithApi", "設定ファイルを読み込み中..."
+
+    If Not LoadSettings(config) Then
+        ' 設定読み込みに失敗した場合は処理を中止
+        ShowErrorMessage ERR_SETTING_NOT_FOUND, "設定ファイルの読み込みに失敗しました。" & vbCrLf & _
+                         "setting.jsonが正しい場所にあるか確認してください。"
+        Exit Sub
+    End If
+
+    WriteLog LOG_LEVEL_INFO, "ProcessWithApi", "設定読み込み完了 - プロバイダー: " & config.ApiProvider & _
+                              ", バッチサイズ: " & config.BatchSize
+
+    '--- ステップ2: API設定の検証 ---
+    If Trim(config.ApiEndpoint) = "" Then
+        ShowErrorMessage ERR_API_ENDPOINT_EMPTY, "APIエンドポイントが設定されていません。" & vbCrLf & _
+                         "setting.jsonのapi.endpointを確認してください。"
+        Exit Sub
+    End If
+
+    '--- ステップ3: 対象シートの取得 ---
+    Set ws = GetTargetWorksheet(config.SheetName)
+
+    If ws Is Nothing Then
+        ShowErrorMessage ERR_SHEET_NOT_FOUND, "対象シートが見つかりません。" & vbCrLf & _
+                         "シート名: " & config.SheetName
+        Exit Sub
+    End If
+
+    WriteLog LOG_LEVEL_INFO, "ProcessWithApi", "対象シート: " & ws.Name
+
+    '--- ステップ4: データ行の収集 ---
+    ' ID列でデータの最終行を判定
+    lastRow = ws.Cells(ws.Rows.Count, config.ColID).End(xlUp).Row
+
+    ' データがある行のインデックスを配列に格納
+    ' （空行をスキップするため）
+    ReDim rowIndices(1 To lastRow - config.DataStartRow + 1)
+    rowCount = 0
+
+    For i = config.DataStartRow To lastRow
+        ' ID列に値がある行のみを処理対象とする
+        If Trim(CStr(ws.Range(config.ColID & i).Value)) <> "" Then
+            rowCount = rowCount + 1
+            rowIndices(rowCount) = i
+        End If
+    Next i
+
+    ' データがない場合は処理終了
+    If rowCount = 0 Then
+        ShowErrorMessage ERR_NO_DATA, "処理対象のデータがありません。" & vbCrLf & _
+                         "ID列（" & config.ColID & "列）にデータがあるか確認してください。"
+        Exit Sub
+    End If
+
+    ' 配列サイズを実際のデータ数に調整
+    ReDim Preserve rowIndices(1 To rowCount)
+    totalItems = rowCount
+
+    ' 総バッチ数を計算（切り上げ）
+    totalBatches = Application.WorksheetFunction.Ceiling(totalItems / config.BatchSize, 1)
+
+    WriteLog LOG_LEVEL_INFO, "ProcessWithApi", "データ件数: " & totalItems & ", バッチ数: " & totalBatches
+
+    '--- ステップ5: 一時ファイルパスの設定 ---
+    ' Windows標準のTEMPフォルダを使用
+    inputJsonPath = Environ("TEMP") & "\excel_to_api_input.json"
+    outputJsonPath = Environ("TEMP") & "\excel_to_api_output.json"
+
+    WriteLog LOG_LEVEL_DEBUG, "ProcessWithApi", "入力JSON: " & inputJsonPath
+    WriteLog LOG_LEVEL_DEBUG, "ProcessWithApi", "出力JSON: " & outputJsonPath
+
+    '--- ステップ6: バッチ処理ループ ---
+    hasError = False
+    processedItems = 0
+
+    For batchNum = 1 To totalBatches
+        ' バッチ範囲の計算
+        startIdx = (batchNum - 1) * config.BatchSize + 1
+        endIdx = Application.WorksheetFunction.Min(batchNum * config.BatchSize, totalItems)
+
+        ' ステータスバーに進捗表示
+        Application.StatusBar = "処理中... バッチ " & batchNum & "/" & totalBatches & _
+                               " (項目 " & startIdx & "-" & endIdx & " / " & totalItems & ")"
+
+        WriteLog LOG_LEVEL_INFO, "ProcessWithApi", "バッチ " & batchNum & " 開始 (項目 " & startIdx & "-" & endIdx & ")"
+
+        '--- 6a: バッチ用JSONの生成 ---
+        jsonText = GenerateJsonForBatch(ws, rowIndices, startIdx, endIdx, config)
+
+        '--- 6b: JSONファイルの保存 ---
+        If Not WriteToFile(inputJsonPath, jsonText) Then
+            WriteLog LOG_LEVEL_ERROR, "ProcessWithApi", "JSONファイル作成失敗 - バッチ " & batchNum
+            ShowErrorMessage ERR_JSON_FILE_CREATE, "JSONファイルの作成に失敗しました。" & vbCrLf & _
+                             "バッチ: " & batchNum & vbCrLf & _
+                             "パス: " & inputJsonPath
+            hasError = True
+            Exit For
+        End If
+
+        '--- 6c: PowerShell経由でAPI呼び出し ---
+        success = CallPowerShellApi(inputJsonPath, outputJsonPath, config)
+
+        If Not success Then
+            WriteLog LOG_LEVEL_ERROR, "ProcessWithApi", "API呼び出し失敗 - バッチ " & batchNum
+            ShowErrorMessage ERR_API_CALL_FAILED, "API呼び出しに失敗しました。" & vbCrLf & _
+                             "バッチ: " & batchNum & "/" & totalBatches & vbCrLf & _
+                             "ログファイルを確認してください: " & m_LogFilePath
+            hasError = True
+            Exit For
+        End If
+
+        '--- 6d: レスポンスの読み取り ---
+        responseJson = ReadFromFile(outputJsonPath)
+
+        If responseJson = "" Then
+            WriteLog LOG_LEVEL_ERROR, "ProcessWithApi", "レスポンス読み取り失敗 - バッチ " & batchNum
+            ShowErrorMessage ERR_RESPONSE_READ_FAILED, "APIレスポンスの読み取りに失敗しました。" & vbCrLf & _
+                             "バッチ: " & batchNum
+            hasError = True
+            Exit For
+        End If
+
+        '--- 6e: APIエラーチェック ---
+        If InStr(1, responseJson, """error"": true", vbTextCompare) > 0 Then
+            Dim apiErrorMsg As String
+            apiErrorMsg = ExtractJsonValue(responseJson, "message")
+            WriteLog LOG_LEVEL_ERROR, "ProcessWithApi", "APIエラー - " & apiErrorMsg
+            ShowErrorMessage ERR_API_RETURNED_ERROR, "APIがエラーを返しました。" & vbCrLf & _
+                             "バッチ: " & batchNum & vbCrLf & _
+                             "エラー: " & apiErrorMsg
+            hasError = True
+            Exit For
+        End If
+
+        '--- 6f: Excelへの書き戻し ---
+        WriteResponseToExcel responseJson, config
+
+        processedItems = endIdx
+        WriteLog LOG_LEVEL_INFO, "ProcessWithApi", "バッチ " & batchNum & " 完了 - 累計処理: " & processedItems & " 件"
+
+        ' Excelの応答性を維持（ハングアップ防止）
+        DoEvents
+    Next batchNum
+
+    '--- ステップ7: 後処理 ---
+    Application.StatusBar = False  ' ステータスバーをクリア
+
+    ' 経過時間を計算
+    elapsedTime = Timer - startTime
+
+    '--- ステップ8: 完了メッセージの表示 ---
+    If hasError Then
+        WriteLog LOG_LEVEL_WARNING, "ProcessWithApi", "処理中断 - 処理済み: " & processedItems & "/" & totalItems
+        MsgBox "処理がエラーにより中断されました。" & vbCrLf & vbCrLf & _
+               "処理済み: " & processedItems & " / " & totalItems & " 件" & vbCrLf & _
+               "経過時間: " & Format(elapsedTime, "0.0") & " 秒" & vbCrLf & vbCrLf & _
+               "詳細はログファイルを確認してください:" & vbCrLf & _
+               m_LogFilePath, vbExclamation, "処理中断"
+    Else
+        WriteLog LOG_LEVEL_INFO, "ProcessWithApi", "===== 処理完了 ===== (経過時間: " & Format(elapsedTime, "0.0") & " 秒)"
+        MsgBox "処理が正常に完了しました。" & vbCrLf & vbCrLf & _
+               "プロバイダー: " & config.ApiProvider & vbCrLf & _
+               "処理件数: " & totalItems & " 件" & vbCrLf & _
+               "バッチ数: " & totalBatches & vbCrLf & _
+               "経過時間: " & Format(elapsedTime, "0.0") & " 秒", vbInformation, "処理完了"
+    End If
+End Sub
+
+'===============================================================================
+' セッション初期化
+'===============================================================================
+' 【機能】
+' ログファイルパスとセッションIDを初期化します。
+' 各処理実行時に呼び出され、ログの追跡を容易にします。
+'
+' 【セッションIDの形式】
+' YYYYMMDD_HHMMSS_nnnn（日時 + ランダム4桁）
+'===============================================================================
+Private Sub InitializeSession()
+    ' ログファイルパスを設定
+    m_LogFilePath = Environ("TEMP") & LOG_FILE_NAME
+
+    ' セッションIDを生成（日時 + ランダム値で一意性を確保）
+    Randomize
+    m_SessionId = Format(Now, "yyyymmdd_hhmmss") & "_" & Format(Int(Rnd * 10000), "0000")
+End Sub
+
+'===============================================================================
+' ログ出力関数
+'===============================================================================
+' 【機能】
+' 指定されたログレベルでメッセージをログファイルに書き込みます。
+' 本番運用時のトラブルシューティングに必要な情報を記録します。
+'
+' 【引数】
+' logLevel: ログレベル（LOG_LEVEL_DEBUG/INFO/WARNING/ERROR/CRITICAL）
+' procName: 処理名（どの関数からのログか）
+' message: ログメッセージ
+'
+' 【ログ形式】
+' 2025-01-15 10:30:45 [INFO] [SESSION_ID] [ProcessWithApi] メッセージ
+'
+' 【注意】
+' - CURRENT_LOG_LEVEL以上のレベルのみ出力されます
+' - ログファイルは追記モードで書き込まれます
+'===============================================================================
+Private Sub WriteLog(logLevel As Integer, procName As String, message As String)
+    Dim logLevelStr As String
+    Dim logLine As String
+    Dim fileNum As Integer
+
+    ' 現在のログレベル未満は出力しない
+    If logLevel < CURRENT_LOG_LEVEL Then
+        Exit Sub
+    End If
+
+    ' ログレベルを文字列に変換
+    Select Case logLevel
+        Case LOG_LEVEL_DEBUG:    logLevelStr = "DEBUG"
+        Case LOG_LEVEL_INFO:     logLevelStr = "INFO"
+        Case LOG_LEVEL_WARNING:  logLevelStr = "WARNING"
+        Case LOG_LEVEL_ERROR:    logLevelStr = "ERROR"
+        Case LOG_LEVEL_CRITICAL: logLevelStr = "CRITICAL"
+        Case Else:               logLevelStr = "UNKNOWN"
+    End Select
+
+    ' ログ行を組み立て
+    logLine = Format(Now, "yyyy-mm-dd hh:mm:ss") & " [" & logLevelStr & "]" & _
+              " [" & m_SessionId & "]" & _
+              " [" & procName & "] " & message
+
+    ' ファイルに追記
+    On Error Resume Next
+    fileNum = FreeFile
+    Open m_LogFilePath For Append As #fileNum
+    Print #fileNum, logLine
+    Close #fileNum
+    On Error GoTo 0
+
+    ' デバッグ時はイミディエイトウィンドウにも出力
+    #If DEBUG_MODE Then
+        Debug.Print logLine
+    #End If
+End Sub
+
+'===============================================================================
+' エラーメッセージ表示関数
+'===============================================================================
+' 【機能】
+' エラーコードとメッセージを整形して表示し、ログにも記録します。
+' ユーザーに分かりやすいエラー情報を提供します。
+'
+' 【引数】
+' errorCode: エラーコード（ERR_XXX定数）
+' message: ユーザー向けメッセージ
+'
+' 【表示形式】
+' エラーコード: ERR-1001
+' メッセージ内容...
+'===============================================================================
+Private Sub ShowErrorMessage(errorCode As Long, message As String)
+    Dim fullMessage As String
+
+    ' ログに記録
+    WriteLog LOG_LEVEL_ERROR, "ShowErrorMessage", "ERR-" & errorCode & ": " & Replace(message, vbCrLf, " | ")
+
+    ' ユーザー向けメッセージを組み立て
+    fullMessage = "エラーコード: ERR-" & errorCode & vbCrLf & vbCrLf & message
+
+    ' メッセージボックスを表示
+    MsgBox fullMessage, vbCritical, "エラー"
+End Sub
+
+'===============================================================================
+' PowerShellスクリプト呼び出し関数
+'===============================================================================
+' 【機能】
+' CallCloudApi.ps1を実行してクラウドAPIを呼び出します。
+' PowerShellを使用することで、複雑なHTTP処理やBase64エンコードを実現します。
+'
+' 【引数】
+' inputPath: 入力JSONファイルのパス
+' outputPath: 出力JSONファイルのパス（APIレスポンス保存先）
+' config: 設定情報
+'
+' 【戻り値】
+' True: 成功、False: 失敗
+'
+' 【処理フロー】
+' 1. PowerShellスクリプトの存在確認
+' 2. コマンドライン引数の組み立て
+' 3. PowerShellの実行（同期、非表示ウィンドウ）
+' 4. 終了コードの確認
+'===============================================================================
+Private Function CallPowerShellApi(inputPath As String, outputPath As String, config As SettingConfig) As Boolean
+    Dim wsh As Object               ' WScript.Shellオブジェクト
+    Dim fso As Object               ' FileSystemObjectオブジェクト
+    Dim psCommand As String         ' 実行するPowerShellコマンド
+    Dim psScriptPath As String      ' PowerShellスクリプトのパス
+    Dim exitCode As Long            ' PowerShellの終了コード
+
+    On Error GoTo ErrorHandler
+
+    WriteLog LOG_LEVEL_DEBUG, "CallPowerShellApi", "API呼び出し開始"
+
+    ' COMオブジェクトの作成
+    Set wsh = CreateObject("WScript.Shell")
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    ' PowerShellスクリプトのパスを取得
+    ' OneDrive環境でもローカルパスに変換
+    psScriptPath = GetLocalPath(ThisWorkbook.Path) & "\CallCloudApi.ps1"
+
+    WriteLog LOG_LEVEL_DEBUG, "CallPowerShellApi", "スクリプトパス: " & psScriptPath
+
+    ' スクリプトの存在確認
+    If Not fso.FileExists(psScriptPath) Then
+        WriteLog LOG_LEVEL_ERROR, "CallPowerShellApi", "スクリプトが見つかりません: " & psScriptPath
+        ShowErrorMessage ERR_POWERSHELL_SCRIPT_NOT_FOUND, _
+                         "PowerShellスクリプトが見つかりません。" & vbCrLf & _
+                         "パス: " & psScriptPath & vbCrLf & vbCrLf & _
+                         "CallCloudApi.ps1がExcelファイルと同じフォルダにあるか確認してください。"
+        CallPowerShellApi = False
+        Exit Function
+    End If
+
+    ' PowerShellコマンドの組み立て
+    ' -ExecutionPolicy Bypass: 実行ポリシーを一時的にバイパス
+    ' -NoProfile: プロファイルを読み込まない（高速化）
+    ' -File: スクリプトファイルを指定
+    psCommand = "powershell.exe -ExecutionPolicy Bypass -NoProfile -File " & _
+                Chr(34) & psScriptPath & Chr(34) & " " & _
+                "-JsonFilePath " & Chr(34) & inputPath & Chr(34) & " " & _
+                "-Endpoint " & Chr(34) & config.ApiEndpoint & Chr(34) & " " & _
+                "-ApiKey " & Chr(34) & config.ApiKey & Chr(34) & " " & _
+                "-OutputFilePath " & Chr(34) & outputPath & Chr(34) & " " & _
+                "-Provider " & Chr(34) & config.ApiProvider & Chr(34) & " " & _
+                "-AuthHeader " & Chr(34) & config.ApiAuthHeader & Chr(34)
+
+    WriteLog LOG_LEVEL_DEBUG, "CallPowerShellApi", "コマンド実行中..."
+
+    ' PowerShellを同期実行（ウィンドウ非表示）
+    ' wsh.Run の引数:
+    '   第1引数: コマンド
+    '   第2引数: 0 = 非表示
+    '   第3引数: True = 完了まで待機
+    exitCode = wsh.Run(psCommand, 0, True)
+
+    WriteLog LOG_LEVEL_DEBUG, "CallPowerShellApi", "終了コード: " & exitCode
+
+    ' 終了コードの確認
+    If exitCode <> 0 Then
+        WriteLog LOG_LEVEL_ERROR, "CallPowerShellApi", "PowerShellエラー - 終了コード: " & exitCode
+
+        ' エラー内容の取得を試みる
+        If fso.FileExists(outputPath) Then
+            Dim errorContent As String
+            errorContent = ReadFromFile(outputPath)
+            WriteLog LOG_LEVEL_ERROR, "CallPowerShellApi", "エラー内容: " & Left(errorContent, 500)
+            MsgBox "PowerShellエラー (終了コード: " & exitCode & ")" & vbCrLf & vbCrLf & _
+                   Left(errorContent, 300), vbCritical, "PowerShellエラー"
+        Else
+            MsgBox "PowerShellエラー (終了コード: " & exitCode & ")" & vbCrLf & vbCrLf & _
+                   "出力ファイルが作成されませんでした。" & vbCrLf & _
+                   "スクリプト: " & psScriptPath, vbCritical, "PowerShellエラー"
+        End If
+    End If
+
+    CallPowerShellApi = (exitCode = 0)
+
+    WriteLog LOG_LEVEL_DEBUG, "CallPowerShellApi", "API呼び出し完了 - 結果: " & IIf(exitCode = 0, "成功", "失敗")
+    Exit Function
+
+ErrorHandler:
+    WriteLog LOG_LEVEL_CRITICAL, "CallPowerShellApi", "予期しないエラー: " & Err.Description & " (番号: " & Err.Number & ")"
+    ShowErrorMessage Err.Number, "PowerShell呼び出し中に予期しないエラーが発生しました。" & vbCrLf & _
+                     "エラー: " & Err.Description
+    CallPowerShellApi = False
+End Function
+
+'===============================================================================
+' APIレスポンスをExcelに書き戻す関数
+'===============================================================================
+' 【機能】
+' APIから返されたJSONレスポンスを解析し、対応するExcelセルに値を書き込みます。
+'
+' 【引数】
+' responseJson: APIからのJSONレスポンス文字列
+' config: 設定情報（列マッピング等）
+'
+' 【書き込み対象】
+' - 評価結果（Boolean → 有効/非有効）
+' - 判断根拠（複数行テキスト）
+' - 文書参照（複数行テキスト）
+' - ファイル名
+'
+' 【特殊処理】
+' - \n は Excelの改行（Chr(10)）に変換
+' - 改行を含むセルは自動的に折り返し表示
+'===============================================================================
+Private Sub WriteResponseToExcel(responseJson As String, config As SettingConfig)
+    Dim ws As Worksheet               ' 対象ワークシート
+    Dim lastRow As Long               ' データの最終行
+    Dim rowNum As Long                ' 現在処理中の行番号
+    Dim itemId As String              ' 現在の項目ID
+    Dim itemJson As String            ' IDに対応するJSONオブジェクト
+    Dim boolValue As String           ' Boolean値の文字列
+    Dim displayValue As String        ' 表示用の値
+    Dim processedCount As Long        ' 処理件数
+
+    WriteLog LOG_LEVEL_DEBUG, "WriteResponseToExcel", "Excel書き戻し開始"
+
+    ' 対象シートの取得
+    Set ws = GetTargetWorksheet(config.SheetName)
+
+    If ws Is Nothing Then
+        WriteLog LOG_LEVEL_ERROR, "WriteResponseToExcel", "対象シートが見つかりません"
+        Exit Sub
+    End If
+
+    ' データの最終行を取得
+    lastRow = ws.Cells(ws.Rows.Count, config.ColID).End(xlUp).Row
+    processedCount = 0
+
+    ' 各行のデータを処理
+    For rowNum = config.DataStartRow To lastRow
+        ' ID列の値を取得
+        itemId = Trim(CStr(ws.Range(config.ColID & rowNum).Value))
+
+        If itemId <> "" Then
+            ' このIDに対応するJSONオブジェクトを検索
+            itemJson = FindJsonItemById(responseJson, itemId)
+
+            If itemJson <> "" Then
+                '--- 評価結果の書き込み ---
+                ' Boolean値（true/false）を日本語表示に変換
+                If config.ColEvaluationResult <> "" Then
+                    boolValue = ExtractJsonBooleanValue(itemJson, "evaluationResult")
+
+                    If boolValue = "true" Then
+                        displayValue = config.BooleanDisplayTrue  ' 例: "有効"
+                    ElseIf boolValue = "false" Then
+                        displayValue = config.BooleanDisplayFalse ' 例: "非有効"
+                    Else
+                        displayValue = boolValue  ' そのまま出力
+                    End If
+
+                    ws.Range(config.ColEvaluationResult & rowNum).Value = displayValue
+                End If
+
+                '--- 判断根拠の書き込み ---
+                ' \n を Excel改行に変換し、折り返し表示を有効化
+                If config.ColJudgmentBasis <> "" Then
+                    ws.Range(config.ColJudgmentBasis & rowNum).Value = _
+                        ConvertJsonNewlines(ExtractJsonValue(itemJson, "judgmentBasis"))
+                    ws.Range(config.ColJudgmentBasis & rowNum).WrapText = True
+                End If
+
+                '--- 文書参照の書き込み ---
+                If config.ColDocumentReference <> "" Then
+                    ws.Range(config.ColDocumentReference & rowNum).Value = _
+                        ConvertJsonNewlines(ExtractJsonValue(itemJson, "documentReference"))
+                    ws.Range(config.ColDocumentReference & rowNum).WrapText = True
+                End If
+
+                '--- ファイル名の書き込み ---
+                If config.ColFileName <> "" Then
+                    ws.Range(config.ColFileName & rowNum).Value = _
+                        ExtractJsonValue(itemJson, "fileName")
+                End If
+
+                processedCount = processedCount + 1
+            End If
+        End If
+    Next rowNum
+
+    WriteLog LOG_LEVEL_DEBUG, "WriteResponseToExcel", "Excel書き戻し完了 - " & processedCount & " 件処理"
+End Sub
+
+'===============================================================================
+' 対象ワークシート取得関数
+'===============================================================================
+' 【機能】
+' 指定された名前のワークシートを取得します。
+' 名前が空の場合や見つからない場合はアクティブシートを返します。
+'
+' 【引数】
+' sheetName: シート名（空文字列可）
+'
+' 【戻り値】
+' Worksheet: 対象のワークシート
+'===============================================================================
+Private Function GetTargetWorksheet(sheetName As String) As Worksheet
+    Dim ws As Worksheet
+
+    On Error Resume Next
+
+    If sheetName = "" Then
+        ' シート名未指定の場合はアクティブシート
+        Set ws = ActiveSheet
+    Else
+        ' 指定されたシートを取得
+        Set ws = ThisWorkbook.Worksheets(sheetName)
+
+        ' 見つからない場合はアクティブシート
+        If ws Is Nothing Then
+            WriteLog LOG_LEVEL_WARNING, "GetTargetWorksheet", _
+                     "シート '" & sheetName & "' が見つからないため、アクティブシートを使用"
+            Set ws = ActiveSheet
+        End If
+    End If
+
+    On Error GoTo 0
+
+    Set GetTargetWorksheet = ws
+End Function
+
+'===============================================================================
+' JSONからIDでオブジェクトを検索する関数
+'===============================================================================
+' 【機能】
+' JSON配列の中から、指定されたIDを持つオブジェクトを検索して返します。
+'
+' 【引数】
+' jsonText: JSON配列文字列
+' targetId: 検索するID値
+'
+' 【戻り値】
+' String: IDに対応するJSONオブジェクト文字列（見つからない場合は空文字列）
+'
+' 【アルゴリズム】
+' 1. "ID": "targetId" のパターンを検索
+' 2. 見つかった位置から前方向に { を検索（オブジェクト開始位置）
+' 3. ブラケットのネストを考慮して } を検索（オブジェクト終了位置）
+'===============================================================================
+Private Function FindJsonItemById(jsonText As String, targetId As String) As String
+    Dim searchPattern As String       ' 検索パターン
+    Dim startPos As Long              ' オブジェクト開始位置
+    Dim endPos As Long                ' オブジェクト終了位置
+    Dim bracketCount As Long          ' ブラケットネスト数
+    Dim i As Long                     ' ループカウンター
+    Dim currentChar As String         ' 現在の文字
+    Dim checkPos As Long              ' チェック位置
+    Dim foundIdKey As Boolean         ' IDキーが見つかったか
+
+    ' ID値を二重引用符で囲んだパターンを作成
+    searchPattern = """" & targetId & """"
+    startPos = InStr(1, jsonText, searchPattern, vbTextCompare)
+
+    If startPos = 0 Then
+        ' IDが見つからない場合
+        FindJsonItemById = ""
+        Exit Function
+    End If
+
+    ' これが本当にIDフィールドの値かを確認
+    ' （他のフィールドに同じ値がある可能性があるため）
+    foundIdKey = False
+
+    ' 見つかった位置から後方に "ID": があるかチェック
+    For checkPos = startPos - 1 To 1 Step -1
+        If Mid(jsonText, checkPos, 5) = """ID"":" Or Mid(jsonText, checkPos, 5) = """id"":" Then
+            foundIdKey = True
+            Exit For
+        ElseIf Mid(jsonText, checkPos, 1) = "{" Or Mid(jsonText, checkPos, 1) = "," Then
+            Exit For
+        End If
+    Next checkPos
+
+    ' IDキーでない場合は次の出現を検索
+    If Not foundIdKey Then
+        startPos = InStr(startPos + 1, jsonText, searchPattern, vbTextCompare)
+        If startPos = 0 Then
+            FindJsonItemById = ""
+            Exit Function
+        End If
+    End If
+
+    ' オブジェクトの開始位置（{）を後方検索
+    For i = startPos To 1 Step -1
+        If Mid(jsonText, i, 1) = "{" Then
+            startPos = i
+            Exit For
+        End If
+    Next i
+
+    ' オブジェクトの終了位置を検索
+    ' ネストされた {} を正しく処理するためブラケット数をカウント
+    bracketCount = 0
+    For i = startPos To Len(jsonText)
+        currentChar = Mid(jsonText, i, 1)
+
+        If currentChar = "{" Then
+            bracketCount = bracketCount + 1
+        ElseIf currentChar = "}" Then
+            bracketCount = bracketCount - 1
+
+            If bracketCount = 0 Then
+                ' 対応する } が見つかった
+                endPos = i
+                Exit For
+            End If
+        End If
+    Next i
+
+    ' オブジェクトを抽出
+    If endPos > startPos Then
+        FindJsonItemById = Mid(jsonText, startPos, endPos - startPos + 1)
+    Else
+        FindJsonItemById = ""
+    End If
+End Function
+
+'===============================================================================
+' 設定ファイル読み込み関数
+'===============================================================================
+' 【機能】
+' setting.jsonを読み込み、設定値をSettingConfig構造体に格納します。
+'
+' 【引数】
+' config: 設定値を格納するSettingConfig変数（ByRef）
+'
+' 【戻り値】
+' True: 成功、False: 失敗
+'
+' 【setting.jsonの構造】
+' {
+'   "dataStartRow": 2,
+'   "sheetName": "",
+'   "batchSize": 3,
+'   "columns": { "ID": "A", ... },
+'   "api": { "provider": "AZURE", "endpoint": "...", ... },
+'   "responseMapping": { "evaluationResult": "F", ... },
+'   "booleanDisplayTrue": "有効",
+'   "booleanDisplayFalse": "非有効"
+' }
+'===============================================================================
+Private Function LoadSettings(ByRef config As SettingConfig) As Boolean
+    Dim fso As Object                 ' FileSystemObject
+    Dim stream As Object              ' ADODB.Stream
+    Dim jsonText As String            ' JSON文字列
+    Dim settingPath As String         ' setting.jsonのパス
+    Dim batchSizeStr As String        ' バッチサイズ文字列
+
+    On Error GoTo ErrorHandler
+
+    WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "設定読み込み開始"
+
+    ' setting.jsonのパスを取得（OneDrive対応）
+    settingPath = GetLocalPath(ThisWorkbook.Path) & "\setting.json"
+
+    WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "設定ファイルパス: " & settingPath
+
+    ' ファイルの存在確認
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    If Not fso.FileExists(settingPath) Then
+        WriteLog LOG_LEVEL_ERROR, "LoadSettings", "設定ファイルが見つかりません: " & settingPath
+        MsgBox "設定ファイルが見つかりません:" & vbCrLf & settingPath, vbExclamation, "設定エラー"
+        LoadSettings = False
+        Exit Function
+    End If
+
+    ' UTF-8でファイルを読み込み
+    ' ADODB.Streamを使用することで日本語を正しく処理
+    Set stream = CreateObject("ADODB.Stream")
+    With stream
+        .Type = 2         ' テキストモード
+        .Charset = "UTF-8"
+        .Open
+        .LoadFromFile settingPath
+        jsonText = .ReadText
+        .Close
+    End With
+    Set stream = Nothing
+
+    WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "ファイル読み込み完了 - サイズ: " & Len(jsonText) & " 文字"
+
+    '--- 基本設定の解析 ---
+    config.DataStartRow = CLng(ExtractJsonValue(jsonText, "dataStartRow"))
+    config.SheetName = ExtractJsonValue(jsonText, "sheetName")
+
+    ' バッチサイズ（デフォルト: 3）
+    batchSizeStr = ExtractJsonValue(jsonText, "batchSize")
+    If batchSizeStr <> "" And IsNumeric(batchSizeStr) Then
+        config.BatchSize = CLng(batchSizeStr)
+    Else
+        config.BatchSize = 3  ' デフォルト値
+    End If
+
+    '--- 列マッピングの解析 ---
+    config.ColID = ExtractNestedJsonValue(jsonText, "columns", "ID")
+    config.ColControlDescription = ExtractNestedJsonValue(jsonText, "columns", "ControlDescription")
+    config.ColTestProcedure = ExtractNestedJsonValue(jsonText, "columns", "TestProcedure")
+    config.ColEvidenceLink = ExtractNestedJsonValue(jsonText, "columns", "EvidenceLink")
+
+    '--- API設定の解析 ---
+    config.ApiProvider = ExtractNestedJsonValue(jsonText, "api", "provider")
+    config.ApiEndpoint = ExtractNestedJsonValue(jsonText, "api", "endpoint")
+    config.ApiKey = ExtractNestedJsonValue(jsonText, "api", "apiKey")
+    config.ApiAuthHeader = ExtractNestedJsonValue(jsonText, "api", "authHeader")
+
+    ' プロバイダーのデフォルト値
+    If config.ApiProvider = "" Then
+        config.ApiProvider = "AZURE"
+    End If
+
+    '--- レスポンスマッピングの解析 ---
+    config.ColEvaluationResult = ExtractNestedJsonValue(jsonText, "responseMapping", "evaluationResult")
+    config.ColJudgmentBasis = ExtractNestedJsonValue(jsonText, "responseMapping", "judgmentBasis")
+    config.ColDocumentReference = ExtractNestedJsonValue(jsonText, "responseMapping", "documentReference")
+    config.ColFileName = ExtractNestedJsonValue(jsonText, "responseMapping", "fileName")
+
+    '--- Boolean表示設定の解析 ---
+    config.BooleanDisplayTrue = ExtractJsonValue(jsonText, "booleanDisplayTrue")
+    config.BooleanDisplayFalse = ExtractJsonValue(jsonText, "booleanDisplayFalse")
+
+    ' デフォルト値の設定
+    If config.BooleanDisplayTrue = "" Then config.BooleanDisplayTrue = "有効"
+    If config.BooleanDisplayFalse = "" Then config.BooleanDisplayFalse = "非有効"
+
+    WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "設定読み込み完了"
+    WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "  DataStartRow: " & config.DataStartRow
+    WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "  BatchSize: " & config.BatchSize
+    WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "  Provider: " & config.ApiProvider
+
+    LoadSettings = True
+    Exit Function
+
+ErrorHandler:
+    WriteLog LOG_LEVEL_CRITICAL, "LoadSettings", "設定読み込みエラー: " & Err.Description & " (番号: " & Err.Number & ")"
+    MsgBox "設定ファイルの読み込み中にエラーが発生しました:" & vbCrLf & vbCrLf & _
+           "エラー: " & Err.Description & vbCrLf & _
+           "番号: " & Err.Number & vbCrLf & _
+           "パス: " & settingPath, vbCritical, "設定エラー"
+    LoadSettings = False
+End Function
+
+'===============================================================================
+' JSON値抽出関数
+'===============================================================================
+' 【機能】
+' JSON文字列から指定されたキーの値を抽出します。
+' シンプルなJSON解析機能で、外部ライブラリ不要。
+'
+' 【引数】
+' jsonText: JSON文字列
+' key: 抽出するキー名
+'
+' 【戻り値】
+' String: キーに対応する値（見つからない場合は空文字列）
+'
+' 【対応する値の型】
+' - 文字列: "key": "value"
+' - 数値: "key": 123
+' - Boolean: "key": true/false
+'
+' 【制限事項】
+' - 配列やネストしたオブジェクトには対応していません
+' - ネストした値を取得するにはExtractNestedJsonValueを使用
+'===============================================================================
+Private Function ExtractJsonValue(jsonText As String, key As String) As String
+    Dim pattern As String             ' 検索パターン
+    Dim startPos As Long              ' 値の開始位置
+    Dim endPos As Long                ' 値の終了位置
+    Dim value As String               ' 抽出した値
+
+    ' 検索パターン: "key":
+    pattern = """" & key & """:"
+    startPos = InStr(1, jsonText, pattern, vbTextCompare)
+
+    If startPos = 0 Then
+        ' キーが見つからない
+        ExtractJsonValue = ""
+        Exit Function
+    End If
+
+    ' コロンの後ろに移動
+    startPos = startPos + Len(pattern)
+
+    ' 空白文字をスキップ
+    Do While Mid(jsonText, startPos, 1) = " " Or Mid(jsonText, startPos, 1) = vbTab Or _
+              Mid(jsonText, startPos, 1) = vbCr Or Mid(jsonText, startPos, 1) = vbLf
+        startPos = startPos + 1
+    Loop
+
+    ' 値の型を判定して抽出
+    If Mid(jsonText, startPos, 1) = """" Then
+        ' 文字列値: 次の " まで
+        startPos = startPos + 1
+        endPos = InStr(startPos, jsonText, """")
+        value = Mid(jsonText, startPos, endPos - startPos)
+    Else
+        ' 数値または Boolean: カンマ、}、改行まで
+        endPos = startPos
+        Do While Mid(jsonText, endPos, 1) <> "," And Mid(jsonText, endPos, 1) <> "}" And _
+                 Mid(jsonText, endPos, 1) <> vbCr And Mid(jsonText, endPos, 1) <> vbLf
+            endPos = endPos + 1
+        Loop
+        value = Trim(Mid(jsonText, startPos, endPos - startPos))
+    End If
+
+    ExtractJsonValue = value
+End Function
+
+'===============================================================================
+' ネストしたJSON値抽出関数
+'===============================================================================
+' 【機能】
+' ネストしたJSONオブジェクトから値を抽出します。
+' 例: {"section": {"key": "value"}} から "value" を取得
+'
+' 【引数】
+' jsonText: JSON文字列
+' section: セクション名（親オブジェクト名）
+' key: 抽出するキー名
+'
+' 【戻り値】
+' String: キーに対応する値
+'
+' 【使用例】
+' setting.jsonの "columns": {"ID": "A"} から "A" を取得:
+' ExtractNestedJsonValue(json, "columns", "ID")
+'===============================================================================
+Private Function ExtractNestedJsonValue(jsonText As String, section As String, key As String) As String
+    Dim sectionPattern As String      ' セクション検索パターン
+    Dim sectionStart As Long          ' セクション開始位置
+    Dim sectionEnd As Long            ' セクション終了位置
+    Dim bracketCount As Long          ' ブラケットネスト数
+    Dim i As Long                     ' ループカウンター
+    Dim sectionJson As String         ' セクション内のJSON
+
+    ' セクションの検索パターン
+    sectionPattern = """" & section & """:"
+    sectionStart = InStr(1, jsonText, sectionPattern, vbTextCompare)
+
+    If sectionStart = 0 Then
+        ' セクションが見つからない
+        ExtractNestedJsonValue = ""
+        Exit Function
+    End If
+
+    ' コロンの後ろに移動
+    sectionStart = sectionStart + Len(sectionPattern)
+
+    ' 空白をスキップして { を見つける
+    Do While Mid(jsonText, sectionStart, 1) = " " Or Mid(jsonText, sectionStart, 1) = vbTab Or _
+              Mid(jsonText, sectionStart, 1) = vbCr Or Mid(jsonText, sectionStart, 1) = vbLf
+        sectionStart = sectionStart + 1
+    Loop
+
+    ' オブジェクトでない場合は終了
+    If Mid(jsonText, sectionStart, 1) <> "{" Then
+        ExtractNestedJsonValue = ""
+        Exit Function
+    End If
+
+    ' セクションの終了位置を検索
+    bracketCount = 0
+    For i = sectionStart To Len(jsonText)
+        If Mid(jsonText, i, 1) = "{" Then
+            bracketCount = bracketCount + 1
+        ElseIf Mid(jsonText, i, 1) = "}" Then
+            bracketCount = bracketCount - 1
+            If bracketCount = 0 Then
+                sectionEnd = i
+                Exit For
+            End If
+        End If
+    Next i
+
+    ' セクションを抽出してキーを検索
+    sectionJson = Mid(jsonText, sectionStart, sectionEnd - sectionStart + 1)
+    ExtractNestedJsonValue = ExtractJsonValue(sectionJson, key)
+End Function
+
+'===============================================================================
+' JSON Boolean値抽出関数
+'===============================================================================
+' 【機能】
+' JSONからBoolean値（true/false）を文字列として抽出します。
+' 引用符で囲まれていない値を正しく処理します。
+'
+' 【引数】
+' jsonText: JSON文字列
+' key: 抽出するキー名
+'
+' 【戻り値】
+' String: "true"、"false"、または空文字列
+'===============================================================================
+Private Function ExtractJsonBooleanValue(jsonText As String, key As String) As String
+    Dim pattern As String
+    Dim startPos As Long
+    Dim endPos As Long
+    Dim value As String
+
+    pattern = """" & key & """:"
+    startPos = InStr(1, jsonText, pattern, vbTextCompare)
+
+    If startPos = 0 Then
+        ExtractJsonBooleanValue = ""
+        Exit Function
+    End If
+
+    startPos = startPos + Len(pattern)
+
+    ' 空白をスキップ
+    Do While Mid(jsonText, startPos, 1) = " " Or Mid(jsonText, startPos, 1) = vbTab Or _
+              Mid(jsonText, startPos, 1) = vbCr Or Mid(jsonText, startPos, 1) = vbLf
+        startPos = startPos + 1
+    Loop
+
+    ' 値の終端を検索
+    endPos = startPos
+    Do While Mid(jsonText, endPos, 1) <> "," And Mid(jsonText, endPos, 1) <> "}" And _
+             Mid(jsonText, endPos, 1) <> vbCr And Mid(jsonText, endPos, 1) <> vbLf
+        endPos = endPos + 1
+    Loop
+
+    ' 小文字に変換して返す
+    value = Trim(LCase(Mid(jsonText, startPos, endPos - startPos)))
+    ExtractJsonBooleanValue = value
+End Function
+
+'===============================================================================
+' 全データJSON生成関数（非バッチ処理用）
+'===============================================================================
+' 【機能】
+' Excelの全データ行をJSON配列に変換します。
+' ※現在はバッチ処理が標準のため、この関数は互換性のために残しています。
+'
+' 【引数】
+' config: 設定情報
+'
+' 【戻り値】
+' String: JSON配列文字列
+'===============================================================================
+Private Function GenerateJson(config As SettingConfig) As String
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim i As Long
+    Dim json As String
+    Dim itemJson As String
+    Dim isFirst As Boolean
+
+    Set ws = GetTargetWorksheet(config.SheetName)
+
+    lastRow = ws.Cells(ws.Rows.Count, config.ColID).End(xlUp).Row
+
+    json = "[" & vbCrLf
+    isFirst = True
+
+    For i = config.DataStartRow To lastRow
+        If Trim(CStr(ws.Range(config.ColID & i).Value)) <> "" Then
+            If Not isFirst Then
+                json = json & "," & vbCrLf
+            End If
+
+            itemJson = GenerateItemJson(ws, i, config)
+            json = json & itemJson
+
+            isFirst = False
+        End If
+    Next i
+
+    json = json & vbCrLf & "]"
+    GenerateJson = json
+End Function
+
+'===============================================================================
+' バッチ用JSON生成関数
+'===============================================================================
+' 【機能】
+' 指定された範囲の行データをJSON配列に変換します。
+' バッチ処理時に使用し、タイムアウトを防ぎます。
+'
+' 【引数】
+' ws: 対象ワークシート
+' rowIndices: データがある行番号の配列
+' startIdx: 配列内の開始インデックス
+' endIdx: 配列内の終了インデックス
+' config: 設定情報
+'
+' 【戻り値】
+' String: JSON配列文字列
+'
+' 【出力例】
+' [
+'     {"ID": "1", "ControlDescription": "...", ...},
+'     {"ID": "2", "ControlDescription": "...", ...}
+' ]
+'===============================================================================
+Private Function GenerateJsonForBatch(ws As Worksheet, rowIndices() As Long, startIdx As Long, endIdx As Long, config As SettingConfig) As String
+    Dim json As String                ' 結果JSON
+    Dim itemJson As String            ' 個別項目のJSON
+    Dim isFirst As Boolean            ' 最初の項目フラグ
+    Dim i As Long                     ' ループカウンター
+
+    json = "[" & vbCrLf
+    isFirst = True
+
+    For i = startIdx To endIdx
+        If Not isFirst Then
+            json = json & "," & vbCrLf
+        End If
+
+        ' 行データをJSONオブジェクトに変換
+        itemJson = GenerateItemJson(ws, rowIndices(i), config)
+        json = json & itemJson
+
+        isFirst = False
+    Next i
+
+    json = json & vbCrLf & "]"
+    GenerateJsonForBatch = json
+End Function
+
+'===============================================================================
+' 1行分のJSON生成関数
+'===============================================================================
+' 【機能】
+' Excelの1行分のデータをJSONオブジェクトに変換します。
+'
+' 【引数】
+' ws: 対象ワークシート
+' rowNum: 行番号
+' config: 設定情報
+'
+' 【戻り値】
+' String: JSONオブジェクト文字列
+'
+' 【出力例】
+' {
+'     "ID": "IC-001",
+'     "ControlDescription": "経費承認プロセス",
+'     "TestProcedure": "承認印を確認する",
+'     "EvidenceLink": "C:\Evidence\doc.pdf"
+' }
+'
+' 【特殊文字処理】
+' - ダブルクォート → \"
+' - 改行 → \n
+' - タブ → \t
+' - バックスラッシュ → \\
+'===============================================================================
+Private Function GenerateItemJson(ws As Worksheet, rowNum As Long, config As SettingConfig) As String
+    Dim json As String
+    Dim indent As String
+
+    indent = "    "  ' 4スペースインデント
+
+    json = indent & "{" & vbCrLf
+    json = json & indent & indent & """ID"": """ & EscapeJsonString(CStr(ws.Range(config.ColID & rowNum).Value)) & """," & vbCrLf
+    json = json & indent & indent & """ControlDescription"": """ & EscapeJsonString(CStr(ws.Range(config.ColControlDescription & rowNum).Value)) & """," & vbCrLf
+    json = json & indent & indent & """TestProcedure"": """ & EscapeJsonString(CStr(ws.Range(config.ColTestProcedure & rowNum).Value)) & """," & vbCrLf
+    json = json & indent & indent & """EvidenceLink"": """ & EscapeJsonString(CStr(ws.Range(config.ColEvidenceLink & rowNum).Value)) & """" & vbCrLf
+    json = json & indent & "}"
+
+    GenerateItemJson = json
+End Function
+
+'===============================================================================
+' JSONエスケープ関数
+'===============================================================================
+' 【機能】
+' 文字列をJSON形式に安全にエスケープします。
+' JSON仕様で特殊な意味を持つ文字を変換します。
+'
+' 【引数】
+' text: 元の文字列
+'
+' 【戻り値】
+' String: エスケープされた文字列
+'
+' 【変換ルール】
+' \ → \\  （バックスラッシュ）
+' " → \"  （ダブルクォート）
+' 改行 → \n
+' タブ → \t
+'===============================================================================
+Private Function EscapeJsonString(text As String) As String
+    Dim result As String
+
+    result = text
+
+    ' バックスラッシュを最初にエスケープ（他の置換に影響するため）
+    result = Replace(result, "\", "\\")
+
+    ' ダブルクォートをエスケープ
+    result = Replace(result, """", "\""")
+
+    ' 改行をエスケープ（Windows/Mac/Unix対応）
+    result = Replace(result, vbCrLf, "\n")  ' Windows改行
+    result = Replace(result, vbCr, "\n")     ' 旧Mac改行
+    result = Replace(result, vbLf, "\n")     ' Unix改行
+
+    ' タブをエスケープ
+    result = Replace(result, vbTab, "\t")
+
+    EscapeJsonString = result
+End Function
+
+'===============================================================================
+' ファイル書き込み関数（UTF-8）
+'===============================================================================
+' 【機能】
+' 文字列をUTF-8エンコードでファイルに書き込みます。
+' 日本語を正しく保存するためにADODB.Streamを使用。
+'
+' 【引数】
+' filePath: 保存先ファイルパス
+' content: 書き込む内容
+'
+' 【戻り値】
+' True: 成功、False: 失敗
+'
+' 【注意】
+' - 既存ファイルは上書きされます
+' - BOM（バイトオーダーマーク）は付加されません
+'===============================================================================
+Private Function WriteToFile(filePath As String, content As String) As Boolean
+    Dim stream As Object
+
+    On Error GoTo ErrorHandler
+
+    WriteLog LOG_LEVEL_DEBUG, "WriteToFile", "ファイル書き込み: " & filePath
+
+    Set stream = CreateObject("ADODB.Stream")
+
+    With stream
+        .Type = 2         ' テキストモード
+        .Charset = "UTF-8"
+        .Open
+        .WriteText content
+        .SaveToFile filePath, 2  ' 2 = 上書き保存
+        .Close
+    End With
+
+    WriteToFile = True
+    WriteLog LOG_LEVEL_DEBUG, "WriteToFile", "書き込み完了 - サイズ: " & Len(content) & " 文字"
+    Exit Function
+
+ErrorHandler:
+    WriteLog LOG_LEVEL_ERROR, "WriteToFile", "書き込み失敗: " & Err.Description
+    WriteToFile = False
+End Function
+
+'===============================================================================
+' ファイル読み込み関数（UTF-8）
+'===============================================================================
+' 【機能】
+' UTF-8エンコードのファイルを読み込みます。
+'
+' 【引数】
+' filePath: 読み込むファイルパス
+'
+' 【戻り値】
+' String: ファイル内容（失敗時は空文字列）
+'===============================================================================
+Private Function ReadFromFile(filePath As String) As String
+    Dim stream As Object
+
+    On Error GoTo ErrorHandler
+
+    WriteLog LOG_LEVEL_DEBUG, "ReadFromFile", "ファイル読み込み: " & filePath
+
+    Set stream = CreateObject("ADODB.Stream")
+
+    With stream
+        .Type = 2         ' テキストモード
+        .Charset = "UTF-8"
+        .Open
+        .LoadFromFile filePath
+        ReadFromFile = .ReadText
+        .Close
+    End With
+
+    WriteLog LOG_LEVEL_DEBUG, "ReadFromFile", "読み込み完了 - サイズ: " & Len(ReadFromFile) & " 文字"
+    Exit Function
+
+ErrorHandler:
+    WriteLog LOG_LEVEL_ERROR, "ReadFromFile", "読み込み失敗: " & Err.Description
+    ReadFromFile = ""
+End Function
+
+'===============================================================================
+' OneDrive URLをローカルパスに変換する関数
+'===============================================================================
+' 【機能】
+' OneDriveの同期によりURLパスになっている場合、ローカルパスに変換します。
+' Excel VBAでOneDrive上のファイルを扱う際に必要な処理です。
+'
+' 【引数】
+' urlPath: パス（URLまたはローカルパス）
+'
+' 【戻り値】
+' String: ローカルファイルパス
+'
+' 【処理フロー】
+' 1. httpで始まるか確認
+' 2. OneDrive環境変数を取得
+' 3. URLをパス部分に分解
+' 4. ローカルパスを構築
+'
+' 【対応する環境変数】
+' - OneDrive（個人用）
+' - OneDriveConsumer（個人用別名）
+' - OneDriveCommercial（ビジネス用）
+'===============================================================================
+Private Function GetLocalPath(urlPath As String) As String
+    Dim localPath As String
+    Dim oneDriveEnv As String
+    Dim urlParts() As String
+    Dim i As Long
+    Dim decodedPart As String
+
+    ' 既にローカルパスの場合はそのまま返す
+    If Left(urlPath, 4) <> "http" Then
+        GetLocalPath = urlPath
+        Exit Function
+    End If
+
+    WriteLog LOG_LEVEL_DEBUG, "GetLocalPath", "URL変換: " & urlPath
+
+    ' OneDrive環境変数を優先順位で取得
+    oneDriveEnv = Environ("OneDrive")
+    If oneDriveEnv = "" Then
+        oneDriveEnv = Environ("OneDriveConsumer")
+    End If
+    If oneDriveEnv = "" Then
+        oneDriveEnv = Environ("OneDriveCommercial")
+    End If
+
+    If oneDriveEnv <> "" Then
+        ' URLをパス部分に分解
+        urlParts = Split(urlPath, "/")
+        localPath = oneDriveEnv
+
+        ' URLの5番目以降がフォルダ/ファイル名
+        For i = 4 To UBound(urlParts)
+            If urlParts(i) <> "" Then
+                decodedPart = UrlDecode(urlParts(i))
+                localPath = localPath & "\" & decodedPart
+            End If
+        Next i
+
+        WriteLog LOG_LEVEL_DEBUG, "GetLocalPath", "ローカルパス: " & localPath
+        GetLocalPath = localPath
+    Else
+        ' OneDriveが見つからない場合は元のパスを返す
+        WriteLog LOG_LEVEL_WARNING, "GetLocalPath", "OneDrive環境変数が見つかりません"
+        GetLocalPath = urlPath
+    End If
+End Function
+
+'===============================================================================
+' URLデコード関数
+'===============================================================================
+' 【機能】
+' URLエンコードされた文字列（%XX形式）をデコードします。
+' 日本語ファイル名などをURLから復元する際に使用。
+'
+' 【引数】
+' encodedStr: URLエンコードされた文字列
+'
+' 【戻り値】
+' String: デコードされた文字列
+'
+' 【例】
+' "%E3%83%86%E3%82%B9%E3%83%88" → "テスト"
+'===============================================================================
+Private Function UrlDecode(encodedStr As String) As String
+    Dim result As String
+    Dim i As Long
+    Dim hexCode As String
+
+    result = encodedStr
+    i = 1
+
+    Do While i <= Len(result)
+        If Mid(result, i, 1) = "%" And i + 2 <= Len(result) Then
+            hexCode = Mid(result, i + 1, 2)
+            On Error Resume Next
+            result = Left(result, i - 1) & Chr(CLng("&H" & hexCode)) & Mid(result, i + 3)
+            On Error GoTo 0
+        End If
+        i = i + 1
+    Loop
+
+    UrlDecode = result
+End Function
+
+'===============================================================================
+' JSON改行変換関数
+'===============================================================================
+' 【機能】
+' JSONのエスケープシーケンス（\n, \r, \t）をExcelの制御文字に変換します。
+' APIレスポンスをExcelに表示する際に、改行を正しく表示するために使用。
+'
+' 【引数】
+' text: JSONから取得した文字列
+'
+' 【戻り値】
+' String: Excel表示用に変換された文字列
+'
+' 【変換ルール】
+' \n → Chr(10)  Excel改行（LF）
+' \r → 削除     キャリッジリターンは不要
+' \t → Chr(9)   タブ文字
+'
+' 【使用場面】
+' 判断根拠や文書参照など、複数行のテキストをExcelセルに表示する際
+'===============================================================================
+Private Function ConvertJsonNewlines(text As String) As String
+    Dim result As String
+
+    result = text
+
+    ' \n を Excel改行に変換
+    result = Replace(result, "\n", Chr(10))
+
+    ' \r は削除（Excelでは不要）
+    result = Replace(result, "\r", "")
+
+    ' \t をタブに変換
+    result = Replace(result, "\t", Chr(9))
+
+    ConvertJsonNewlines = result
+End Function
