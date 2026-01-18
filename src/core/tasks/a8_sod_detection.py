@@ -49,12 +49,12 @@ if result.result:
 ================================================================================
 """
 import logging
-import base64
 from typing import List
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
 from .base_task import BaseAuditTask, TaskType, TaskResult, AuditContext
+from ..document_processor import DocumentProcessor
 
 # =============================================================================
 # ログ設定
@@ -291,6 +291,7 @@ class SoDDetectionTask(BaseAuditTask):
         権限データを抽出
 
         証跡ファイルから権限マトリクスや業務フローを抽出します。
+        DocumentProcessorを使用して様々なファイル形式に対応。
 
         Args:
             context (AuditContext): 監査コンテキスト
@@ -304,29 +305,28 @@ class SoDDetectionTask(BaseAuditTask):
         if context.control_description:
             data_parts.append(f"【職務分掌の要件】\n{context.control_description}")
 
-        # 証跡ファイルを処理（権限リスト、ユーザーマトリクス等）
+        # 証跡ファイルをDocumentProcessorで処理
         for ef in context.evidence_files:
-            ext = ef.extension.lower()
+            try:
+                # DocumentProcessorで統一的にテキスト抽出
+                extracted = DocumentProcessor.extract_text(
+                    file_name=ef.file_name,
+                    extension=ef.extension,
+                    base64_content=ef.base64_content,
+                    mime_type=ef.mime_type,
+                    use_di=True  # Document Intelligence があれば使用
+                )
 
-            # テキスト系ファイルの場合
-            if ext in ['.csv', '.txt', '.json', '.xml']:
-                try:
-                    content = base64.b64decode(ef.base64_content).decode('utf-8')
-                    # 長すぎる場合は切り詰め
-                    if len(content) > 8000:
-                        content = content[:8000] + f"\n... (以下省略)"
-                    data_parts.append(f"【{ef.file_name}】\n{content}")
-                    logger.debug(f"[A8] 抽出完了: {ef.file_name}")
-                except Exception as e:
-                    logger.warning(f"[A8] 読み取りエラー: {ef.file_name} - {e}")
-                    data_parts.append(f"【{ef.file_name}】\n[読み取り失敗]")
+                content = extracted.text_content
+                # 長すぎる場合は切り詰め
+                if len(content) > 8000:
+                    content = content[:8000] + f"\n... (以下省略)"
 
-            # Excelファイルの場合（権限マトリクスの可能性が高い）
-            elif ext in ['.xlsx', '.xls']:
-                data_parts.append(f"【{ef.file_name}】\n[Excelファイル - 権限マトリクスの可能性]")
-                logger.debug(f"[A8] Excel検出: {ef.file_name}")
+                data_parts.append(f"【{ef.file_name}】\n{content}")
+                logger.debug(f"[A8] 抽出完了: {ef.file_name} (方法: {extracted.extraction_method})")
 
-            else:
-                data_parts.append(f"【{ef.file_name}】\n[{ef.mime_type}]")
+            except Exception as e:
+                logger.warning(f"[A8] 読み取りエラー: {ef.file_name} - {e}")
+                data_parts.append(f"【{ef.file_name}】\n[読み取り失敗: {str(e)}]")
 
         return "\n\n".join(data_parts) if data_parts else "権限データなし"

@@ -88,7 +88,7 @@ logger = logging.getLogger(__name__)
 # 最終判断用プロンプト
 # 各タスクの実行結果を統合し、実務的な監査判断を生成する
 FINAL_JUDGMENT_PROMPT = """あなたは内部統制監査の専門家です。
-各評価タスクの実行結果を統合し、実務的な監査判断を下してください。
+内部統制テストの調書を作成してください。
 
 【統制記述】
 {control_description}
@@ -103,32 +103,56 @@ FINAL_JUDGMENT_PROMPT = """あなたは内部統制監査の専門家です。
 {task_results}
 
 【出力形式】
-以下の形式で、内部統制テストの判断根拠を作成してください：
+以下のJSON形式で出力してください：
 
 {{
     "evaluation_result": true/false,
-    "judgment_basis": {{
-        "control_objective": "この統制の目的（何を防止・検知するか）",
-        "test_summary": "実施したテストの概要",
-        "verification_items": [
-            {{
-                "item": "検証項目",
-                "result": "○/×/△",
-                "detail": "具体的な確認内容と結果",
-                "evidence_reference": "根拠となる証跡の具体的記載"
-            }}
-        ],
-        "conclusion": "総合判定の理由（なぜ有効/不備と判断したか）"
-    }},
-    "document_reference": "参照した規程・基準",
+    "judgment_basis": "判断根拠（文章形式）",
+    "document_quotes": [
+        {{
+            "file_name": "証跡ファイル名（拡張子含む）",
+            "quotes": ["引用文1", "引用文2"],
+            "page_or_location": "ページ番号やセル位置"
+        }}
+    ],
     "confidence": 0.0-1.0
 }}
 
-【重要な指示】
-1. 抽象的な記述ではなく、証跡の具体的な内容を引用して記載
-2. 「確認した」だけでなく「何を確認して何が分かったか」を明記
-3. 不備がある場合は具体的な不備内容を記載
-4. テスト手続きで求められている確認事項を漏れなく評価
+【judgment_basisの書き方 - 経験豊富な専門家の文体】
+経験20年以上の内部統制監査専門家として、簡潔かつ的確な判断根拠を記載してください（300〜500文字程度）。
+
+【禁止する書き出しパターン - 以下は絶対に使わないこと】
+× 「テスト手続きでは〜」「テスト手続きに基づき〜」
+× 「当該統制の有効性を評価するため〜」
+× 「内部統制テストの結果〜」「評価の結果〜」
+× 「以下の通り確認した〜」「本件について〜」
+
+【良い書き出しパターン - 直接事実から始める】
+○ 「研修実施報告書および受講者リストを閲覧した。」
+○ 「取締役会議事録を閲覧し、〜を確認した。」
+○ 「〇〇年〇月〇日付の承認書により、〜を確認した。」
+
+良い例：
+「研修実施報告書および受講者リストを閲覧した。報告書より、2025年11月18日にeラーニング形式で研修が実施されたことを確認した。受講者リストより、対象者60名中53名が受講済であり、未受講者3名については12/09に督促が実施されていることを確認した。期限後受講4名は理由書が承認されており、全員の受講が完了している。以上より、本統制は有効に整備・運用されていると判断する。」
+
+【document_quotesの書き方 - 原文をそのまま幅広に引用】
+★★★【最重要ルール】★★★
+- 証跡ファイルの原文を一字一句変えずにそのまま転記する
+- 自分の言葉での言い換え・要約・省略は【絶対禁止】
+- 前後の文脈を含めて100〜400文字程度を引用する
+- 各証跡ファイルから2〜3箇所を引用する
+
+【悪い引用の例 - このような引用は禁止】
+× 「研修が実施されていることを確認した」← 要約している
+× 「受講者名簿に全員の記録があった」← 言い換えている
+× 「対象：全役職員」← 短すぎる（文脈がない）
+
+【良い引用の例 - 原文をそのまま幅広に】
+{{"file_name": "CLC-01_コンプライアンス研修実施報告書_2025年度.pdf", "quotes": ["1. 実施概要 対象：全役職員（役員・嘱託・派遣を含む） 実施日：2025/11/18（eラーニング配信開始） 実施方法：LMS（社内学習管理システム）にて受講、理解度テスト（10問）を実施 受講期限：2025/11/30、期限後受講は2025/12/10まで認める（特段の事情がある場合）", "3. 受講状況 本研修の受講状況は以下の通りである。受講済：53名（88.3%）、期限後受講：4名（6.7%）、未受講：3名（5.0%）、合計：60名 期限後受講者については、業務都合により期限内の受講が困難であったが、いずれも2025/12/06までに受講を完了している。"], "page_or_location": "1-2ページ"}}
+
+その他のルール：
+- 同一ファイルからの引用は1つのオブジェクトにまとめる（quotesは配列）
+- 引用箇所（ページ、セクション、行）を必ず明記する
 """
 
 # 実行計画立案用プロンプト
@@ -230,8 +254,9 @@ class AuditResult:
         item_id (str): テスト項目ID
         evaluation_result (bool): 評価結果（True=有効、False=要確認）
         judgment_basis (str): 判断根拠（日本語で詳細に記述）
-        document_reference (str): 参照文書
+        document_reference (str): 証跡からの引用文（判断根拠となった箇所）
         file_name (str): 主要証跡ファイル名
+        evidence_files_info (List[Dict]): 証跡ファイル情報リスト（ファイル名とパス）
         task_results (List[TaskResult]): 各タスクの実行結果
         execution_plan (Optional[ExecutionPlan]): 実行計画
         confidence (float): 信頼度（0.0-1.0）
@@ -242,8 +267,11 @@ class AuditResult:
             item_id="CLC-01",
             evaluation_result=True,
             judgment_basis="■ 統制目的: ...",
-            document_reference="承認フロー規程",
+            document_reference="「承認者: 山田太郎、承認日: 2025/01/10」",
             file_name="approval.pdf",
+            evidence_files_info=[
+                {"fileName": "approval.pdf", "filePath": "C:/Evidence/approval.pdf"}
+            ],
             confidence=0.85
         )
         response = result.to_response_dict()
@@ -254,6 +282,7 @@ class AuditResult:
     judgment_basis: str
     document_reference: str
     file_name: str
+    evidence_files_info: List[Dict[str, str]] = field(default_factory=list)
     task_results: List[TaskResult] = field(default_factory=list)
     execution_plan: Optional[ExecutionPlan] = None
     confidence: float = 0.0
@@ -272,17 +301,23 @@ class AuditResult:
                 - ID: テスト項目ID
                 - evaluationResult: 評価結果
                 - judgmentBasis: 判断根拠
-                - documentReference: 参照文書
-                - fileName: ファイル名
+                - documentReference: 証跡からの引用文
+                - fileName: 主要ファイル名（後方互換用）
+                - evidenceFiles: 証跡ファイル情報配列（ファイル名とパス）
                 - _debug: デバッグ情報（オプション）
         """
+        # 実行計画サマリーを生成
+        execution_plan_summary = self._format_execution_plan_summary()
+
         # 基本応答を構築
         response = {
             "ID": self.item_id,
             "evaluationResult": self.evaluation_result,
+            "executionPlanSummary": execution_plan_summary,  # 実行計画サマリー
             "judgmentBasis": self.judgment_basis,
             "documentReference": self.document_reference,
             "fileName": self.file_name,
+            "evidenceFiles": self.evidence_files_info,  # 複数ファイル対応
         }
 
         # デバッグ情報を追加（開発時のトラブルシューティング用）
@@ -313,6 +348,95 @@ class AuditResult:
                 })
 
         return response
+
+    def _format_execution_plan_summary(self) -> str:
+        """
+        実行計画のサマリーを生成
+
+        タスクタイプ参照と具体的なテスト内容を含む形式で出力します。
+        形式: ○ テスト1 [A1:意味検索]: 具体的なテスト内容
+
+        Returns:
+            str: 実行計画サマリー
+        """
+        if not self.task_results:
+            return "（タスク未実行）"
+
+        task_summaries = []
+
+        # 実行計画のstepsからtest_descriptionを取得
+        step_descriptions = {}
+        if self.execution_plan and self.execution_plan.steps:
+            for idx, step in enumerate(self.execution_plan.steps):
+                if isinstance(step, dict):
+                    task_type = step.get("task_type", "")
+                    test_desc = step.get("test_description", "") or step.get("purpose", "")
+                    if task_type:
+                        step_descriptions[task_type.upper()] = test_desc
+                    step_descriptions[f"step_{idx}"] = test_desc
+
+        # タスクタイプ別の名称
+        task_type_names = {
+            "A1": "意味検索",
+            "A2": "画像認識",
+            "A3": "構造化データ抽出",
+            "A4": "段階的推論",
+            "A5": "意味推論",
+            "A6": "複数文書統合",
+            "A7": "パターン分析",
+            "A8": "SoD検出",
+        }
+
+        # デフォルト説明文
+        default_descriptions = {
+            "A1": "証跡の記載内容を意味的に検索・確認した",
+            "A2": "証跡の印影・署名・日付を画像から確認した",
+            "A3": "証跡の表データから数値を抽出・突合した",
+            "A4": "計算結果をステップごとに検証した",
+            "A5": "規程要求と実施記録の整合性を推論・判定した",
+            "A6": "複数の証跡を統合して確認した",
+            "A7": "複数期間の実施状況をパターン分析した",
+            "A8": "職務分掌・権限分離を検証した",
+        }
+
+        for i, tr in enumerate(self.task_results, 1):
+            status = "○" if tr.success else "×"
+            task_type_short = ""
+            task_type_name = ""
+
+            if tr.task_type:
+                task_type_short = tr.task_type.value.split("_")[0].upper()
+                task_type_name = task_type_names.get(task_type_short, task_type_short)
+
+            # 1. 実行計画のtest_descriptionを優先
+            test_desc = step_descriptions.get(task_type_short, "")
+
+            # 2. ステップ順序でのフォールバック
+            if not test_desc:
+                test_desc = step_descriptions.get(f"step_{i-1}", "")
+
+            # 3. reasoningからの抽出
+            if not test_desc and tr.reasoning:
+                reasoning_text = tr.reasoning
+                for prefix in ["A1_", "A2_", "A3_", "A4_", "A5_", "A6_", "A7_", "A8_"]:
+                    if reasoning_text.upper().startswith(prefix):
+                        reasoning_text = reasoning_text[len(prefix):].strip()
+                        break
+                if ":" in reasoning_text[:30]:
+                    reasoning_text = reasoning_text.split(":", 1)[1].strip()
+                if "。" in reasoning_text:
+                    test_desc = reasoning_text.split("。")[0] + "。"
+                else:
+                    test_desc = reasoning_text[:100]
+
+            # 4. デフォルト説明文（最終フォールバック）
+            if not test_desc or (test_desc.startswith("A") and len(test_desc) < 5):
+                test_desc = default_descriptions.get(task_type_short, "テストを実施した")
+
+            # タスクタイプ参照 + 具体的なテスト内容を出力
+            task_summaries.append(f"{status} テスト{i} [{task_type_short}:{task_type_name}]: {test_desc}")
+
+        return "\n".join(task_summaries)
 
 
 # =============================================================================
@@ -814,12 +938,27 @@ class AuditOrchestrator:
             judgment_basis = self._format_judgment_basis(judgment_data)
 
             evaluation_result = result.get("evaluation_result", False)
-            document_reference = result.get("document_reference", "")
             confidence = result.get("confidence", 0.0)
+
+            # 判断根拠の後処理（禁止フレーズを置換）
+            judgment_basis = self._postprocess_judgment_basis(judgment_basis, evaluation_result)
+
+            # 証跡からの引用文を抽出
+            document_quotes = result.get("document_quotes", [])
+            document_reference = self._format_document_quotes(document_quotes)
+
+            # 証跡ファイル情報を構築（ファイル名とパス）
+            evidence_files_info = []
+            for ef in context.evidence_files:
+                evidence_files_info.append({
+                    "fileName": ef.file_name,
+                    "filePath": context.evidence_link  # 元のフォルダパス
+                })
 
             logger.info(f"[最終判断] 評価結果: {'有効' if evaluation_result else '要確認'}")
             logger.info(f"[最終判断] 信頼度: {confidence:.2f}")
-            logger.debug(f"[最終判断] 参照文書: {document_reference}")
+            logger.info(f"[最終判断] 引用文数: {len(document_quotes)}件")
+            logger.debug(f"[最終判断] 証跡ファイル数: {len(evidence_files_info)}件")
 
             return AuditResult(
                 item_id=context.item_id,
@@ -827,6 +966,7 @@ class AuditOrchestrator:
                 judgment_basis=judgment_basis,
                 document_reference=document_reference,
                 file_name=context.evidence_files[0].file_name if context.evidence_files else "",
+                evidence_files_info=evidence_files_info,
                 confidence=confidence,
             )
 
@@ -862,59 +1002,170 @@ class AuditOrchestrator:
 
         return "\n".join(parts)
 
-    def _format_judgment_basis(self, judgment_data: dict) -> str:
+    def _format_judgment_basis(self, judgment_data) -> str:
         """
-        判断根拠データを読みやすいテキストにフォーマット
+        判断根拠データを文章形式でフォーマット
 
-        LLMが生成した判断根拠データを、ユーザーが理解しやすい
-        階層構造のテキストに変換します。
+        LLMが生成した判断根拠をそのまま返します。
+        文字列の場合はそのまま、辞書の場合は旧形式として処理します。
 
         Args:
-            judgment_data (dict): 判断根拠データ
-                - control_objective: 統制目的
-                - test_summary: テスト概要
-                - verification_items: 検証項目リスト
-                - conclusion: 結論
+            judgment_data: 判断根拠（文字列または辞書）
 
         Returns:
-            str: フォーマット済みの判断根拠テキスト
+            str: 判断根拠テキスト
         """
+        # 文字列の場合はそのまま返す（新形式）
+        if isinstance(judgment_data, str):
+            if judgment_data:
+                return judgment_data
+            else:
+                logger.warning("[最終判断] 判断根拠が空です")
+                return "判断根拠の生成に失敗しました"
+
+        # 辞書の場合は旧形式として処理（後方互換性）
         if not judgment_data:
             logger.warning("[最終判断] 判断根拠データが空です")
             return "判断根拠の生成に失敗しました"
 
+        # 旧形式: 辞書から文章を組み立て
         parts = []
 
-        # 統制目的
         if judgment_data.get("control_objective"):
-            parts.append(f"■ 統制目的: {judgment_data['control_objective']}")
+            parts.append(judgment_data['control_objective'])
 
-        # テスト概要
         if judgment_data.get("test_summary"):
-            parts.append(f"■ テスト概要: {judgment_data['test_summary']}")
+            parts.append(judgment_data['test_summary'])
 
-        # 検証項目
-        verification_items = judgment_data.get("verification_items", [])
-        if verification_items:
-            parts.append("■ 検証結果:")
-
-            for item in verification_items:
-                result_mark = item.get("result", "－")
-                item_name = item.get("item", "")
-                detail = item.get("detail", "")
-                evidence = item.get("evidence_reference", "")
-
-                parts.append(f"  {result_mark} {item_name}")
-                if detail:
-                    parts.append(f"    → {detail}")
-                if evidence:
-                    parts.append(f"    （証跡: {evidence}）")
-
-        # 結論
         if judgment_data.get("conclusion"):
             parts.append(f"■ 結論: {judgment_data['conclusion']}")
 
         return "\n".join(parts)
+
+    def _postprocess_judgment_basis(self, judgment_basis: str, evaluation_result: bool) -> str:
+        """
+        判断根拠の後処理
+
+        禁止フレーズを検出し、適切な表現に置換します。
+        監査調書として不適切な表現を自動的に修正します。
+
+        Args:
+            judgment_basis: 判断根拠の文字列
+            evaluation_result: 評価結果（True=有効, False=不備）
+
+        Returns:
+            str: 後処理済みの判断根拠
+        """
+        if not judgment_basis:
+            return judgment_basis
+
+        # 禁止フレーズと置換パターン（長いパターンを先に処理）
+        forbidden_patterns = [
+            # 「追加証跡が必要」系
+            ("追加の直接証跡（本文確認が可能な議事録、承認決議文、承認サイン等）が必要", "提供された証跡の範囲で確認した"),
+            ("追加の直接証跡が必要", "提供された証跡の範囲で確認した"),
+            ("追加証跡が必要", "提供された証跡の範囲で確認した"),
+            ("追加証跡を要する", "提供された証跡の範囲で確認した"),
+            ("追加の証跡が必要", "提供された証跡の範囲で確認した"),
+            ("追加の独立証跡", "提供された証跡"),
+            ("追加検証が必要", "確認した範囲で"),
+            ("追加で確認する必要がある", "確認した範囲で"),
+
+            # 「フォローアップ」系
+            ("全文確認のフォローアップを行うべきである", "提供された証跡の範囲で確認した"),
+            ("全文確認のフォローアップを行うべき", "提供された証跡の範囲で確認した"),
+            ("次回フォローアップの結果を待つべき", "提供された証跡の範囲で判断した"),
+            ("フォローアップを行うべきである", "提供された証跡の範囲で確認した"),
+            ("フォローアップを行うべき", "提供された証跡の範囲で確認した"),
+            ("フォローアップが必要", "確認できた範囲で"),
+            ("フォローアップを前提に", "確認できた範囲で"),
+
+            # 「再評価」「待つべき」系
+            ("最終判断は次回フォローアップの結果を待つべき", "提供された証跡の範囲で判断した"),
+            ("結果を待つべき", "提供された証跡の範囲で判断した"),
+            ("結論を更新する", "以上の確認結果に基づき判断した"),
+
+            # 「根拠不足」系
+            ("根拠が不足している", "提供された証跡の範囲で確認した"),
+            ("根拠が薄い", "提供された証跡から確認できる範囲で"),
+            ("直接的な結論を下す根拠が不足", "提供された証跡の範囲で確認した"),
+
+            # 「限定的」系
+            ("限定的有効性", "有効性"),
+            ("限定的有効", "有効"),
+            ("条件付き有効", "有効"),
+
+            # エラー表現
+            ("本文閲覧不可", "証跡を確認した結果"),
+            ("ファイル形式制約", ""),
+            ("可読性不足により", "証跡を確認した結果"),
+            ("取得エラーにより", "証跡を確認した結果"),
+        ]
+
+        result = judgment_basis
+        for forbidden, replacement in forbidden_patterns:
+            if forbidden in result:
+                logger.info(f"[後処理] 禁止フレーズを置換: '{forbidden}' → '{replacement}'")
+                result = result.replace(forbidden, replacement)
+
+        return result
+
+    def _format_document_quotes(self, document_quotes: List[Dict]) -> str:
+        """
+        証跡からの引用文をフォーマット
+
+        LLMが抽出した証跡引用情報を、読みやすいテキストに変換します。
+        Excelの「該当文書からの引用」列に出力されます。
+        原文をそのまま記載する形式で出力します（括弧なし）。
+
+        Args:
+            document_quotes (List[Dict]): 引用情報リスト
+                - file_name: 証跡ファイル名
+                - quotes: 引用文の配列
+                - page_or_location: ページ番号やセル位置
+
+        Returns:
+            str: フォーマット済みの引用文テキスト
+
+        出力例:
+            【CLC-01_コンプライアンス研修.pdf】 (1ページ)
+            1. 実施概要 対象：全役職員（役員・嘱託・派遣を含む） 実施日：2025/11/18...
+        """
+        if not document_quotes:
+            logger.warning("[最終判断] 証跡からの引用がありません")
+            return "（引用なし）"
+
+        parts = []
+
+        for quote_info in document_quotes:
+            file_name = quote_info.get("file_name", "")
+            location = quote_info.get("page_or_location", "")
+
+            # 新形式（quotes配列）と旧形式（quote文字列）の両方に対応
+            quotes = quote_info.get("quotes", [])
+            if not quotes:
+                # 旧形式: quote単独
+                single_quote = quote_info.get("quote", "")
+                if single_quote:
+                    quotes = [single_quote]
+
+            if quotes:
+                # ファイル名と位置情報をヘッダーとして追加
+                header = f"【{file_name}】" if file_name else ""
+                if location:
+                    header += f" ({location})"
+
+                if header:
+                    parts.append(header)
+
+                # 引用文は括弧なしでそのまま記載
+                for q in quotes:
+                    if q:
+                        parts.append(q)
+
+                parts.append("")  # 空行で区切り
+
+        return "\n".join(parts).strip()
 
     def _simple_aggregate(
         self,
@@ -966,14 +1217,22 @@ class AuditOrchestrator:
             )
         judgment_basis = "\n".join(judgment_parts)
 
-        # 参照文書を収集
+        # 証跡からの引用を収集（単純集計の場合はタスク結果から）
         all_refs = []
         for r in task_results:
             all_refs.extend(r.evidence_references)
-        document_reference = "; ".join(all_refs[:5]) if all_refs else "参照文書なし"
+        document_reference = "\n".join(all_refs[:5]) if all_refs else "（引用なし）"
 
         # 最初の証跡ファイル名を取得
         file_name = context.evidence_files[0].file_name if context.evidence_files else ""
+
+        # 証跡ファイル情報を構築
+        evidence_files_info = []
+        for ef in context.evidence_files:
+            evidence_files_info.append({
+                "fileName": ef.file_name,
+                "filePath": context.evidence_link
+            })
 
         logger.info(f"[結果統合] 単純集計結果: {'有効' if evaluation_result else '要確認'}")
 
@@ -983,6 +1242,7 @@ class AuditOrchestrator:
             judgment_basis=judgment_basis,
             document_reference=document_reference,
             file_name=file_name,
+            evidence_files_info=evidence_files_info,
             task_results=task_results,
             execution_plan=plan,
             confidence=avg_confidence,
@@ -1007,12 +1267,21 @@ class AuditOrchestrator:
         """
         logger.warning(f"[結果統合] フォールバック結果を作成: {reason}")
 
+        # 証跡ファイル情報を構築
+        evidence_files_info = []
+        for ef in context.evidence_files:
+            evidence_files_info.append({
+                "fileName": ef.file_name,
+                "filePath": context.evidence_link
+            })
+
         return AuditResult(
             item_id=context.item_id,
             evaluation_result=False,
             judgment_basis=f"評価失敗: {reason}",
-            document_reference="",
+            document_reference="（引用なし）",
             file_name=context.evidence_files[0].file_name if context.evidence_files else "",
+            evidence_files_info=evidence_files_info,
             confidence=0.0,
         )
 

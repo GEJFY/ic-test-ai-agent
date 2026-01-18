@@ -1,5 +1,6 @@
 # CallCloudApi.ps1
 # Send JSON to cloud API and return results
+# Supports parallel API calls for each item to maximize throughput
 # Supported providers: AZURE, GCP, AWS
 param(
     [Parameter(Mandatory=$true)]
@@ -18,7 +19,10 @@ param(
     [string]$Provider,
 
     [Parameter(Mandatory=$false)]
-    [string]$AuthHeader = ""
+    [string]$AuthHeader = "",
+
+    [Parameter(Mandatory=$false)]
+    [int]$TimeoutSec = 600
 )
 
 # Convert file to Base64
@@ -101,6 +105,45 @@ function Get-FolderFilesAsBase64 {
     return $files
 }
 
+# Function to call API for a single item (used by parallel jobs)
+function Invoke-SingleItemApi {
+    param(
+        [string]$ItemJson,
+        [string]$Endpoint,
+        [hashtable]$Headers,
+        [int]$TimeoutSec
+    )
+
+    try {
+        # Wrap single item in array (API expects array)
+        $bodyContent = "[$ItemJson]"
+        $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($bodyContent)
+
+        $webResponse = Invoke-WebRequest -Uri $Endpoint -Method Post -Headers $Headers -Body $bodyBytes -ContentType "application/json; charset=utf-8" -UseBasicParsing -TimeoutSec $TimeoutSec
+
+        # Parse response and extract first item
+        $responseContent = $webResponse.Content
+        $responseArray = $responseContent | ConvertFrom-Json
+
+        if ($responseArray -is [System.Array] -and $responseArray.Count -gt 0) {
+            return $responseArray[0]
+        }
+        return $responseArray
+    }
+    catch {
+        # Return error object
+        return @{
+            "ID" = "ERROR"
+            "evaluationResult" = $false
+            "judgmentBasis" = "API呼び出しエラー: $($_.Exception.Message)"
+            "documentReference" = ""
+            "fileName" = ""
+            "evidenceFiles" = @()
+            "_error" = $true
+        }
+    }
+}
+
 try {
     # Read JSON file
     $jsonContent = Get-Content -Path $JsonFilePath -Raw -Encoding UTF8
@@ -111,7 +154,8 @@ try {
         $jsonObject = @($jsonObject)
     }
 
-    # Process EvidenceLink folders
+    # Process EvidenceLink folders and prepare items
+    $preparedItems = @()
     foreach ($item in $jsonObject) {
         $evidenceLink = $item.EvidenceLink
 
@@ -121,14 +165,8 @@ try {
         } else {
             $item | Add-Member -NotePropertyName "EvidenceFiles" -NotePropertyValue @() -Force
         }
-    }
 
-    # Convert to JSON - use @() to ensure array output even for single item
-    $updatedJsonContent = @($jsonObject) | ConvertTo-Json -Depth 10 -Compress:$false
-
-    # Handle single item case - ConvertTo-Json doesn't wrap single object in array
-    if ($jsonObject.Count -eq 1) {
-        $updatedJsonContent = "[$updatedJsonContent]"
+        $preparedItems += $item
     }
 
     # Set headers by provider
@@ -167,14 +205,117 @@ try {
         }
     }
 
-    # Call API using Invoke-WebRequest to preserve raw JSON encoding
-    $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($updatedJsonContent)
-    $webResponse = Invoke-WebRequest -Uri $Endpoint -Method Post -Headers $headers -Body $bodyBytes -ContentType "application/json; charset=utf-8" -UseBasicParsing
+    # Parallel API calls using Start-Job (Windows PowerShell 5.1 compatible)
+    $jobs = @()
+    $results = @()
 
-    # Get response content as UTF-8 string and write to file
-    $responseContent = $webResponse.Content
-    [System.IO.File]::WriteAllText($OutputFilePath, $responseContent, [System.Text.Encoding]::UTF8)
+    Write-Host "[CallCloudApi] Starting parallel API calls for $($preparedItems.Count) items..."
 
+    foreach ($item in $preparedItems) {
+        $itemJson = $item | ConvertTo-Json -Depth 10 -Compress
+
+        # Start background job for each item
+        $job = Start-Job -ScriptBlock {
+            param($ItemJson, $Endpoint, $Headers, $TimeoutSec)
+
+            try {
+                # Wrap single item in array (API expects array)
+                $bodyContent = "[$ItemJson]"
+                $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($bodyContent)
+
+                $webResponse = Invoke-WebRequest -Uri $Endpoint -Method Post -Headers $Headers -Body $bodyBytes -ContentType "application/json; charset=utf-8" -UseBasicParsing -TimeoutSec $TimeoutSec
+
+                # Parse response and extract first item
+                $responseContent = $webResponse.Content
+                $responseArray = $responseContent | ConvertFrom-Json
+
+                if ($responseArray -is [System.Array] -and $responseArray.Count -gt 0) {
+                    return $responseArray[0]
+                }
+                return $responseArray
+            }
+            catch {
+                # Return error object with item ID if available
+                $errorItem = $ItemJson | ConvertFrom-Json
+                $itemId = if ($errorItem.ID) { $errorItem.ID } else { "UNKNOWN" }
+
+                return @{
+                    "ID" = $itemId
+                    "evaluationResult" = $false
+                    "executionPlanSummary" = ""
+                    "judgmentBasis" = "API呼び出しエラー: $($_.Exception.Message)"
+                    "documentReference" = ""
+                    "fileName" = ""
+                    "evidenceFiles" = @()
+                    "_error" = $true
+                }
+            }
+        } -ArgumentList $itemJson, $Endpoint, $headers, $TimeoutSec
+
+        $jobs += $job
+        Write-Host "[CallCloudApi] Started job for item: $($item.ID)"
+    }
+
+    # Wait for all jobs to complete
+    Write-Host "[CallCloudApi] Waiting for all jobs to complete..."
+    $jobs | Wait-Job -Timeout ($TimeoutSec + 60) | Out-Null
+
+    # Collect results
+    foreach ($job in $jobs) {
+        if ($job.State -eq 'Completed') {
+            $result = Receive-Job -Job $job
+            $results += $result
+            Write-Host "[CallCloudApi] Job completed: $($result.ID)"
+        }
+        elseif ($job.State -eq 'Running') {
+            # Job timed out
+            Stop-Job -Job $job
+            $results += @{
+                "ID" = "TIMEOUT"
+                "evaluationResult" = $false
+                "executionPlanSummary" = ""
+                "judgmentBasis" = "タイムアウト: 処理時間が制限を超過しました"
+                "documentReference" = ""
+                "fileName" = ""
+                "evidenceFiles" = @()
+                "_error" = $true
+            }
+            Write-Host "[CallCloudApi] Job timed out"
+        }
+        else {
+            # Job failed
+            $errorInfo = Receive-Job -Job $job -ErrorAction SilentlyContinue
+            $results += @{
+                "ID" = "ERROR"
+                "evaluationResult" = $false
+                "executionPlanSummary" = ""
+                "judgmentBasis" = "ジョブエラー: $($job.State)"
+                "documentReference" = ""
+                "fileName" = ""
+                "evidenceFiles" = @()
+                "_error" = $true
+            }
+            Write-Host "[CallCloudApi] Job failed: $($job.State)"
+        }
+
+        # Clean up job
+        Remove-Job -Job $job -Force
+    }
+
+    # Sort results by ID to maintain order
+    $sortedResults = $results | Sort-Object { $_.ID }
+
+    # Convert results to JSON and save
+    $outputJson = $sortedResults | ConvertTo-Json -Depth 10 -Compress:$false
+
+    # Ensure array format for single item
+    if ($sortedResults.Count -eq 1) {
+        $outputJson = "[$outputJson]"
+    }
+
+    [System.IO.File]::WriteAllText($OutputFilePath, $outputJson, [System.Text.Encoding]::UTF8)
+
+    Write-Host "[CallCloudApi] All jobs completed. Results saved to: $OutputFilePath"
     exit 0
 }
 catch {

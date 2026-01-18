@@ -1,0 +1,39 @@
+# Azure Functions core
+azure-functions>=1.17.0
+
+# LangChain framework
+langchain>=0.2.0
+langchain-core>=0.2.0
+langgraph>=0.2.0                      # LangGraph for workflow orchestration
+
+# Cloud LLM providers
+langchain-openai>=0.1.0              # Azure OpenAI Service
+langchain-google-vertexai>=1.0.0     # GCP Vertex AI (Gemini)
+langchain-aws>=0.1.0                 # AWS Bedrock
+
+# Utilities
+python-dotenv>=1.0.0
+
+# Document processing
+pypdf>=3.0.0                          # PDF text extraction
+openpyxl>=3.1.0                       # Excel file processing
+python-docx>=1.0.0                    # Word file processing
+
+# ==============================================================================
+# OCR Providers (選択したプロバイダーのみインストール)
+# ==============================================================================
+
+# Azure Document Intelligence (OCR_PROVIDER=AZURE)
+azure-ai-documentintelligence>=1.0.0  # Document Intelligence SDK
+azure-core>=1.30.0                    # Azure core for credentials
+
+# AWS Textract (OCR_PROVIDER=AWS) - boto3はlangchain-awsで既に含まれる
+# boto3>=1.34.0                       # langchain-awsに含まれるため不要
+
+# GCP Document AI (OCR_PROVIDER=GCP)
+# google-cloud-documentai>=2.0.0      # 使用時にインストール
+
+# Tesseract OCR (OCR_PROVIDER=TESSERACT) - ローカルOSS
+# pytesseract>=0.3.10                 # 使用時にインストール
+# pdf2image>=1.16.0                   # PDF→画像変換（Tesseract用）
+# Pillow>=10.0.0                      # 画像処理（Tesseract用）

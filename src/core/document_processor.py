@@ -523,9 +523,10 @@ class DocumentProcessor:
     TEXT_TYPES = ['.txt', '.csv', '.json', '.xml', '.log', '.md']
     PDF_TYPES = ['.pdf']
     EXCEL_TYPES = ['.xlsx', '.xls']
+    WORD_TYPES = ['.docx', '.doc']
     IMAGE_TYPES = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif']
 
-    # Document Intelligence クライアント（シングルトン）
+    # Document Intelligence クライアント（シングルトン）- 後方互換用
     _di_client: Optional[AzureDocumentIntelligence] = None
 
     @classmethod
@@ -533,12 +534,32 @@ class DocumentProcessor:
         """
         Document Intelligence クライアントを取得（シングルトン）
 
+        後方互換のため残しています。新規コードはOCRFactoryを使用してください。
+
         Returns:
             AzureDocumentIntelligence: クライアントインスタンス
         """
         if cls._di_client is None:
             cls._di_client = AzureDocumentIntelligence()
         return cls._di_client
+
+    @classmethod
+    def get_ocr_client(cls):
+        """
+        OCRクライアントを取得（OCRFactoryを使用）
+
+        OCR_PROVIDER環境変数に基づいて適切なOCRクライアントを返します。
+
+        Returns:
+            BaseOCRClient: OCRクライアント（NONE指定時はNone）
+        """
+        try:
+            from infrastructure.ocr_factory import OCRFactory
+            return OCRFactory.get_ocr_client()
+        except ImportError:
+            logger.warning("OCRFactory が利用できません。AzureDocumentIntelligenceにフォールバック")
+            di_client = cls.get_di_client()
+            return di_client if di_client.is_configured() else None
 
     @classmethod
     def extract_text(cls, file_name: str, extension: str, base64_content: str,
@@ -564,16 +585,16 @@ class DocumentProcessor:
             error フィールドでエラー有無を確認できます。
         """
         ext = extension.lower()
-        di_client = cls.get_di_client()
 
         logger.info(f"[抽出開始] {file_name} (形式: {ext})")
 
         try:
-            # PDF・画像の場合、Document Intelligence を優先使用
-            if use_di and di_client.is_configured():
-                if ext in cls.PDF_TYPES or ext in cls.IMAGE_TYPES:
-                    logger.info(f"Document Intelligence を使用: {file_name}")
-                    return di_client.extract_with_layout(file_name, base64_content, mime_type)
+            # PDF・画像の場合、OCRFactoryを使用
+            if use_di and ext in (cls.PDF_TYPES + cls.IMAGE_TYPES):
+                ocr_result = cls._extract_with_ocr(file_name, base64_content, mime_type)
+                if ocr_result:
+                    return ocr_result
+                # OCRが利用不可の場合はフォールバック
 
             # ローカル抽出にフォールバック
             if ext in cls.TEXT_TYPES:
@@ -584,6 +605,9 @@ class DocumentProcessor:
 
             elif ext in cls.EXCEL_TYPES:
                 return cls._extract_from_excel(file_name, ext, base64_content)
+
+            elif ext in cls.WORD_TYPES:
+                return cls._extract_from_word(file_name, ext, base64_content)
 
             elif ext in cls.IMAGE_TYPES:
                 # 画像（Document Intelligence なし）
@@ -614,6 +638,120 @@ class DocumentProcessor:
                 extraction_method="error",
                 error=str(e)
             )
+
+    @classmethod
+    def _extract_with_ocr(cls, file_name: str, base64_content: str, mime_type: str = None) -> Optional[ExtractedContent]:
+        """
+        OCRFactoryを使用してテキストを抽出
+
+        OCR_PROVIDER環境変数に基づいて適切なOCRエンジンを使用します。
+        OCRが設定されていない場合はNoneを返します。
+
+        Args:
+            file_name: ファイル名
+            base64_content: Base64エンコードされたファイル内容
+            mime_type: MIMEタイプ
+
+        Returns:
+            ExtractedContent: 抽出結果（OCR未設定時はNone）
+        """
+        try:
+            from infrastructure.ocr_factory import OCRFactory, OCRProvider
+
+            # OCRプロバイダーを取得
+            provider = OCRFactory.get_provider()
+
+            # NONE の場合は None を返してフォールバック
+            if provider == OCRProvider.NONE:
+                logger.info(f"[OCR] OCR_PROVIDER=NONE, ローカル抽出にフォールバック: {file_name}")
+                return None
+
+            # OCRクライアントを取得
+            ocr_client = OCRFactory.get_ocr_client()
+            if not ocr_client or not ocr_client.is_configured():
+                logger.warning(f"[OCR] OCRクライアント未設定, ローカル抽出にフォールバック: {file_name}")
+                return None
+
+            logger.info(f"[OCR] {ocr_client.provider_name} を使用: {file_name}")
+
+            # Base64デコード
+            file_bytes = base64.b64decode(base64_content)
+
+            # OCR実行
+            result = ocr_client.extract_text(file_bytes, mime_type)
+
+            if result.error:
+                logger.error(f"[OCR] エラー: {result.error}")
+                return ExtractedContent(
+                    file_name=file_name,
+                    file_type="pdf" if file_name.lower().endswith('.pdf') else "image",
+                    text_content=f"[OCRエラー: {file_name}] - {result.error}",
+                    extraction_method=f"ocr_error_{provider.value.lower()}",
+                    error=result.error
+                )
+
+            # OCRResultをExtractedContentに変換
+            # 座標情報付きのelementsを変換
+            elements = None
+            tables = None
+
+            if result.elements:
+                elements = [
+                    TextElement(
+                        element_id=f"elem_{i}",
+                        text=elem.text,
+                        page_number=elem.page_number,
+                        bounding_box=elem.bounding_box or [0, 0, 0, 0],
+                        element_type=elem.element_type,
+                        confidence=elem.confidence
+                    )
+                    for i, elem in enumerate(result.elements)
+                ]
+
+            if result.tables:
+                tables = [
+                    ExtractedTable(
+                        table_id=table.table_id,
+                        page_number=table.page_number,
+                        row_count=table.row_count,
+                        column_count=table.column_count,
+                        cells=[
+                            TableCell(
+                                row_index=cell.row_index,
+                                column_index=cell.column_index,
+                                text=cell.text,
+                                bounding_box=[0, 0, 0, 0],
+                                row_span=cell.row_span,
+                                column_span=cell.column_span
+                            )
+                            for cell in table.cells
+                        ],
+                        bounding_box=[0, 0, 0, 0]
+                    )
+                    for table in result.tables
+                ]
+
+            return ExtractedContent(
+                file_name=file_name,
+                file_type="pdf" if file_name.lower().endswith('.pdf') else "image",
+                text_content=result.text_content,
+                extraction_method=f"ocr_{provider.value.lower()}",
+                page_count=result.page_count,
+                elements=elements,
+                tables=tables
+            )
+
+        except ImportError:
+            # OCRFactoryがインポートできない場合は後方互換のためDIを試行
+            logger.debug("OCRFactory 未使用, AzureDocumentIntelligenceにフォールバック")
+            di_client = cls.get_di_client()
+            if di_client.is_configured():
+                return di_client.extract_with_layout(file_name, base64_content, mime_type)
+            return None
+
+        except Exception as e:
+            logger.error(f"[OCR] 予期せぬエラー: {e}")
+            return None
 
     @classmethod
     def _extract_from_text(cls, file_name: str, ext: str, base64_content: str) -> ExtractedContent:
@@ -819,6 +957,81 @@ class DocumentProcessor:
             )
 
     @classmethod
+    def _extract_from_word(cls, file_name: str, ext: str, base64_content: str) -> ExtractedContent:
+        """
+        Wordファイル（.docx）からテキストを抽出
+
+        python-docx ライブラリを使用します。
+        段落、表、ヘッダー、フッターからテキストを抽出します。
+
+        Args:
+            file_name: ファイル名
+            ext: 拡張子
+            base64_content: Base64エンコードされた内容
+
+        Returns:
+            ExtractedContent: 抽出結果
+        """
+        try:
+            from docx import Document
+
+            # Base64 デコード
+            word_bytes = base64.b64decode(base64_content)
+            word_stream = io.BytesIO(word_bytes)
+
+            # Word を読み込み
+            doc = Document(word_stream)
+            logger.info(f"Word読み込み完了: {file_name}")
+
+            text_parts = []
+
+            # 段落を抽出
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    text_parts.append(para.text)
+
+            # 表を抽出
+            for table_idx, table in enumerate(doc.tables):
+                text_parts.append(f"\n=== 表 {table_idx + 1} ===")
+                for row in table.rows:
+                    row_text = []
+                    for cell in row.cells:
+                        row_text.append(cell.text.strip())
+                    if any(row_text):
+                        text_parts.append("\t".join(row_text))
+
+            full_text = "\n".join(text_parts)
+            logger.info(f"Word抽出成功: {len(full_text):,}文字")
+
+            return ExtractedContent(
+                file_name=file_name,
+                file_type="word",
+                text_content=full_text,
+                extraction_method="python-docx",
+                page_count=None  # DOCXではページ数の取得が困難
+            )
+
+        except ImportError:
+            logger.warning("python-docx がインストールされていません")
+            return ExtractedContent(
+                file_name=file_name,
+                file_type="word",
+                text_content=f"[Wordファイル: {file_name}] - python-docx ライブラリ未インストール",
+                extraction_method="metadata_only",
+                error="python-docx がインストールされていません"
+            )
+
+        except Exception as e:
+            logger.error(f"Word抽出エラー ({file_name}): {e}")
+            return ExtractedContent(
+                file_name=file_name,
+                file_type="word",
+                text_content=f"[Word読み取りエラー: {file_name}] - {str(e)}",
+                extraction_method="error",
+                error=str(e)
+            )
+
+    @classmethod
     def extract_all(cls, evidence_files: List, use_di: bool = True) -> List[ExtractedContent]:
         """
         複数の証跡ファイルを一括抽出
@@ -964,19 +1177,46 @@ class DocumentProcessor:
 
         Returns:
             dict: 設定状態
-                - document_intelligence_configured: DI設定済みか
-                - endpoint: エンドポイント（一部マスク）
+                - ocr_provider: OCRプロバイダー名
+                - ocr_configured: OCR設定済みか
+                - document_intelligence_configured: DI設定済みか（後方互換）
                 - supported_formats: 対応ファイル形式
         """
+        # OCRFactory経由の設定状態
+        ocr_status = {
+            "provider": "NONE",
+            "configured": False,
+            "provider_name": "OCR無効"
+        }
+
+        try:
+            from infrastructure.ocr_factory import OCRFactory
+            ocr_config = OCRFactory.get_config_status()
+            ocr_status["provider"] = ocr_config.get("provider", "NONE")
+            ocr_status["configured"] = ocr_config.get("configured", False)
+
+            ocr_client = OCRFactory.get_ocr_client()
+            if ocr_client:
+                ocr_status["provider_name"] = ocr_client.provider_name
+        except ImportError:
+            pass
+
+        # 後方互換: AzureDocumentIntelligenceの状態
         di_client = cls.get_di_client()
+        di_configured = di_client.is_configured()
 
         return {
-            "document_intelligence_configured": di_client.is_configured(),
+            "ocr_provider": ocr_status["provider"],
+            "ocr_provider_name": ocr_status["provider_name"],
+            "ocr_configured": ocr_status["configured"],
+            # 後方互換フィールド
+            "document_intelligence_configured": di_configured or (ocr_status["provider"] == "AZURE" and ocr_status["configured"]),
             "endpoint": di_client.endpoint[:30] + "..." if di_client.endpoint else None,
             "supported_formats": {
                 "text": cls.TEXT_TYPES,
                 "pdf": cls.PDF_TYPES,
                 "excel": cls.EXCEL_TYPES,
+                "word": cls.WORD_TYPES,
                 "image": cls.IMAGE_TYPES
             }
         }

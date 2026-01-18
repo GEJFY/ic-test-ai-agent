@@ -79,11 +79,13 @@ Private Type SettingConfig
     SheetName As String         ' 対象シート名（空欄の場合はアクティブシート）
     BatchSize As Long           ' 一度に処理する項目数（タイムアウト対策用）
 
-    '--- 入力列マッピング（ExcelのどのB列にどのデータがあるか）---
+    '--- 入力列マッピング（Excelのどの列にどのデータがあるか）---
     ColID As String                  ' ID列（例："A"）
-    ColControlDescription As String  ' 統制記述列（例："C"）
-    ColTestProcedure As String       ' テスト手続き列（例："D"）
-    ColEvidenceLink As String        ' エビデンスリンク列（例："E"）
+    ColTestTarget As String          ' テスト対象列（例："B"）- TRUEの行のみ処理
+    ColCategory As String            ' 区分名列（例："C"）
+    ColControlDescription As String  ' 統制記述列（例："D"）
+    ColTestProcedure As String       ' テスト手続き列（例："E"）
+    ColEvidenceLink As String        ' エビデンスリンク列（例："F"）
 
     '--- API接続設定 ---
     ApiProvider As String       ' プロバイダー名（AZURE/GCP/AWS）
@@ -93,6 +95,7 @@ Private Type SettingConfig
 
     '--- 出力列マッピング（APIの応答をどの列に書き込むか）---
     ColEvaluationResult As String    ' 評価結果列（True/False → 有効/非有効）
+    ColExecutionPlanSummary As String ' 実行計画サマリー列（テスト計画）
     ColJudgmentBasis As String       ' 判断根拠列
     ColDocumentReference As String   ' 文書参照列
     ColFileName As String            ' ファイル名列
@@ -198,17 +201,38 @@ Public Sub ProcessWithApi()
     lastRow = ws.Cells(ws.Rows.Count, config.ColID).End(xlUp).Row
 
     ' データがある行のインデックスを配列に格納
-    ' （空行をスキップするため）
+    ' （空行をスキップ、テスト対象列でフィルタリング）
     ReDim rowIndices(1 To lastRow - config.DataStartRow + 1)
     rowCount = 0
+    Dim testTargetValue As String  ' テスト対象列の値
+    Dim skippedCount As Long       ' スキップされた件数
+    skippedCount = 0
 
     For i = config.DataStartRow To lastRow
         ' ID列に値がある行のみを処理対象とする
         If Trim(CStr(ws.Range(config.ColID & i).Value)) <> "" Then
-            rowCount = rowCount + 1
-            rowIndices(rowCount) = i
+            ' テスト対象列でフィルタリング（列が設定されている場合）
+            If config.ColTestTarget <> "" Then
+                testTargetValue = UCase(Trim(CStr(ws.Range(config.ColTestTarget & i).Value)))
+                ' TRUE または 1 の場合のみ処理対象
+                If testTargetValue = "TRUE" Or testTargetValue = "1" Or testTargetValue = "はい" Or testTargetValue = "○" Then
+                    rowCount = rowCount + 1
+                    rowIndices(rowCount) = i
+                Else
+                    skippedCount = skippedCount + 1
+                End If
+            Else
+                ' テスト対象列が設定されていない場合は全行処理
+                rowCount = rowCount + 1
+                rowIndices(rowCount) = i
+            End If
         End If
     Next i
+
+    ' スキップ件数をログに記録
+    If skippedCount > 0 Then
+        WriteLog LOG_LEVEL_INFO, "ProcessWithApi", "テスト対象外としてスキップ: " & skippedCount & " 件"
+    End If
 
     ' データがない場合は処理終了
     If rowCount = 0 Then
@@ -323,11 +347,16 @@ Public Sub ProcessWithApi()
                m_LogFilePath, vbExclamation, "処理中断"
     Else
         WriteLog LOG_LEVEL_INFO, "ProcessWithApi", "===== 処理完了 ===== (経過時間: " & Format(elapsedTime, "0.0") & " 秒)"
-        MsgBox "処理が正常に完了しました。" & vbCrLf & vbCrLf & _
+        Dim resultMsg As String
+        resultMsg = "処理が正常に完了しました。" & vbCrLf & vbCrLf & _
                "プロバイダー: " & config.ApiProvider & vbCrLf & _
-               "処理件数: " & totalItems & " 件" & vbCrLf & _
-               "バッチ数: " & totalBatches & vbCrLf & _
-               "経過時間: " & Format(elapsedTime, "0.0") & " 秒", vbInformation, "処理完了"
+               "処理件数: " & totalItems & " 件" & vbCrLf
+        If skippedCount > 0 Then
+            resultMsg = resultMsg & "スキップ件数: " & skippedCount & " 件（テスト対象外）" & vbCrLf
+        End If
+        resultMsg = resultMsg & "バッチ数: " & totalBatches & vbCrLf & _
+               "経過時間: " & Format(elapsedTime, "0.0") & " 秒"
+        MsgBox resultMsg, vbInformation, "処理完了"
     End If
 End Sub
 
@@ -556,12 +585,14 @@ End Function
 ' 【書き込み対象】
 ' - 評価結果（Boolean → 有効/非有効）
 ' - 判断根拠（複数行テキスト）
-' - 文書参照（複数行テキスト）
-' - ファイル名
+' - 該当文書からの引用（証跡の直接引用文）
+' - ファイル名（複数ファイル対応、ハイパーリンク付き）
 '
 ' 【特殊処理】
 ' - \n は Excelの改行（Chr(10)）に変換
 ' - 改行を含むセルは自動的に折り返し表示
+' - 複数ファイルは右の列に展開
+' - ファイル名にはパスへのハイパーリンクを設定
 '===============================================================================
 Private Sub WriteResponseToExcel(responseJson As String, config As SettingConfig)
     Dim ws As Worksheet               ' 対象ワークシート
@@ -613,6 +644,14 @@ Private Sub WriteResponseToExcel(responseJson As String, config As SettingConfig
                     ws.Range(config.ColEvaluationResult & rowNum).Value = displayValue
                 End If
 
+                '--- 実行計画サマリーの書き込み ---
+                ' どのようなタスクを実行したかを表示
+                If config.ColExecutionPlanSummary <> "" Then
+                    ws.Range(config.ColExecutionPlanSummary & rowNum).Value = _
+                        ConvertJsonNewlines(ExtractJsonValue(itemJson, "executionPlanSummary"))
+                    ws.Range(config.ColExecutionPlanSummary & rowNum).WrapText = True
+                End If
+
                 '--- 判断根拠の書き込み ---
                 ' \n を Excel改行に変換し、折り返し表示を有効化
                 If config.ColJudgmentBasis <> "" Then
@@ -621,17 +660,17 @@ Private Sub WriteResponseToExcel(responseJson As String, config As SettingConfig
                     ws.Range(config.ColJudgmentBasis & rowNum).WrapText = True
                 End If
 
-                '--- 文書参照の書き込み ---
+                '--- 該当文書からの引用の書き込み ---
+                ' documentReferenceには証跡からの直接引用文が入る
                 If config.ColDocumentReference <> "" Then
                     ws.Range(config.ColDocumentReference & rowNum).Value = _
                         ConvertJsonNewlines(ExtractJsonValue(itemJson, "documentReference"))
                     ws.Range(config.ColDocumentReference & rowNum).WrapText = True
                 End If
 
-                '--- ファイル名の書き込み ---
+                '--- ファイル名の書き込み（複数ファイル対応・ハイパーリンク付き）---
                 If config.ColFileName <> "" Then
-                    ws.Range(config.ColFileName & rowNum).Value = _
-                        ExtractJsonValue(itemJson, "fileName")
+                    WriteEvidenceFilesWithLinks ws, rowNum, itemJson, config
                 End If
 
                 processedCount = processedCount + 1
@@ -641,6 +680,215 @@ Private Sub WriteResponseToExcel(responseJson As String, config As SettingConfig
 
     WriteLog LOG_LEVEL_DEBUG, "WriteResponseToExcel", "Excel書き戻し完了 - " & processedCount & " 件処理"
 End Sub
+
+'===============================================================================
+' 証跡ファイルをハイパーリンク付きで書き込む関数
+'===============================================================================
+' 【機能】
+' 複数の証跡ファイル名を右の列に展開し、各ファイルパスへのハイパーリンクを設定します。
+'
+' 【引数】
+' ws: 対象ワークシート
+' rowNum: 行番号
+' itemJson: 項目のJSONデータ
+' config: 設定情報
+'
+' 【処理内容】
+' - evidenceFiles配列から各ファイル情報を取得
+' - 最初のファイルは設定された列に書き込み
+' - 2番目以降のファイルは右隣の列に順次書き込み
+' - 各セルにファイルパスへのハイパーリンクを設定
+'===============================================================================
+Private Sub WriteEvidenceFilesWithLinks(ws As Worksheet, rowNum As Long, itemJson As String, config As SettingConfig)
+    Dim evidenceFilesJson As String   ' evidenceFiles配列のJSON
+    Dim fileCount As Long             ' ファイル数
+    Dim colOffset As Long             ' 列オフセット
+    Dim fileName As String            ' ファイル名
+    Dim filePath As String            ' ファイルパス
+    Dim fullPath As String            ' 完全なファイルパス
+    Dim targetCell As Range           ' 書き込み先セル
+    Dim baseColNum As Long            ' 基準列番号
+    Dim i As Long                     ' ループカウンター
+    Dim startPos As Long              ' 検索開始位置
+    Dim endPos As Long                ' 検索終了位置
+    Dim currentJson As String         ' 現在処理中のJSONオブジェクト
+
+    WriteLog LOG_LEVEL_DEBUG, "WriteEvidenceFilesWithLinks", "証跡ファイル書き込み開始 - 行: " & rowNum
+
+    ' evidenceFiles配列を抽出
+    evidenceFilesJson = ExtractJsonArray(itemJson, "evidenceFiles")
+
+    ' 基準列番号を取得（列文字→列番号変換）
+    baseColNum = ws.Range(config.ColFileName & "1").Column
+
+    If evidenceFilesJson = "" Or evidenceFilesJson = "[]" Then
+        ' evidenceFilesがない場合は従来のfileName値を使用
+        fileName = ExtractJsonValue(itemJson, "fileName")
+        If fileName <> "" Then
+            ws.Range(config.ColFileName & rowNum).Value = fileName
+        End If
+        Exit Sub
+    End If
+
+    ' JSON配列内のオブジェクトを順次処理
+    colOffset = 0
+    startPos = InStr(1, evidenceFilesJson, "{")
+
+    Do While startPos > 0
+        ' オブジェクトの終了位置を検索
+        endPos = FindMatchingBrace(evidenceFilesJson, startPos)
+
+        If endPos > startPos Then
+            currentJson = Mid(evidenceFilesJson, startPos, endPos - startPos + 1)
+
+            ' ファイル名とパスを抽出
+            fileName = ExtractJsonValue(currentJson, "fileName")
+            filePath = ExtractJsonValue(currentJson, "filePath")
+
+            If fileName <> "" Then
+                ' 書き込み先セルを決定
+                Set targetCell = ws.Cells(rowNum, baseColNum + colOffset)
+
+                ' 完全なファイルパスを構築
+                If filePath <> "" Then
+                    ' パスの末尾に\がなければ追加
+                    If Right(filePath, 1) <> "\" Then
+                        fullPath = filePath & "\" & fileName
+                    Else
+                        fullPath = filePath & fileName
+                    End If
+
+                    ' ハイパーリンクを設定（ファイルが存在する場合）
+                    On Error Resume Next
+                    ws.Hyperlinks.Add _
+                        Anchor:=targetCell, _
+                        Address:=fullPath, _
+                        TextToDisplay:=fileName
+
+                    ' ハイパーリンク設定に失敗した場合はテキストのみ
+                    If Err.Number <> 0 Then
+                        Err.Clear
+                        targetCell.Value = fileName
+                        WriteLog LOG_LEVEL_WARNING, "WriteEvidenceFilesWithLinks", _
+                                 "ハイパーリンク設定失敗: " & fullPath
+                    Else
+                        WriteLog LOG_LEVEL_DEBUG, "WriteEvidenceFilesWithLinks", _
+                                 "ハイパーリンク設定: " & fileName & " -> " & fullPath
+                    End If
+                    On Error GoTo 0
+                Else
+                    ' パスがない場合はファイル名のみ
+                    targetCell.Value = fileName
+                End If
+
+                colOffset = colOffset + 1
+            End If
+        End If
+
+        ' 次のオブジェクトを検索
+        startPos = InStr(endPos + 1, evidenceFilesJson, "{")
+    Loop
+
+    WriteLog LOG_LEVEL_DEBUG, "WriteEvidenceFilesWithLinks", _
+             "証跡ファイル書き込み完了 - " & colOffset & " ファイル"
+End Sub
+
+'===============================================================================
+' JSON配列抽出関数
+'===============================================================================
+' 【機能】
+' JSONオブジェクトから指定されたキーの配列値を抽出します。
+'
+' 【引数】
+' jsonText: JSON文字列
+' key: 配列キー名
+'
+' 【戻り値】
+' String: 配列部分のJSON文字列（[...]形式）
+'===============================================================================
+Private Function ExtractJsonArray(jsonText As String, key As String) As String
+    Dim pattern As String
+    Dim startPos As Long
+    Dim bracketCount As Long
+    Dim i As Long
+    Dim endPos As Long
+
+    pattern = """" & key & """:"
+    startPos = InStr(1, jsonText, pattern, vbTextCompare)
+
+    If startPos = 0 Then
+        ExtractJsonArray = ""
+        Exit Function
+    End If
+
+    ' コロンの後ろに移動
+    startPos = startPos + Len(pattern)
+
+    ' 空白をスキップ
+    Do While Mid(jsonText, startPos, 1) = " " Or Mid(jsonText, startPos, 1) = vbTab Or _
+              Mid(jsonText, startPos, 1) = vbCr Or Mid(jsonText, startPos, 1) = vbLf
+        startPos = startPos + 1
+    Loop
+
+    ' 配列開始 [ を確認
+    If Mid(jsonText, startPos, 1) <> "[" Then
+        ExtractJsonArray = ""
+        Exit Function
+    End If
+
+    ' 配列終了位置を検索
+    bracketCount = 0
+    For i = startPos To Len(jsonText)
+        If Mid(jsonText, i, 1) = "[" Then
+            bracketCount = bracketCount + 1
+        ElseIf Mid(jsonText, i, 1) = "]" Then
+            bracketCount = bracketCount - 1
+            If bracketCount = 0 Then
+                endPos = i
+                Exit For
+            End If
+        End If
+    Next i
+
+    If endPos > startPos Then
+        ExtractJsonArray = Mid(jsonText, startPos, endPos - startPos + 1)
+    Else
+        ExtractJsonArray = ""
+    End If
+End Function
+
+'===============================================================================
+' 対応するブラケット位置検索関数
+'===============================================================================
+' 【機能】
+' JSONオブジェクトの開始 { に対応する終了 } の位置を検索します。
+'
+' 【引数】
+' jsonText: JSON文字列
+' startPos: 開始位置（{ の位置）
+'
+' 【戻り値】
+' Long: 対応する } の位置
+'===============================================================================
+Private Function FindMatchingBrace(jsonText As String, startPos As Long) As Long
+    Dim bracketCount As Long
+    Dim i As Long
+
+    bracketCount = 0
+    For i = startPos To Len(jsonText)
+        If Mid(jsonText, i, 1) = "{" Then
+            bracketCount = bracketCount + 1
+        ElseIf Mid(jsonText, i, 1) = "}" Then
+            bracketCount = bracketCount - 1
+            If bracketCount = 0 Then
+                FindMatchingBrace = i
+                Exit Function
+            End If
+        End If
+    Next i
+
+    FindMatchingBrace = 0
+End Function
 
 '===============================================================================
 ' 対象ワークシート取得関数
@@ -855,6 +1103,8 @@ Private Function LoadSettings(ByRef config As SettingConfig) As Boolean
 
     '--- 列マッピングの解析 ---
     config.ColID = ExtractNestedJsonValue(jsonText, "columns", "ID")
+    config.ColTestTarget = ExtractNestedJsonValue(jsonText, "columns", "TestTarget")
+    config.ColCategory = ExtractNestedJsonValue(jsonText, "columns", "Category")
     config.ColControlDescription = ExtractNestedJsonValue(jsonText, "columns", "ControlDescription")
     config.ColTestProcedure = ExtractNestedJsonValue(jsonText, "columns", "TestProcedure")
     config.ColEvidenceLink = ExtractNestedJsonValue(jsonText, "columns", "EvidenceLink")
@@ -872,9 +1122,14 @@ Private Function LoadSettings(ByRef config As SettingConfig) As Boolean
 
     '--- レスポンスマッピングの解析 ---
     config.ColEvaluationResult = ExtractNestedJsonValue(jsonText, "responseMapping", "evaluationResult")
+    config.ColExecutionPlanSummary = ExtractNestedJsonValue(jsonText, "responseMapping", "executionPlanSummary")
     config.ColJudgmentBasis = ExtractNestedJsonValue(jsonText, "responseMapping", "judgmentBasis")
     config.ColDocumentReference = ExtractNestedJsonValue(jsonText, "responseMapping", "documentReference")
-    config.ColFileName = ExtractNestedJsonValue(jsonText, "responseMapping", "fileName")
+    ' evidenceFileNamesまたはfileNameのどちらも対応
+    config.ColFileName = ExtractNestedJsonValue(jsonText, "responseMapping", "evidenceFileNames")
+    If config.ColFileName = "" Then
+        config.ColFileName = ExtractNestedJsonValue(jsonText, "responseMapping", "fileName")
+    End If
 
     '--- Boolean表示設定の解析 ---
     config.BooleanDisplayTrue = ExtractJsonValue(jsonText, "booleanDisplayTrue")
@@ -1492,3 +1747,134 @@ Private Function ConvertJsonNewlines(text As String) As String
 
     ConvertJsonNewlines = result
 End Function
+
+'===============================================================================
+' 評価結果クリア: ClearEvaluationResults
+'===============================================================================
+' 【機能】
+' API評価結果が書き込まれたセルの内容をクリアします。
+' setting.jsonのresponseMappingで指定された列（F〜J列等）をクリアします。
+'
+' 【処理対象】
+' - 評価結果（evaluationResult列）
+' - 実行計画サマリー（executionPlanSummary列）
+' - 判断根拠（judgmentBasis列）
+' - 文書参照（documentReference列）
+' - ファイル名（fileName列）
+'
+' 【使用例】
+' Excelのマクロダイアログから「ClearEvaluationResults」を選択して実行
+' または、ボタンにこのマクロを割り当てて使用
+'===============================================================================
+Public Sub ClearEvaluationResults()
+    Dim config As SettingConfig
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim clearRange As Range
+    Dim colsToClear As String
+    Dim i As Long
+    Dim confirmMsg As String
+    Dim clearedCount As Long
+
+    ' セッション初期化
+    InitializeSession
+    WriteLog LOG_LEVEL_INFO, "ClearEvaluationResults", "===== 評価結果クリア開始 ====="
+
+    ' 設定ファイルの読み込み
+    If Not LoadSettings(config) Then
+        ShowErrorMessage ERR_SETTING_NOT_FOUND, "設定ファイルの読み込みに失敗しました。"
+        Exit Sub
+    End If
+
+    ' 対象シートの取得
+    Set ws = GetTargetWorksheet(config.SheetName)
+    If ws Is Nothing Then
+        ShowErrorMessage ERR_SHEET_NOT_FOUND, "対象シートが見つかりません。"
+        Exit Sub
+    End If
+
+    ' データの最終行を取得
+    lastRow = ws.Cells(ws.Rows.Count, config.ColID).End(xlUp).Row
+
+    If lastRow < config.DataStartRow Then
+        MsgBox "クリア対象のデータがありません。", vbInformation, "情報"
+        Exit Sub
+    End If
+
+    ' 確認メッセージ
+    confirmMsg = "以下の列の評価結果をクリアします：" & vbCrLf & vbCrLf
+    If config.ColEvaluationResult <> "" Then confirmMsg = confirmMsg & "・評価結果（" & config.ColEvaluationResult & "列）" & vbCrLf
+    If config.ColExecutionPlanSummary <> "" Then confirmMsg = confirmMsg & "・実行計画サマリー（" & config.ColExecutionPlanSummary & "列）" & vbCrLf
+    If config.ColJudgmentBasis <> "" Then confirmMsg = confirmMsg & "・判断根拠（" & config.ColJudgmentBasis & "列）" & vbCrLf
+    If config.ColDocumentReference <> "" Then confirmMsg = confirmMsg & "・文書参照（" & config.ColDocumentReference & "列）" & vbCrLf
+    If config.ColFileName <> "" Then confirmMsg = confirmMsg & "・ファイル名（" & config.ColFileName & "列〜）" & vbCrLf
+    confirmMsg = confirmMsg & vbCrLf & "対象範囲: " & config.DataStartRow & "行目〜" & lastRow & "行目" & vbCrLf & vbCrLf
+    confirmMsg = confirmMsg & "よろしいですか？"
+
+    If MsgBox(confirmMsg, vbYesNo + vbQuestion, "確認") <> vbYes Then
+        WriteLog LOG_LEVEL_INFO, "ClearEvaluationResults", "ユーザーによりキャンセル"
+        Exit Sub
+    End If
+
+    ' 画面更新を一時停止（高速化）
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+
+    On Error GoTo ErrorHandler
+
+    clearedCount = 0
+
+    ' 各列をクリア
+    If config.ColEvaluationResult <> "" Then
+        ws.Range(config.ColEvaluationResult & config.DataStartRow & ":" & config.ColEvaluationResult & lastRow).ClearContents
+        clearedCount = clearedCount + 1
+    End If
+
+    If config.ColExecutionPlanSummary <> "" Then
+        ws.Range(config.ColExecutionPlanSummary & config.DataStartRow & ":" & config.ColExecutionPlanSummary & lastRow).ClearContents
+        clearedCount = clearedCount + 1
+    End If
+
+    If config.ColJudgmentBasis <> "" Then
+        ws.Range(config.ColJudgmentBasis & config.DataStartRow & ":" & config.ColJudgmentBasis & lastRow).ClearContents
+        clearedCount = clearedCount + 1
+    End If
+
+    If config.ColDocumentReference <> "" Then
+        ws.Range(config.ColDocumentReference & config.DataStartRow & ":" & config.ColDocumentReference & lastRow).ClearContents
+        clearedCount = clearedCount + 1
+    End If
+
+    ' ファイル名列（複数列に展開される可能性があるため、右側の列も含めてクリア）
+    If config.ColFileName <> "" Then
+        Dim fileNameColNum As Long
+        Dim clearEndCol As Long
+        fileNameColNum = ws.Range(config.ColFileName & "1").Column
+        ' ファイル名は最大5列まで展開される可能性があるため、5列分クリア
+        clearEndCol = fileNameColNum + 4
+        ws.Range(ws.Cells(config.DataStartRow, fileNameColNum), ws.Cells(lastRow, clearEndCol)).ClearContents
+        ' ハイパーリンクも削除
+        On Error Resume Next
+        ws.Range(ws.Cells(config.DataStartRow, fileNameColNum), ws.Cells(lastRow, clearEndCol)).Hyperlinks.Delete
+        On Error GoTo ErrorHandler
+        clearedCount = clearedCount + 1
+    End If
+
+    ' 画面更新を再開
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+
+    WriteLog LOG_LEVEL_INFO, "ClearEvaluationResults", "===== クリア完了 ===== (" & clearedCount & "列)"
+
+    MsgBox "評価結果をクリアしました。" & vbCrLf & vbCrLf & _
+           "クリア列数: " & clearedCount & vbCrLf & _
+           "対象行: " & (lastRow - config.DataStartRow + 1) & "行", vbInformation, "完了"
+
+    Exit Sub
+
+ErrorHandler:
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+    WriteLog LOG_LEVEL_ERROR, "ClearEvaluationResults", "エラー: " & Err.Description
+    MsgBox "クリア中にエラーが発生しました:" & vbCrLf & Err.Description, vbCritical, "エラー"
+End Sub
