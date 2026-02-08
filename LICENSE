@@ -1,0 +1,58 @@
+# ライセンス / License
+
+## 著作権表示 / Copyright Notice
+
+Copyright (c) 2025-2026 Go Yoshizawa. All Rights Reserved.
+
+## 使用許諾 / License Terms
+
+本ソフトウェアおよび関連文書ファイル（以下「本ソフトウェア」）の複製、
+変更、配布、商用利用、その他の使用には、著作権者 Go Yoshizawa の
+書面による事前許可が必要です。
+
+This software and associated documentation files (the "Software") may not be
+copied, modified, distributed, used commercially, or otherwise used without
+prior written permission from the copyright holder, Go Yoshizawa.
+
+## 禁止事項 / Prohibited Actions
+
+著作権者の書面による許可なく、以下の行為を禁じます：
+
+- 本ソフトウェアの複製（リポジトリのフォーク・クローンを含む）
+- 本ソフトウェアの改変または派生物の作成
+- 本ソフトウェアの再配布
+- 本ソフトウェアの商用利用
+- 本ソフトウェアの一部または全部の組み込み
+
+Without prior written permission from the copyright holder, the following
+actions are prohibited:
+
+- Copying the Software (including forking or cloning the repository)
+- Modifying or creating derivative works based on the Software
+- Redistributing the Software
+- Commercial use of the Software
+- Incorporating any part of the Software into other projects
+
+## 許可の申請 / Permission Requests
+
+本ソフトウェアの使用許可については、著作権者までお問い合わせください。
+
+For permission to use the Software, please contact the copyright holder.
+
+## 免責事項 / Disclaimer
+
+本ソフトウェアは「現状のまま」で提供され、明示または黙示を問わず、
+商品性、特定目的への適合性、権利非侵害の保証を含むがこれに限定されない、
+いかなる種類の保証も伴いません。
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+著作権者は、本ソフトウェアの使用またはその他の取引から生じる、
+いかなる損害についても責任を負いません。
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
