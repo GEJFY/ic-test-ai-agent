@@ -28,6 +28,11 @@ python-docx>=1.0.0
 # AWS Textract - boto3経由で使用
 # 追加パッケージ不要
 
+# Tesseract OCR（Docker版で使用）
+pytesseract>=0.3.10
+Pillow>=10.0.0
+pdf2image>=1.16.0              # PDFをTesseractで処理する場合に必要
+
 # Azure Document Intelligence (optional)
 # azure-ai-documentintelligence>=1.0.0
 # azure-core>=1.30.0

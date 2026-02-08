@@ -105,12 +105,14 @@ class OCRProvider(Enum):
     - AWS: 表抽出に強い、フォーム解析
     - GCP: 多言語対応、Document AI
     - TESSERACT: 無料、ローカル実行可、カスタマイズ可能
+    - YOMITOKU: 日本語特化OCR（AWS Marketplace版、SageMaker Endpoint経由）
     - NONE: OCR無効（pypdfフォールバック）
     """
     AZURE = "AZURE"
     AWS = "AWS"
     GCP = "GCP"
     TESSERACT = "TESSERACT"
+    YOMITOKU = "YOMITOKU"
     NONE = "NONE"
 
 
@@ -705,6 +707,152 @@ class TesseractOCRClient(BaseOCRClient):
 
 
 # =============================================================================
+# YomiToku OCR クライアント（AWS Marketplace版）
+# =============================================================================
+
+class YomitokuOCRClient(BaseOCRClient):
+    """
+    YomiToku-Pro OCRクライアント（AWS Marketplace版）
+
+    SageMaker Endpointを経由してYomiToku APIを呼び出します。
+    日本語OCRに特化した高精度サービスです。
+
+    【設定に必要な環境変数】
+    - YOMITOKU_ENDPOINT_NAME: SageMaker Endpoint名
+    - AWS_REGION: AWSリージョン（デフォルト: ap-northeast-1）
+
+    【使用例】
+    ```python
+    os.environ["OCR_PROVIDER"] = "YOMITOKU"
+    os.environ["YOMITOKU_ENDPOINT_NAME"] = "yomitoku-pro-endpoint"
+    ocr = OCRFactory.get_ocr_client()
+    result = ocr.extract_text(pdf_bytes)
+    ```
+    """
+
+    def __init__(self):
+        self.endpoint_name = os.getenv("YOMITOKU_ENDPOINT_NAME")
+        self.region = os.getenv("AWS_REGION", "ap-northeast-1")
+        self._client = None
+
+    def is_configured(self) -> bool:
+        return bool(self.endpoint_name)
+
+    @property
+    def provider_name(self) -> str:
+        return "YomiToku-Pro"
+
+    def _get_client(self):
+        """SageMaker Runtimeクライアントを取得"""
+        if self._client is None:
+            import boto3
+            self._client = boto3.client(
+                'sagemaker-runtime',
+                region_name=self.region
+            )
+        return self._client
+
+    def extract_text(self, file_bytes: bytes, mime_type: str = None) -> OCRResult:
+        """YomiToku-Pro SageMaker Endpointでテキスト抽出"""
+        if not self.is_configured():
+            return OCRResult(
+                text_content="",
+                error="YomiToku-Pro が設定されていません（YOMITOKU_ENDPOINT_NAME未設定）",
+                provider=self.provider_name
+            )
+
+        try:
+            import json
+
+            client = self._get_client()
+            logger.info(f"[YomiToku] 抽出開始: {len(file_bytes):,} バイト")
+
+            # ContentTypeを決定
+            content_type = mime_type or "application/pdf"
+            if 'pdf' in content_type.lower():
+                content_type = "application/pdf"
+            elif 'png' in content_type.lower():
+                content_type = "image/png"
+            elif 'jpeg' in content_type.lower() or 'jpg' in content_type.lower():
+                content_type = "image/jpeg"
+
+            # SageMaker Endpointを呼び出し
+            response = client.invoke_endpoint(
+                EndpointName=self.endpoint_name,
+                ContentType=content_type,
+                Accept="application/json",
+                Body=file_bytes
+            )
+
+            # レスポンスを解析
+            result_body = response['Body'].read().decode('utf-8')
+            result_data = json.loads(result_body)
+
+            # YomiToku APIのレスポンス形式に応じて解析
+            # 注: 実際のAPI仕様に合わせて調整が必要
+            text_content = ""
+            elements = []
+            page_count = 1
+
+            # 標準的なレスポンス形式を想定
+            if isinstance(result_data, dict):
+                # テキスト取得
+                text_content = result_data.get("text", "")
+                if not text_content and "pages" in result_data:
+                    # ページごとのテキストを結合
+                    text_parts = []
+                    for page_idx, page in enumerate(result_data.get("pages", []), 1):
+                        page_text = page.get("text", "")
+                        if page_text:
+                            text_parts.append(f"--- ページ {page_idx} ---")
+                            text_parts.append(page_text)
+                        # 行ごとの要素を取得
+                        for line in page.get("lines", []):
+                            elements.append(OCRTextElement(
+                                text=line.get("text", ""),
+                                page_number=page_idx,
+                                bounding_box=line.get("bbox"),
+                                confidence=line.get("confidence", 1.0),
+                                element_type="line"
+                            ))
+                    text_content = "\n".join(text_parts)
+                    page_count = len(result_data.get("pages", []))
+
+                # 単純なテキストレスポンスの場合
+                if not text_content and "result" in result_data:
+                    text_content = result_data.get("result", "")
+
+            elif isinstance(result_data, str):
+                text_content = result_data
+
+            logger.info(f"[YomiToku] 抽出完了: {len(text_content):,}文字")
+
+            return OCRResult(
+                text_content=text_content,
+                page_count=page_count,
+                elements=elements,
+                provider=self.provider_name
+            )
+
+        except ImportError:
+            return OCRResult(
+                text_content="",
+                error="boto3 パッケージがインストールされていません",
+                provider=self.provider_name
+            )
+        except Exception as e:
+            logger.error(f"[YomiToku] エラー: {e}")
+            error_msg = str(e)
+            if "ValidationError" in error_msg:
+                error_msg = f"SageMaker Endpointエラー: {error_msg}"
+            return OCRResult(
+                text_content="",
+                error=error_msg,
+                provider=self.provider_name
+            )
+
+
+# =============================================================================
 # OCRファクトリー
 # =============================================================================
 
@@ -727,7 +875,18 @@ class OCRFactory:
         OCRProvider.AWS: [],  # IAMロールで認証可能
         OCRProvider.GCP: ["GCP_DOCAI_PROJECT_ID", "GCP_DOCAI_PROCESSOR_ID"],
         OCRProvider.TESSERACT: [],  # ローカルインストール
+        OCRProvider.YOMITOKU: ["YOMITOKU_ENDPOINT_NAME"],  # SageMaker Endpoint
         OCRProvider.NONE: [],
+    }
+
+    # 言語→プロバイダーマッピング（言語ベース自動選択用）
+    LANGUAGE_PROVIDER_MAP = {
+        "jpn": OCRProvider.YOMITOKU,  # 日本語→YomiToku
+        "ja": OCRProvider.YOMITOKU,
+        "tha": OCRProvider.TESSERACT,  # タイ語→Tesseract
+        "th": OCRProvider.TESSERACT,
+        "nld": OCRProvider.TESSERACT,  # オランダ語→Tesseract
+        "nl": OCRProvider.TESSERACT,
     }
 
     # シングルトンキャッシュ
@@ -782,6 +941,8 @@ class OCRFactory:
             client = GCPDocumentAIClient()
         elif provider == OCRProvider.TESSERACT:
             client = TesseractOCRClient()
+        elif provider == OCRProvider.YOMITOKU:
+            client = YomitokuOCRClient()
 
         if client and client.is_configured():
             cls._client_cache = client
@@ -863,6 +1024,13 @@ class OCRFactory:
                 "optional_env_vars": ["TESSERACT_CMD", "TESSERACT_LANG"],
                 "documentation": "https://github.com/tesseract-ocr/tesseract"
             },
+            "YOMITOKU": {
+                "name": "YomiToku-Pro",
+                "description": "日本語特化OCR、AWS Marketplace版、SageMaker Endpoint経由",
+                "required_env_vars": cls.REQUIRED_ENV_VARS[OCRProvider.YOMITOKU],
+                "optional_env_vars": ["AWS_REGION"],
+                "documentation": "https://aws.amazon.com/marketplace/pp/prodview-xxx"
+            },
             "NONE": {
                 "name": "OCR無効",
                 "description": "OCRを使用しない（pypdfでテキストPDFのみ処理）",
@@ -871,3 +1039,65 @@ class OCRFactory:
                 "documentation": ""
             }
         }
+
+    @classmethod
+    def get_ocr_client_for_language(cls, language: str) -> Optional[BaseOCRClient]:
+        """
+        言語に基づいてOCRクライアントを取得
+
+        言語コードに応じて最適なOCRプロバイダーを自動選択します。
+        - 日本語 (jpn, ja) → YomiToku-Pro
+        - タイ語 (tha, th) → Tesseract
+        - オランダ語 (nld, nl) → Tesseract
+        - その他 → デフォルトプロバイダー（OCR_PROVIDER環境変数）
+
+        Args:
+            language: 言語コード（ISO 639-2/3 または ISO 639-1）
+
+        Returns:
+            BaseOCRClient: 言語に適したOCRクライアント
+
+        使用例:
+            ocr = OCRFactory.get_ocr_client_for_language("jpn")
+            result = ocr.extract_text(japanese_pdf_bytes)
+        """
+        provider = cls.LANGUAGE_PROVIDER_MAP.get(language.lower())
+
+        if provider:
+            logger.info(f"[OCRFactory] 言語 '{language}' → {provider.value} を選択")
+            return cls._create_client(provider)
+
+        # マッピングにない場合はデフォルトプロバイダーを使用
+        logger.info(f"[OCRFactory] 言語 '{language}' はマッピングなし、デフォルトを使用")
+        return cls.get_ocr_client()
+
+    @classmethod
+    def _create_client(cls, provider: OCRProvider) -> Optional[BaseOCRClient]:
+        """
+        指定されたプロバイダーのOCRクライアントを作成
+
+        Args:
+            provider: OCRProvider
+
+        Returns:
+            BaseOCRClient: 作成されたクライアント（設定不完全の場合はNone）
+        """
+        client = None
+        if provider == OCRProvider.AZURE:
+            client = AzureOCRClient()
+        elif provider == OCRProvider.AWS:
+            client = AWSTextractClient()
+        elif provider == OCRProvider.GCP:
+            client = GCPDocumentAIClient()
+        elif provider == OCRProvider.TESSERACT:
+            client = TesseractOCRClient()
+        elif provider == OCRProvider.YOMITOKU:
+            client = YomitokuOCRClient()
+        elif provider == OCRProvider.NONE:
+            return None
+
+        if client and client.is_configured():
+            return client
+        else:
+            logger.warning(f"[OCRFactory] {provider.value}の設定が不完全です")
+            return None

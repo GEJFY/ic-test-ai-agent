@@ -1313,11 +1313,13 @@ curl -X POST http://localhost:7071/api/evaluate \
 
 **GCP Vertex AI:**
 
+- `gemini-3-pro-preview` - 最高性能（動作確認済み・globalリージョン必須）
+- `gemini-3-flash-preview` - 高速・マルチモーダル（globalリージョン必須）
 - `gemini-2.5-pro` - 高度な推論・コーディング（動作確認済み）
-- `gemini-2.5-flash` - 高速・コスト効率（推奨・動作確認済み）
+- `gemini-2.5-flash` - 高速・コスト効率（動作確認済み）
 - `gemini-2.5-flash-lite` - 超軽量（動作確認済み）
-- `gemini-3-pro-preview` - Gemini 3 Pro（Previewアクセス申請が必要）
-- `gemini-3-flash-preview` - Gemini 3 Flash（Previewアクセス申請が必要）
+
+> **Note**: Gemini 3.x を使用するには `GCP_LOCATION=global` の設定が必要です。
 
 **AWS Bedrock:**
 - `global.anthropic.claude-opus-4-6-v1` - 最高性能

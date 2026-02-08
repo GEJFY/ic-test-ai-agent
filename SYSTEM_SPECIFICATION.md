@@ -1,8 +1,8 @@
     # 内部統制テスト評価AIシステム 仕様書
 
     ================================================================================
-    **バージョン**: 1.0.0
-    **リリース日**: 2026年1月29日
+    **バージョン**: 1.2.0
+    **最終更新日**: 2026年2月8日
     **対象読者**: システム管理者、開発者、内部監査担当者
     ================================================================================
 
@@ -19,9 +19,10 @@
     9. [トラブルシューティング](#9-トラブルシューティング)
     10. [セキュリティ考慮事項](#10-セキュリティ考慮事項)
     11. [テスト](#11-テスト)
-    12. [技術解説](#12-技術解説)
-    13. [用語集](#13-用語集)
-    14. [更新履歴](#14-更新履歴)
+    12. [クラウドリソース詳細](#12-クラウドリソース詳細)
+    13. [技術解説](#13-技術解説)
+    14. [用語集](#14-用語集)
+    15. [更新履歴](#15-更新履歴)
 
     ---
 
@@ -2024,9 +2025,785 @@
 
     ---
 
-    ## 12. 技術解説
+    ## 12. クラウドリソース詳細
 
-    ### 11.1 使用技術スタック
+    本セクションでは、このシステムで使用されるすべてのクラウドリソースについて、
+    初心者の方でも理解できるよう詳細に解説します。
+
+    ### 12.1 マルチクラウドアーキテクチャの全体像
+
+    本システムは「マルチクラウド対応」を設計の柱としており、
+    Azure、AWS、GCPのいずれでも同じソースコードで動作します。
+
+    ```text
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │                    マルチクラウドアーキテクチャ                          │
+    ├─────────────────────────────────────────────────────────────────────────┤
+    │                                                                         │
+    │  ┌─────────────────────────────────────────────────────────────────┐   │
+    │  │                     共通ソースコード (src/)                       │   │
+    │  │  ┌──────────────┐  ┌───────────────┐  ┌──────────────────────┐ │   │
+    │  │  │  handlers.py │  │ llm_factory.py│  │  job_storage/*.py    │ │   │
+    │  │  │  (APIハンドラ) │  │  (LLM抽象化)   │  │  (ストレージ抽象化)    │ │   │
+    │  │  └──────────────┘  └───────────────┘  └──────────────────────┘ │   │
+    │  └─────────────────────────────────────────────────────────────────┘   │
+    │                                    │                                    │
+    │                ┌───────────────────┼───────────────────┐                │
+    │                ▼                   ▼                   ▼                │
+    │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐      │
+    │  │      Azure       │  │       GCP        │  │       AWS        │      │
+    │  ├──────────────────┤  ├──────────────────┤  ├──────────────────┤      │
+    │  │ 【計算リソース】   │  │ 【計算リソース】   │  │ 【計算リソース】   │      │
+    │  │  Azure Functions │  │  Cloud Functions │  │   AWS Lambda    │      │
+    │  │                  │  │                  │  │  + API Gateway  │      │
+    │  ├──────────────────┤  ├──────────────────┤  ├──────────────────┤      │
+    │  │ 【AIサービス】    │  │ 【AIサービス】    │  │ 【AIサービス】    │      │
+    │  │  Azure AI Foundry│  │   Vertex AI      │  │  Amazon Bedrock │      │
+    │  │  (GPT-5, Claude) │  │  (Gemini 2.5/3)  │  │  (Claude Opus)  │      │
+    │  ├──────────────────┤  ├──────────────────┤  ├──────────────────┤      │
+    │  │ 【ストレージ】    │  │ 【ストレージ】    │  │ 【ストレージ】    │      │
+    │  │  Table Storage   │  │   Firestore     │  │   DynamoDB      │      │
+    │  │  Blob Storage    │  │  Cloud Storage  │  │      S3         │      │
+    │  │  Queue Storage   │  │  Cloud Tasks    │  │      SQS        │      │
+    │  └──────────────────┘  └──────────────────┘  └──────────────────┘      │
+    │                                                                         │
+    └─────────────────────────────────────────────────────────────────────────┘
+    ```
+
+    ### 12.2 Azure クラウドリソース
+
+    #### 12.2.1 Azure AI Foundry（旧 Azure AI Studio）
+
+    **Azure AI Foundryとは？**
+
+    Azure AI Foundryは、MicrosoftがAzure上で提供する統合AIプラットフォームです。
+    OpenAIのGPTシリーズだけでなく、Anthropic Claude、Meta Llama、Mistralなど
+    複数のAIモデルを統一されたAPIで利用できます。
+
+    ```text
+    【Azure AI Foundry の概念図】
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                    Azure AI Foundry                             │
+    ├─────────────────────────────────────────────────────────────────┤
+    │                                                                 │
+    │  ┌───────────────────────────────────────────────────────────┐ │
+    │  │                    Model Catalog（モデルカタログ）           │ │
+    │  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐        │ │
+    │  │  │  GPT-5  │ │ Claude  │ │  Llama  │ │ Mistral │        │ │
+    │  │  │  Nano   │ │ Opus 4.6│ │   3.x   │ │   7B    │        │ │
+    │  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘        │ │
+    │  └───────────────────────────────────────────────────────────┘ │
+    │                                                                 │
+    │  【メリット】                                                   │
+    │  - 複数モデルを単一エンドポイントで利用                          │
+    │  - モデル切り替えが環境変数の変更だけで完了                       │
+    │  - Azure ADによるエンタープライズ認証                            │
+    │  - SLA（サービスレベル保証）付き                                 │
+    │                                                                 │
+    └─────────────────────────────────────────────────────────────────┘
+    ```
+
+    **利用可能なモデル（2026年2月時点・動作確認済み）**
+
+    | モデル | 説明 | 推奨用途 |
+    |--------|------|---------|
+    | `gpt-5.2` | 最新フラッグシップ、企業エージェント向け | 複雑な推論 |
+    | `gpt-5-nano` | 高速・低コスト、推論系モデル | **本システム推奨** |
+    | `claude-opus-4-6` | Anthropic最高性能、1Mトークン対応 | 大規模文書処理 |
+    | `claude-sonnet-4-5` | バランス型 | 汎用処理 |
+
+    **環境変数設定**
+
+    ```ini
+    # .envファイル
+    LLM_PROVIDER=AZURE_FOUNDRY
+    AZURE_FOUNDRY_ENDPOINT=https://your-project.region.models.ai.azure.com
+    AZURE_FOUNDRY_API_KEY=your-api-key
+    AZURE_FOUNDRY_MODEL=gpt-5-nano
+    AZURE_FOUNDRY_API_VERSION=2025-01-01-preview
+    ```
+
+    #### 12.2.2 Azure Functions
+
+    **Azure Functionsとは？**
+
+    Azure Functionsは、サーバーレスコンピューティングサービスです。
+    「サーバーレス」とは、サーバーの管理が不要という意味で、
+    コードを書くだけで自動的にスケールする環境を提供します。
+
+    ```text
+    【従来のサーバー vs サーバーレス】
+
+    従来のサーバー:
+    ┌─────────────────────────────────────────────────────────────────┐
+    │  あなたの責任範囲                                                │
+    │  ┌─────────────────────────────────────────────────────────┐   │
+    │  │  OS更新 │ セキュリティパッチ │ スケーリング │ 監視 │ 冗長化 │   │
+    │  └─────────────────────────────────────────────────────────┘   │
+    │  + コード開発                                                   │
+    └─────────────────────────────────────────────────────────────────┘
+
+    サーバーレス (Azure Functions):
+    ┌─────────────────────────────────────────────────────────────────┐
+    │  Azureが管理（あなたは気にしなくてOK）                            │
+    │  ┌─────────────────────────────────────────────────────────┐   │
+    │  │  OS更新 │ セキュリティパッチ │ スケーリング │ 監視 │ 冗長化 │   │
+    │  └─────────────────────────────────────────────────────────┘   │
+    ├─────────────────────────────────────────────────────────────────┤
+    │  あなたの責任範囲: コード開発のみ！                              │
+    └─────────────────────────────────────────────────────────────────┘
+    ```
+
+    **本システムでの使用**
+
+    | リソース名 | 説明 | 設定値 |
+    |-----------|------|--------|
+    | Function App | アプリケーションホスト | `func-ic-test-evaluation` |
+    | ランタイム | 実行環境 | Python 3.11 |
+    | プラン | 課金モデル | 従量課金（Consumption） |
+    | タイムアウト | 最大実行時間 | 10分 |
+
+    **エンドポイント一覧**
+
+    | パス | メソッド | 説明 | モード |
+    |------|---------|------|--------|
+    | `/api/evaluate` | POST | 同期評価 | asyncMode: false |
+    | `/api/evaluate/submit` | POST | 非同期ジョブ送信 | asyncMode: true |
+    | `/api/evaluate/status/{job_id}` | GET | ステータス確認 | asyncMode: true |
+    | `/api/evaluate/results/{job_id}` | GET | 結果取得 | asyncMode: true |
+    | `/api/health` | GET | ヘルスチェック | 共通 |
+    | `/api/config` | GET | 設定確認 | 共通 |
+
+    #### 12.2.3 Azure Storage（ストレージサービス群）
+
+    Azure Storageは、クラウド上のデータ保存サービスです。
+    本システムでは3種類のストレージを使用します。
+
+    ```text
+    【Azure Storageの種類と用途】
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                    Azure Storage Account                        │
+    │                   (ストレージアカウント)                          │
+    ├─────────────────────────────────────────────────────────────────┤
+    │                                                                 │
+    │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
+    │  │  Table Storage  │  │  Blob Storage   │  │  Queue Storage  │ │
+    │  │  (テーブル)      │  │  (ファイル)      │  │  (メッセージ)    │ │
+    │  ├─────────────────┤  ├─────────────────┤  ├─────────────────┤ │
+    │  │ ジョブ状態管理   │  │  証跡ファイル    │  │  ジョブ通知     │ │
+    │  │                 │  │  (Base64保存)   │  │  (キュートリガー)│ │
+    │  │ EvaluationJobs  │  │ evidence-files │  │ evaluation-jobs │ │
+    │  │ テーブル        │  │ コンテナ        │  │ キュー          │ │
+    │  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
+    │                                                                 │
+    └─────────────────────────────────────────────────────────────────┘
+    ```
+
+    **Table Storage（テーブルストレージ）**
+
+    NoSQLデータベースの一種で、構造化データを保存します。
+    Excelのスプレッドシートに似たイメージで理解できます。
+
+    | 概念 | 説明 | 本システムでの例 |
+    |------|------|-----------------|
+    | テーブル | データの入れ物 | `EvaluationJobs` |
+    | PartitionKey | グループ分けキー | `tenant_id`（テナントID） |
+    | RowKey | 一意識別子 | `job_id`（ジョブID） |
+    | プロパティ | 列（データ項目） | `status`, `progress`, `results` |
+
+    **Blob Storage（ブロブストレージ）**
+
+    ファイルを保存するためのストレージです。
+    「Blob」は「Binary Large Object」の略で、大きなファイルを意味します。
+
+    ```text
+    【64KB制限対策】
+
+    Azure Table Storageは1行あたり64KBまでの制限があります。
+    証跡ファイル（PDF等）はこれを超えることがあるため、
+    Blob Storageに分離して保存します。
+
+    ジョブ送信時:
+    ┌────────────┐     ┌────────────────┐
+    │ 証跡ファイル │ ──▶ │ Blob Storage   │ ──▶ 参照情報のみをTable Storageに保存
+    │ (10MB PDF) │     │ (制限なし)      │
+    └────────────┘     └────────────────┘
+
+    ジョブ処理時:
+    ┌────────────────┐     ┌────────────┐
+    │ Table Storage  │ ──▶ │ 参照から復元 │ ──▶ 評価処理
+    │ (参照情報のみ)  │     │            │
+    └────────────────┘     └────────────┘
+    ```
+
+    **Queue Storage（キューストレージ）**
+
+    メッセージキューサービスです。
+    「キュー」は「待ち行列」を意味し、処理待ちのタスクを順番に管理します。
+
+    ```text
+    【非同期処理のフロー】
+
+    1. APIがジョブを受信
+    2. ジョブIDをQueueに追加 ──▶ [job-001] [job-002] [job-003] ...
+    3. 即座にジョブIDを返却      │
+                                ▼ キュートリガーが自動起動
+    4. Azure Functionsワーカーがメッセージを取得
+    5. ジョブを処理
+    6. 結果をTable Storageに保存
+    ```
+
+    **環境変数設定**
+
+    ```ini
+    # 接続文字列（すべてのStorageサービスで共通）
+    AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=stictestevaluation;AccountKey=xxx;EndpointSuffix=core.windows.net
+    ```
+
+    ### 12.3 AWS クラウドリソース
+
+    #### 12.3.1 Amazon Bedrock
+
+    **Amazon Bedrockとは？**
+
+    Amazon Bedrockは、AWSが提供する基盤モデル（Foundation Model）サービスです。
+    Anthropic Claude、Meta Llama、Amazon Titanなど複数のAIモデルを利用できます。
+
+    ```text
+    【Amazon Bedrockの概念図】
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                      Amazon Bedrock                             │
+    ├─────────────────────────────────────────────────────────────────┤
+    │                                                                 │
+    │  ┌───────────────────────────────────────────────────────────┐ │
+    │  │                Foundation Models（基盤モデル）              │ │
+    │  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐        │ │
+    │  │  │ Claude  │ │  Titan  │ │  Llama  │ │ Mistral │        │ │
+    │  │  │ Opus 4.6│ │ Premier │ │   3.2   │ │  Large  │        │ │
+    │  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘        │ │
+    │  └───────────────────────────────────────────────────────────┘ │
+    │                                                                 │
+    │  【特徴】                                                       │
+    │  - IAMによる認証（AWSの標準認証）                               │
+    │  - Lambda等AWSサービスとのシームレスな連携                       │
+    │  - Inference Profile（推論プロファイル）によるリージョン最適化   │
+    │                                                                 │
+    └─────────────────────────────────────────────────────────────────┘
+    ```
+
+    **重要: Inference Profile ID（推論プロファイルID）**
+
+    AWS Bedrockでは、オンデマンドスループットを使用する場合、
+    モデルIDではなく「Inference Profile ID」を指定する必要があります。
+
+    ```text
+    【正しいモデルID形式】
+
+    ✗ 直接モデルID（エラーになる）:
+    anthropic.claude-opus-4-6-v1
+
+    ✓ Inference Profile ID（正しい）:
+    global.anthropic.claude-opus-4-6-v1      ← グローバル推論
+    jp.anthropic.claude-sonnet-4-5-20250929-v1:0  ← 日本リージョン推論
+    ```
+
+    **利用可能なモデル（2026年2月時点・動作確認済み）**
+
+    | モデルID | 説明 | レイテンシ |
+    |----------|------|-----------|
+    | `global.anthropic.claude-opus-4-6-v1` | 最高性能、グローバル推論 | 約9秒 |
+    | `global.anthropic.claude-opus-4-5-20251101-v1:0` | 高性能モデル | 約7秒 |
+    | `jp.anthropic.claude-sonnet-4-5-20250929-v1:0` | 日本リージョン、バランス型 | 約1.6秒 |
+    | `anthropic.claude-3-haiku-20240307-v1:0` | 高速・低コスト | 約0.5秒 |
+
+    **環境変数設定**
+
+    ```ini
+    LLM_PROVIDER=AWS
+    AWS_REGION=ap-northeast-1
+    # AWS_PROFILE=default  # SSO使用時
+    AWS_BEDROCK_MODEL_ID=jp.anthropic.claude-sonnet-4-5-20250929-v1:0
+    ```
+
+    #### 12.3.2 AWS Lambda
+
+    **AWS Lambdaとは？**
+
+    AWS Lambdaは、AWSのサーバーレスコンピューティングサービスです。
+    Azure Functionsと同様、コードを書くだけで自動スケールする環境を提供します。
+
+    **API Gateway連携**
+
+    LambdaはHTTPリクエストを直接受け取れないため、
+    API Gatewayと組み合わせて使用します。
+
+    ```text
+    【AWS Lambda + API Gateway 構成】
+
+    クライアント
+        │
+        ▼ HTTPS
+    ┌──────────────────┐
+    │   API Gateway    │ ← HTTPリクエストを受信、認証、ルーティング
+    └────────┬─────────┘
+             │
+             ▼
+    ┌──────────────────┐
+    │   AWS Lambda     │ ← 実際の処理を実行
+    │ lambda_handler.py│
+    └──────────────────┘
+    ```
+
+    **本システムでの設定**
+
+    | 設定項目 | 値 | 説明 |
+    |---------|-----|------|
+    | ランタイム | Python 3.11 | 実行環境 |
+    | メモリ | 1024 MB | 割り当てメモリ |
+    | タイムアウト | 300秒 | 最大実行時間 |
+    | ハンドラー | `lambda_handler.handler` | エントリポイント |
+
+    #### 12.3.3 AWS DynamoDB
+
+    **DynamoDBとは？**
+
+    Amazon DynamoDBは、フルマネージドのNoSQLデータベースです。
+    Azure Table Storageと同様の用途で、ジョブの状態管理に使用します。
+
+    ```text
+    【DynamoDBテーブル設計】
+
+    テーブル名: EvaluationJobs
+
+    ┌─────────────┬─────────────┬─────────┬──────────┬──────────┐
+    │ tenant_id   │ job_id      │ status  │ progress │ results  │
+    │ (Partition) │ (Sort Key)  │         │          │ (JSON)   │
+    ├─────────────┼─────────────┼─────────┼──────────┼──────────┤
+    │ default     │ uuid-001    │ pending │ 0        │ null     │
+    │ default     │ uuid-002    │ running │ 50       │ null     │
+    │ tenant-a    │ uuid-003    │ completed│ 100     │ [{...}]  │
+    └─────────────┴─────────────┴─────────┴──────────┴──────────┘
+
+    GSI（グローバルセカンダリインデックス）:
+    - status-created_at-index: ステータス別検索用
+    - job_id-index: ジョブID単独検索用
+    ```
+
+    #### 12.3.4 Amazon SQS
+
+    **SQSとは？**
+
+    Amazon Simple Queue Service (SQS) は、メッセージキューサービスです。
+    Azure Queue Storageと同様の用途で、非同期ジョブの通知に使用します。
+
+    **環境変数設定**
+
+    ```ini
+    JOB_STORAGE_PROVIDER=AWS
+    JOB_QUEUE_PROVIDER=AWS
+    AWS_DYNAMODB_TABLE_NAME=EvaluationJobs
+    AWS_SQS_QUEUE_URL=https://sqs.ap-northeast-1.amazonaws.com/123456789/evaluation-jobs
+    ```
+
+    ### 12.4 GCP クラウドリソース
+
+    #### 12.4.1 Google Cloud Vertex AI
+
+    **Vertex AIとは？**
+
+    Vertex AIは、Google Cloudの機械学習プラットフォームです。
+    GoogleのGeminiモデルを利用できます。
+
+    ```text
+    【Vertex AI の概念図】
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                      Vertex AI                                  │
+    ├─────────────────────────────────────────────────────────────────┤
+    │                                                                 │
+    │  ┌───────────────────────────────────────────────────────────┐ │
+    │  │                  Gemini モデルファミリー                    │ │
+    │  │  ┌───────────────────┐  ┌───────────────────┐            │ │
+    │  │  │   Gemini 3.x      │  │   Gemini 2.x      │            │ │
+    │  │  │  (Preview)        │  │  (GA - 安定版)     │            │ │
+    │  │  │  - 3-pro-preview  │  │  - 2.5-pro        │            │ │
+    │  │  │  - 3-flash-preview│  │  - 2.5-flash      │            │ │
+    │  │  │                   │  │  - 2.5-flash-lite │            │ │
+    │  │  └───────────────────┘  └───────────────────┘            │ │
+    │  └───────────────────────────────────────────────────────────┘ │
+    │                                                                 │
+    │  【重要】リージョン設定                                         │
+    │  - Gemini 3.x: globalリージョン必須                            │
+    │  - Gemini 2.x: us-central1等のリージョンも利用可能              │
+    │                                                                 │
+    └─────────────────────────────────────────────────────────────────┘
+    ```
+
+    **重要: Gemini 3.x のリージョン設定**
+
+    Gemini 3 Previewモデルは、**globalリージョン**でのみ利用可能です。
+    `us-central1`等の従来リージョンでは404エラーになります。
+
+    ```text
+    【リージョン設定の違い】
+
+    ✗ 従来リージョン設定（Gemini 3.xでエラー）:
+    GCP_LOCATION=us-central1
+
+    ✓ globalリージョン設定（Gemini 3.x対応）:
+    GCP_LOCATION=global
+
+    注意: Gemini 2.x はどちらでも動作します
+    ```
+
+    **利用可能なモデル（2026年2月時点・動作確認済み）**
+
+    | モデル | 説明 | リージョン | レイテンシ |
+    |--------|------|-----------|-----------|
+    | `gemini-3-pro-preview` | 最高性能（Preview） | global必須 | 約30秒 |
+    | `gemini-3-flash-preview` | 高速・マルチモーダル | global必須 | 約5秒 |
+    | `gemini-2.5-pro` | GA版、高度な推論 | 任意 | 約4秒 |
+    | `gemini-2.5-flash` | GA版、コスト効率 | 任意 | 約3秒 |
+    | `gemini-2.5-flash-lite` | 超軽量 | 任意 | 約1秒 |
+
+    > **注意**: Gemini 2.0は2026年3月31日に廃止予定です。
+
+    **環境変数設定**
+
+    ```ini
+    LLM_PROVIDER=GCP
+    GCP_PROJECT_ID=your-project-id
+    GCP_LOCATION=global                    # Gemini 3.x用
+    GCP_MODEL_NAME=gemini-3-pro-preview
+    ```
+
+    #### 12.4.2 GCP Cloud Functions
+
+    **Cloud Functionsとは？**
+
+    Cloud Functionsは、GCPのサーバーレスコンピューティングサービスです。
+    Azure Functions、AWS Lambdaと同様の役割を果たします。
+
+    **本システムでの使用**
+
+    | 設定項目 | 値 | 説明 |
+    |---------|-----|------|
+    | ランタイム | Python 3.11 | 実行環境 |
+    | メモリ | 1024 MB | 割り当てメモリ |
+    | タイムアウト | 540秒 | 最大実行時間 |
+    | フレームワーク | functions-framework | HTTPトリガー |
+
+    #### 12.4.3 GCP Firestore
+
+    **Firestoreとは？**
+
+    Cloud Firestoreは、GCPのNoSQLデータベースです。
+    リアルタイム同期機能があり、スマートフォンアプリなどでも人気のサービスです。
+
+    ```text
+    【Firestoreのデータ構造】
+
+    コレクション: evaluation_jobs
+    └── ドキュメント: {job_id}
+        ├── tenant_id: "default"
+        ├── status: "pending" | "running" | "completed" | "failed"
+        ├── items: [ {...}, {...} ]
+        ├── results: [ {...}, {...} ]
+        ├── progress: 0-100
+        ├── created_at: Timestamp
+        └── completed_at: Timestamp
+    ```
+
+    #### 12.4.4 GCP Cloud Tasks
+
+    **Cloud Tasksとは？**
+
+    Cloud Tasksは、非同期タスク実行サービスです。
+    Azure Queue Storage、Amazon SQSと同様の用途で使用します。
+
+    **環境変数設定**
+
+    ```ini
+    JOB_STORAGE_PROVIDER=GCP
+    JOB_QUEUE_PROVIDER=GCP
+    GCP_FIRESTORE_COLLECTION=evaluation_jobs
+    GCP_TASKS_QUEUE_PATH=projects/your-project/locations/us-central1/queues/evaluation-jobs
+    ```
+
+    ### 12.5 プロバイダー比較表
+
+    #### 12.5.1 サーバーレスコンピューティング
+
+    | 機能 | Azure Functions | AWS Lambda | GCP Cloud Functions |
+    |------|-----------------|------------|---------------------|
+    | 最大タイムアウト | 10分（Premium: 無制限） | 15分 | 9分（Gen2: 60分） |
+    | メモリ範囲 | 128MB - 14GB | 128MB - 10GB | 128MB - 32GB |
+    | 課金単位 | 100ms | 1ms | 100ms |
+    | コールドスタート | 約1-3秒 | 約0.5-2秒 | 約0.5-2秒 |
+    | ローカル開発ツール | Azure Functions Core Tools | SAM / localstack | functions-framework |
+
+    #### 12.5.2 NoSQLデータベース
+
+    | 機能 | Azure Table Storage | AWS DynamoDB | GCP Firestore |
+    |------|---------------------|--------------|---------------|
+    | データモデル | Key-Value | Key-Value | ドキュメント |
+    | 制限 | 64KB/エンティティ | 400KB/アイテム | 1MB/ドキュメント |
+    | クエリ機能 | 限定的 | GSI対応 | 複合クエリ対応 |
+    | リアルタイム | なし | Streams | ネイティブ対応 |
+    | 料金モデル | 従量課金 | オンデマンド/プロビジョニング | 従量課金 |
+
+    #### 12.5.3 メッセージキュー
+
+    | 機能 | Azure Queue Storage | Amazon SQS | GCP Cloud Tasks |
+    |------|---------------------|------------|-----------------|
+    | 最大メッセージサイズ | 64KB | 256KB | 100KB |
+    | 保持期間 | 7日 | 14日 | 31日 |
+    | ファンクショントリガー | ネイティブ対応 | Lambda統合 | HTTP呼び出し |
+    | FIFO対応 | なし | オプション | なし |
+
+    #### 12.5.4 AIモデルサービス
+
+    | 項目 | Azure AI Foundry | AWS Bedrock | GCP Vertex AI |
+    |------|------------------|-------------|---------------|
+    | 主力モデル | GPT-5.2, Claude | Claude Opus 4.6 | Gemini 3 Pro |
+    | 推奨モデル（本システム） | gpt-5-nano | jp.anthropic.claude-sonnet-4-5 | gemini-3-pro-preview |
+    | 認証方式 | API Key / Azure AD | IAM Role / Keys | サービスアカウント |
+    | リージョン | 東日本/西日本 | 東京 | global |
+    | SLA | 99.9% | 99.9% | 99.9% |
+
+    #### 12.5.5 OCRプロバイダー
+
+    本システムでは、ドキュメント（PDF、画像）からテキストを抽出するためにOCRサービスを使用します。
+
+    | プロバイダー | 説明 | 日本語 | タイ語 | オランダ語 | 設定値 |
+    |-------------|------|:------:|:------:|:----------:|--------|
+    | Azure Document Intelligence | 高精度OCR、レイアウト解析対応 | ◎ | ○ | ○ | `AZURE` |
+    | AWS Textract | 表抽出・フォーム解析に強い | × | × | × | `AWS` |
+    | GCP Document AI | 多言語対応、カスタムモデル可 | ○ | △ | ○ | `GCP` |
+    | Tesseract | OSS、Docker/Lambda実行可 | ○ | ◎ | ◎ | `TESSERACT` |
+    | YomiToku-Pro | 日本語特化、AWS Marketplace | ◎ | × | × | `YOMITOKU` |
+
+    **凡例**: ◎ 高精度対応 / ○ 対応 / △ 限定対応 / × 非対応
+
+    **言語別推奨プロバイダー**:
+    - **日本語ドキュメント**: Azure Document Intelligence または YomiToku-Pro（高精度）
+    - **英語ドキュメント**: Azure / AWS / GCP いずれも高精度
+    - **タイ語ドキュメント**: Tesseract（AWS Textract/GCPは非対応）
+    - **オランダ語ドキュメント**: Tesseract（安定した精度）
+
+    **YomiToku-Pro（AWS Marketplace版）について**:
+    ```text
+    YomiToku-Proは、日本語OCRに特化したAWS Marketplace製品です。
+    SageMaker Endpointとしてデプロイし、invoke_endpointで呼び出します。
+
+    【設定例】
+    OCR_PROVIDER=YOMITOKU
+    YOMITOKU_ENDPOINT_NAME=yomitoku-pro-endpoint
+    AWS_REGION=ap-northeast-1
+
+    【特徴】
+    - 手書き文字認識に対応
+    - 複雑なレイアウト（帳票、申請書等）に強い
+    - 日本語と英語の混在文書に対応
+    ```
+
+    **Tesseract（Docker版）について**:
+    ```text
+    AWS Lambda上でTesseractを使用する場合、Dockerコンテナでデプロイします。
+    platforms/aws/Dockerfile に設定例があります。
+
+    【対応言語】
+    - jpn: 日本語
+    - eng: 英語
+    - tha: タイ語
+    - nld: オランダ語
+
+    【設定例】
+    OCR_PROVIDER=TESSERACT
+    TESSERACT_LANG=jpn+eng+tha+nld
+    TESSERACT_CMD=/usr/bin/tesseract
+    ```
+
+    ### 12.6 クラウドリソースのセットアップ手順
+
+    #### 12.6.1 Azure セットアップ
+
+    **ステップ1: リソースグループの作成**
+
+    ```powershell
+    # Azure CLIにログイン
+    az login
+
+    # リソースグループを作成（リソースをまとめる入れ物）
+    az group create `
+        --name rg-ic-test-evaluation `
+        --location japaneast
+
+    # 確認
+    az group show --name rg-ic-test-evaluation
+    ```
+
+    **ステップ2: ストレージアカウントの作成**
+
+    ```powershell
+    # ストレージアカウント作成
+    az storage account create `
+        --name stictestevaluation `
+        --resource-group rg-ic-test-evaluation `
+        --location japaneast `
+        --sku Standard_LRS
+
+    # 接続文字列を取得
+    az storage account show-connection-string `
+        --name stictestevaluation `
+        --resource-group rg-ic-test-evaluation
+    ```
+
+    **ステップ3: Function Appの作成**
+
+    ```powershell
+    # Function App作成
+    az functionapp create `
+        --name func-ic-test-evaluation `
+        --resource-group rg-ic-test-evaluation `
+        --storage-account stictestevaluation `
+        --consumption-plan-location japaneast `
+        --runtime python `
+        --runtime-version 3.11 `
+        --functions-version 4
+
+    # 環境変数設定
+    az functionapp config appsettings set `
+        --name func-ic-test-evaluation `
+        --resource-group rg-ic-test-evaluation `
+        --settings `
+            LLM_PROVIDER=AZURE_FOUNDRY `
+            AZURE_FOUNDRY_ENDPOINT=https://your-project.openai.azure.com/ `
+            AZURE_FOUNDRY_API_KEY=your-api-key `
+            AZURE_FOUNDRY_MODEL=gpt-5-nano
+    ```
+
+    **ステップ4: Azure AI Foundryの設定**
+
+    1. [Azure AI Foundry](https://ai.azure.com) にアクセス
+    2. 新しいプロジェクトを作成
+    3. Model Catalogからモデルをデプロイ（gpt-5-nano推奨）
+    4. エンドポイントとAPIキーを取得
+    5. .envまたはFunction App設定に反映
+
+    #### 12.6.2 AWS セットアップ
+
+    **ステップ1: Bedrockモデルアクセス申請**
+
+    1. AWS Consoleにログイン
+    2. Amazon Bedrock サービスを開く
+    3. 「Model access」でClaudeモデルへのアクセスをリクエスト
+    4. 承認を待つ（通常は数分〜数時間）
+
+    **ステップ2: Lambda関数の作成**
+
+    ```powershell
+    # 依存パッケージをインストール
+    cd platforms/aws
+    mkdir package
+    pip install -r requirements.txt -t package/
+
+    # ソースコードをコピー
+    Copy-Item -Recurse ..\..\src\* package\
+    Copy-Item lambda_handler.py package\
+
+    # ZIPファイル作成
+    Compress-Archive -Path package\* -DestinationPath deployment.zip
+
+    # Lambda関数作成（AWS CLI）
+    aws lambda create-function `
+        --function-name ic-test-evaluate `
+        --runtime python3.11 `
+        --handler lambda_handler.handler `
+        --zip-file fileb://deployment.zip `
+        --role arn:aws:iam::123456789:role/lambda-bedrock-role `
+        --timeout 300 `
+        --memory-size 1024 `
+        --environment Variables='{
+            "LLM_PROVIDER":"AWS",
+            "AWS_REGION":"ap-northeast-1",
+            "AWS_BEDROCK_MODEL_ID":"jp.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        }'
+    ```
+
+    **ステップ3: API Gatewayの設定**
+
+    1. AWS ConsoleでAPI Gatewayを開く
+    2. HTTP APIを作成
+    3. Lambda統合を追加
+    4. ルートを設定（/evaluate, /health等）
+    5. ステージをデプロイしてエンドポイントURLを取得
+
+    #### 12.6.3 GCP セットアップ
+
+    **ステップ1: プロジェクト設定**
+
+    ```bash
+    # GCPにログイン
+    gcloud auth login
+
+    # プロジェクト作成
+    gcloud projects create ic-test-ai-agent
+
+    # プロジェクトを設定
+    gcloud config set project ic-test-ai-agent
+
+    # Vertex AI APIを有効化
+    gcloud services enable aiplatform.googleapis.com
+    ```
+
+    **ステップ2: 認証設定**
+
+    ```bash
+    # アプリケーションデフォルト認証（開発用）
+    gcloud auth application-default login
+
+    # サービスアカウント作成（本番用）
+    gcloud iam service-accounts create ic-test-sa `
+        --display-name="IC Test Service Account"
+
+    # 権限付与
+    gcloud projects add-iam-policy-binding ic-test-ai-agent `
+        --member="serviceAccount:ic-test-sa@ic-test-ai-agent.iam.gserviceaccount.com" `
+        --role="roles/aiplatform.user"
+
+    # キーファイル作成
+    gcloud iam service-accounts keys create key.json `
+        --iam-account=ic-test-sa@ic-test-ai-agent.iam.gserviceaccount.com
+    ```
+
+    **ステップ3: Cloud Functionsのデプロイ**
+
+    ```bash
+    cd platforms/gcp
+
+    # src/をコピー
+    cp -r ../../src .
+
+    # デプロイ
+    gcloud functions deploy evaluate `
+        --runtime python311 `
+        --trigger-http `
+        --allow-unauthenticated `
+        --entry-point evaluate `
+        --timeout 540 `
+        --memory 1024MB `
+        --set-env-vars "LLM_PROVIDER=GCP,GCP_PROJECT_ID=ic-test-ai-agent,GCP_LOCATION=global,GCP_MODEL_NAME=gemini-3-pro-preview"
+    ```
+
+    ---
+
+    ## 13. 技術解説
+
+    ### 13.1 使用技術スタック
 
     ```text
     ┌─────────────────────────────────────────────────────────────────┐
@@ -2062,7 +2839,7 @@
     └─────────────────────────────────────────────────────────────────┘
     ```
 
-    ### 11.2 LangChainとは
+    ### 13.2 LangChainとは
 
     LangChainは、大規模言語モデル（LLM）を活用したアプリケーション開発のためのフレームワークです。
 
@@ -2082,7 +2859,7 @@
                                             └──▶ Bedrock
     ```
 
-    ### 11.3 LangGraphとは
+    ### 13.3 LangGraphとは
 
     LangGraphは、複雑なAIワークフローをグラフ構造で定義・実行するライブラリです。
 
@@ -2113,7 +2890,7 @@
         └──────────────┘
     ```
 
-    ### 11.4 Factory Patternとは
+    ### 13.4 Factory Patternとは
 
     本システムでは「Factory Pattern（ファクトリーパターン）」を使用してLLMインスタンスを生成しています。
 
@@ -2143,38 +2920,54 @@
 
     ---
 
-    ## 13. 用語集
+    ## 14. 用語集
 
     | 用語 | 読み方 | 説明 |
     | ---- | ------ | ---- |
+    | Amazon Bedrock | アマゾン ベッドロック | AWSの基盤モデルサービス。Claude、Titan等を提供 |
     | API | エーピーアイ | Application Programming Interface。システム間の通信規約 |
+    | API Gateway | エーピーアイ ゲートウェイ | APIリクエストのルーティング・認証を行うサービス |
+    | Azure AI Foundry | アジュール エーアイ ファウンドリー | Microsoft統合AIプラットフォーム。複数モデルを統一APIで利用可能 |
     | Azure Functions | アジュール ファンクションズ | Microsoftのサーバーレスコンピューティングサービス |
     | Base64 | ベースろくじゅうよん | バイナリデータをテキストに変換するエンコード方式 |
-    | Claude | クロード | Anthropic社が開発したAIモデル |
+    | Blob Storage | ブロブ ストレージ | ファイルを保存するためのクラウドストレージ |
+    | Claude | クロード | Anthropic社が開発したAIモデル。Opus、Sonnet、Haiku等 |
+    | Cloud Functions | クラウド ファンクションズ | GCPのサーバーレスコンピューティングサービス |
+    | Cloud Tasks | クラウド タスクス | GCPの非同期タスク実行サービス |
+    | DynamoDB | ダイナモディービー | AWSのNoSQLデータベース |
     | Endpoint | エンドポイント | APIの接続先URL |
     | Factory Pattern | ファクトリーパターン | オブジェクト生成を専用クラスに委譲するデザインパターン |
+    | Firestore | ファイアストア | GCPのNoSQLデータベース。リアルタイム同期対応 |
     | Functions Core Tools | ファンクションズ コアツールズ | Azure Functionsのローカル開発ツール |
-    | Gemini | ジェミニ | Google社が開発したAIモデル |
-    | GPT | ジーピーティー | OpenAI社が開発したAIモデル |
+    | Gemini | ジェミニ | Google社が開発したAIモデル。3.x、2.5シリーズ等 |
+    | GPT | ジーピーティー | OpenAI社が開発したAIモデル。GPT-5シリーズ等 |
+    | IAM | アイアム | Identity and Access Management。AWSの認証・認可サービス |
+    | Inference Profile | インファレンス プロファイル | AWS Bedrockの推論設定。リージョン最適化に使用 |
     | JSON | ジェイソン | JavaScript Object Notation。データ交換形式 |
     | Key Vault | キーボルト | Azureのシークレット管理サービス |
+    | Lambda | ラムダ | AWSのサーバーレスコンピューティングサービス |
     | LangChain | ラングチェーン | LLMアプリケーション開発フレームワーク |
     | LangGraph | ラングラフ | AIワークフロー定義ライブラリ |
     | LLM | エルエルエム | Large Language Model。大規模言語モデル |
+    | NoSQL | ノーエスキューエル | 非リレーショナルデータベース。柔軟なスキーマが特徴 |
     | OCR | オーシーアール | Optical Character Recognition。光学文字認識 |
     | Orchestrator | オーケストレーター | 複数の処理を統括・調整するコンポーネント |
     | PowerShell | パワーシェル | Windowsのスクリプト実行環境 |
+    | Queue Storage | キュー ストレージ | メッセージキューサービス。非同期処理に使用 |
     | Serverless | サーバーレス | サーバー管理不要のクラウドサービス形態 |
     | SoD | エスオーディー | Segregation of Duties。職務分掌 |
+    | SQS | エスキューエス | Amazon Simple Queue Service。AWSのメッセージキュー |
+    | Table Storage | テーブル ストレージ | AzureのNoSQLデータベース |
     | VBA | ブイビーエー | Visual Basic for Applications。Officeマクロ言語 |
     | Vertex AI | バーテックス エーアイ | Google Cloudの機械学習プラットフォーム |
 
     ---
 
-    ## 14. 更新履歴
+    ## 15. 更新履歴
 
     | 日付 | バージョン | 変更内容 |
     | ---- | ---------- | -------- |
+    | 2026-02-08 | 1.2.0 | クラウドリソース詳細ドキュメント追加（セクション12）、マルチクラウドアーキテクチャ図解、各プロバイダー（Azure/AWS/GCP）のリソース詳細解説、最新モデル情報更新（Gemini 3 global設定、AWS Inference Profile ID、GPT-5 Nano等）、初心者向け学習コンテンツ追加 |
     | 2026-01-30 | 1.1.2 | pytestベースのユニットテスト・統合テストスイート追加（156件）、Azure Blob/Queue統合テスト追加、テストドキュメント整備 |
     | 2026-01-30 | 1.1.1 | Azure Table Storage 64KB制限対策を強化（全証跡ファイルをBlob Storageに保存） |
     | 2026-01-30 | 1.1.0 | Azure AD認証のみ方式に変更（Functions Key廃止）、トークンキャッシュ機能追加、セットアップスクリプト整備 |

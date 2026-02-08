@@ -283,7 +283,7 @@ class LLMFactory:
     DEFAULT_MODELS: Dict[LLMProvider, Optional[str]] = {
         LLMProvider.AZURE: None,  # Azure OpenAIはデプロイ名を使用
         LLMProvider.AZURE_FOUNDRY: "gpt-5-nano",  # GPT-5 Nano (動作確認済み)
-        LLMProvider.GCP: "gemini-2.5-flash",  # Gemini 2.5 Flash (動作確認済み)
+        LLMProvider.GCP: "gemini-3-pro-preview",  # Gemini 3 Pro (動作確認済み・globalリージョン必須)
         LLMProvider.AWS: "jp.anthropic.claude-sonnet-4-5-20250929-v1:0",  # Claude Sonnet 4.5 JP (動作確認済み)
         LLMProvider.LOCAL: "llama3.2:8b",      # Llama 3.2 8B (Ollama)
     }
@@ -308,7 +308,7 @@ class LLMFactory:
     HIGH_END_MODELS: Dict[LLMProvider, Optional[str]] = {
         LLMProvider.AZURE: None,
         LLMProvider.AZURE_FOUNDRY: "gpt-5-nano",        # GPT-5 Nano (デプロイ済み)
-        LLMProvider.GCP: "gemini-2.5-pro",              # Gemini 2.5 Pro (動作確認済み)
+        LLMProvider.GCP: "gemini-3-pro-preview",        # Gemini 3 Pro (動作確認済み・globalリージョン必須)
         LLMProvider.AWS: "global.anthropic.claude-opus-4-6-v1",  # Claude Opus 4.6 (動作確認済み)
         LLMProvider.LOCAL: "llama3.2:70b",              # Llama 3.2 70B
     }
@@ -352,12 +352,12 @@ class LLMFactory:
             "claude-haiku-4-5": "Claude Haiku 4.5 - Anthropic高速・低コスト",
         },
         LLMProvider.GCP: {
-            # Gemini 3.x シリーズ (Preview - 申請が必要)
-            "gemini-3-pro-preview": "Gemini 3 Pro - 高度な推論・エージェント向け（Preview）",
-            "gemini-3-flash-preview": "Gemini 3 Flash - 高速・マルチモーダル（Preview）",
+            # Gemini 3.x シリーズ (Preview - globalリージョン必須)
+            "gemini-3-pro-preview": "Gemini 3 Pro - 最高性能（動作確認済み・globalリージョン必須）",
+            "gemini-3-flash-preview": "Gemini 3 Flash - 高速・マルチモーダル（globalリージョン必須）",
             # Gemini 2.5 シリーズ (GA - 動作確認済み)
             "gemini-2.5-pro": "Gemini 2.5 Pro - 高度な推論・コーディング（動作確認済み）",
-            "gemini-2.5-flash": "Gemini 2.5 Flash - 高速・コスト効率（動作確認済み・推奨）",
+            "gemini-2.5-flash": "Gemini 2.5 Flash - 高速・コスト効率（動作確認済み）",
             "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite - 超軽量（動作確認済み）",
             # Gemini 2.0 シリーズ (Legacy - 2026/3/31廃止予定)
             "gemini-2.0-flash-001": "Gemini 2.0 Flash - レガシー（2026/3/31廃止予定）",
