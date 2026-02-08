@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>内部統制テスト評価AI - ファイルアップロード</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- ヘッダー -->
+        <header class="header">
+            <div class="logo">
+                <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <h1>内部統制テスト評価AI</h1>
+            </div>
+            <p class="subtitle">PowerShell/VBA制限環境向けWebインターフェース</p>
+        </header>
+
+        <!-- メインコンテンツ -->
+        <main class="main">
+            <!-- ステップインジケーター -->
+            <div class="steps" role="navigation" aria-label="進行状況">
+                <div class="step active" data-step="1">
+                    <div class="step-number">1</div>
+                    <div class="step-label">ファイル選択</div>
+                </div>
+                <div class="step-connector"></div>
+                <div class="step" data-step="2">
+                    <div class="step-number">2</div>
+                    <div class="step-label">AI評価中</div>
+                </div>
+                <div class="step-connector"></div>
+                <div class="step" data-step="3">
+                    <div class="step-number">3</div>
+                    <div class="step-label">結果取得</div>
+                </div>
+            </div>
+
+            <!-- ステップ1: ファイルアップロード -->
+            <section id="step1" class="step-content active" aria-labelledby="step1-heading">
+                <h2 id="step1-heading" class="section-title">評価データをアップロード</h2>
+                <p class="section-description">
+                    Excelからエクスポートした評価用JSONファイルをアップロードしてください。
+                    <br>対応形式: JSON (.json)
+                </p>
+
+                <!-- ドラッグ&ドロップエリア -->
+                <div class="upload-area" id="dropZone" role="button" tabindex="0"
+                     aria-label="ファイルをドラッグ&ドロップ、またはクリックして選択">
+                    <div class="upload-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                        </svg>
+                    </div>
+                    <p class="upload-text">
+                        ファイルをドラッグ&ドロップ
+                        <br><span class="upload-or">または</span>
+                    </p>
+                    <button type="button" class="btn btn-secondary" id="browseBtn">
+                        ファイルを選択
+                    </button>
+                    <input type="file" id="fileInput" accept=".json" hidden aria-hidden="true">
+                </div>
+
+                <!-- 選択されたファイル表示 -->
+                <div id="fileInfo" class="file-info hidden">
+                    <div class="file-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                    </div>
+                    <div class="file-details">
+                        <span class="file-name" id="fileName"></span>
+                        <span class="file-size" id="fileSize"></span>
+                    </div>
+                    <button type="button" class="btn-icon" id="removeFile" aria-label="ファイルを削除">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- API設定 -->
+                <div class="settings-panel">
+                    <h3 class="settings-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                        API設定
+                    </h3>
+                    <div class="form-group">
+                        <label for="apiEndpoint">APIエンドポイント</label>
+                        <input type="url" id="apiEndpoint" class="form-input"
+                               placeholder="https://your-function-app.azurewebsites.net/api/evaluate"
+                               value="">
+                    </div>
+                    <div class="form-group">
+                        <label for="apiKey">APIキー（オプション）</label>
+                        <div class="input-with-icon">
+                            <input type="password" id="apiKey" class="form-input"
+                                   placeholder="Functions Key または Bearer Token">
+                            <button type="button" class="btn-icon toggle-password" aria-label="パスワードを表示">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    <path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="authHeader">認証ヘッダー</label>
+                        <select id="authHeader" class="form-select">
+                            <option value="x-functions-key">x-functions-key (Azure Functions)</option>
+                            <option value="Authorization">Authorization (Bearer Token)</option>
+                            <option value="x-api-key">x-api-key (AWS API Gateway)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="action-buttons">
+                    <button type="button" class="btn btn-primary btn-large" id="startEvaluation" disabled>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                        </svg>
+                        AI評価を開始
+                    </button>
+                </div>
+            </section>
+
+            <!-- ステップ2: 処理中 -->
+            <section id="step2" class="step-content hidden" aria-labelledby="step2-heading">
+                <h2 id="step2-heading" class="section-title">AI評価処理中...</h2>
+
+                <div class="processing-container">
+                    <!-- プログレスリング -->
+                    <div class="progress-ring-container">
+                        <svg class="progress-ring" viewBox="0 0 120 120">
+                            <circle class="progress-ring-bg" cx="60" cy="60" r="54"/>
+                            <circle class="progress-ring-fill" cx="60" cy="60" r="54"
+                                    stroke-dasharray="339.292" stroke-dashoffset="339.292"/>
+                        </svg>
+                        <div class="progress-text">
+                            <span class="progress-percent" id="progressPercent">0</span>
+                            <span class="progress-label">%</span>
+                        </div>
+                    </div>
+
+                    <!-- 処理ステータス -->
+                    <div class="status-container">
+                        <div class="status-item active" id="statusUpload">
+                            <div class="status-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                                </svg>
+                            </div>
+                            <span>ファイルアップロード</span>
+                        </div>
+                        <div class="status-item" id="statusProcess">
+                            <div class="status-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                                </svg>
+                            </div>
+                            <span>AI分析・評価</span>
+                        </div>
+                        <div class="status-item" id="statusComplete">
+                            <div class="status-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                            </div>
+                            <span>結果生成</span>
+                        </div>
+                    </div>
+
+                    <!-- 詳細メッセージ -->
+                    <div class="processing-message" id="processingMessage">
+                        データをアップロードしています...
+                    </div>
+
+                    <!-- 処理中のヒント -->
+                    <div class="processing-tips">
+                        <div class="tip-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                        </div>
+                        <p>処理には数秒〜数分かかる場合があります。このページを閉じないでください。</p>
+                    </div>
+                </div>
+
+                <div class="action-buttons">
+                    <button type="button" class="btn btn-secondary" id="cancelEvaluation">
+                        キャンセル
+                    </button>
+                </div>
+            </section>
+
+            <!-- ステップ3: 結果 -->
+            <section id="step3" class="step-content hidden" aria-labelledby="step3-heading">
+                <h2 id="step3-heading" class="section-title">評価完了</h2>
+
+                <!-- 成功時 -->
+                <div id="resultSuccess" class="result-container success hidden">
+                    <div class="result-icon success">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </div>
+                    <h3>AI評価が正常に完了しました</h3>
+
+                    <!-- サマリー -->
+                    <div class="result-summary">
+                        <div class="summary-item">
+                            <span class="summary-value" id="totalItems">0</span>
+                            <span class="summary-label">評価項目数</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-value success" id="passedItems">0</span>
+                            <span class="summary-label">有効</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-value warning" id="failedItems">0</span>
+                            <span class="summary-label">要確認</span>
+                        </div>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button type="button" class="btn btn-primary btn-large" id="downloadResults">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                            </svg>
+                            結果をダウンロード
+                        </button>
+                        <button type="button" class="btn btn-secondary" id="startNew">
+                            新しい評価を開始
+                        </button>
+                    </div>
+                </div>
+
+                <!-- エラー時 -->
+                <div id="resultError" class="result-container error hidden">
+                    <div class="result-icon error">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </div>
+                    <h3>エラーが発生しました</h3>
+                    <p class="error-message" id="errorMessage"></p>
+
+                    <div class="error-details" id="errorDetails">
+                        <button type="button" class="btn-text" id="toggleErrorDetails">
+                            詳細を表示
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </button>
+                        <pre class="error-trace hidden" id="errorTrace"></pre>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button type="button" class="btn btn-primary" id="retryEvaluation">
+                            再試行
+                        </button>
+                        <button type="button" class="btn btn-secondary" id="goBack">
+                            戻る
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- フッター -->
+        <footer class="footer">
+            <p>内部統制テスト評価AIシステム v1.0</p>
+            <p class="footer-note">
+                このツールはPowerShell/VBA制限環境でも使用できるWebベースのインターフェースです。
+            </p>
+        </footer>
+    </div>
+
+    <!-- ヘルプモーダル -->
+    <div class="modal hidden" id="helpModal" role="dialog" aria-labelledby="helpModalTitle" aria-modal="true">
+        <div class="modal-overlay" tabindex="-1"></div>
+        <div class="modal-content">
+            <button type="button" class="modal-close" aria-label="閉じる">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+            <h2 id="helpModalTitle">使い方ガイド</h2>
+            <div class="help-content">
+                <h3>1. JSONファイルの準備</h3>
+                <p>Excelで<code>ProcessForExport</code>マクロを実行し、評価用JSONファイルをエクスポートします。</p>
+
+                <h3>2. ファイルのアップロード</h3>
+                <p>エクスポートしたJSONファイルをこの画面にドラッグ&ドロップするか、「ファイルを選択」ボタンでアップロードします。</p>
+
+                <h3>3. API設定</h3>
+                <p>APIエンドポイントと認証情報を入力します。これらは管理者から提供された情報を使用してください。</p>
+
+                <h3>4. 評価の実行</h3>
+                <p>「AI評価を開始」ボタンをクリックすると、クラウド上のAIが内部統制テストの評価を行います。</p>
+
+                <h3>5. 結果のダウンロード</h3>
+                <p>評価完了後、結果JSONファイルをダウンロードし、Excelで<code>ImportResults</code>マクロを実行してインポートします。</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

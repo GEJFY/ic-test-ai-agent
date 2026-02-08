@@ -1,0 +1,20 @@
+[
+    {
+        "ID": "TEST-001",
+        "TestTarget": "購買プロセス",
+        "Category": "業務統制",
+        "ControlDescription": "購買発注には承認者による事前承認が必要である。発注金額が100万円以上の場合は部長承認、500万円以上の場合は役員承認が必要。",
+        "TestProcedure": "サンプル発注書10件について、発注金額に応じた適切な承認者による承認記録があるか確認する。",
+        "EvidenceLink": "",
+        "EvidenceFiles": []
+    },
+    {
+        "ID": "TEST-002",
+        "TestTarget": "アクセス管理",
+        "Category": "IT全般統制",
+        "ControlDescription": "システムへのアクセス権限は、入社・異動・退職時に適切に設定・変更・削除される。",
+        "TestProcedure": "退職者リストとシステムアクセス権限を照合し、退職後30日以内にアカウントが削除されているか確認する。",
+        "EvidenceLink": "",
+        "EvidenceFiles": []
+    }
+]

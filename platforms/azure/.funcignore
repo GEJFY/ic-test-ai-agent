@@ -1,0 +1,35 @@
+# Azure Functions ignore file
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE and editor
+.idea/
+.vscode/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local settings
+local.settings.json
+.env
+
+# Logs
+logs/
+*.log
+
+# Test files
+test_*.py
+
+# Markdown
+*.md
+
+# OS files
+.DS_Store
+
+# Deployment files
+deploy.ps1
+deploy.zip
+.deploy/

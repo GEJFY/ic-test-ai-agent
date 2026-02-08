@@ -1,0 +1,23 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# 機密情報を含む設定ファイル
+terraform.tfvars
+*.auto.tfvars
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# ログ
+*.log

@@ -1,0 +1,101 @@
+# =============================================================================
+# クライアント設定テンプレート
+# =============================================================================
+#
+# このファイルを terraform.tfvars にコピーして、クライアント固有の値を設定してください。
+# cp terraform.tfvars.example terraform.tfvars
+#
+# 注意: terraform.tfvars は .gitignore に含まれており、Gitにコミットされません。
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 基本設定（必須）
+# -----------------------------------------------------------------------------
+
+# クライアント識別子（リソース名に使用、英数字とハイフンのみ）
+client_name = "example-corp"
+
+# 環境（dev, staging, prod）
+environment = "prod"
+
+# クラウドプロバイダー（azure, aws, gcp のいずれか）
+cloud_provider = "azure"
+
+# -----------------------------------------------------------------------------
+# Azure設定（cloud_provider = "azure" の場合）
+# -----------------------------------------------------------------------------
+
+# Azureサブスクリプション ID
+# azure_subscription_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# Azureリージョン
+azure_location = "japaneast"
+
+# Azure AI Foundry設定
+azure_llm_config = {
+  endpoint    = "https://your-project.region.models.ai.azure.com"
+  api_key     = "your-api-key"
+  model       = "gpt-4o"
+  api_version = "2024-08-01-preview"
+}
+
+# -----------------------------------------------------------------------------
+# AWS設定（cloud_provider = "aws" の場合）
+# -----------------------------------------------------------------------------
+
+# AWSリージョン
+# aws_region = "ap-northeast-1"
+
+# AWS Bedrock設定
+# aws_llm_config = {
+#   model_id = "jp.anthropic.claude-sonnet-4-5-20250929-v1:0"
+# }
+
+# -----------------------------------------------------------------------------
+# GCP設定（cloud_provider = "gcp" の場合）
+# -----------------------------------------------------------------------------
+
+# GCPプロジェクトID
+# gcp_project_id = "your-project-id"
+
+# GCPリージョン
+# gcp_region = "asia-northeast1"
+
+# GCP Vertex AI設定
+# gcp_llm_config = {
+#   model = "gemini-2.5-flash"
+# }
+
+# Cloud Runコンテナイメージ
+# gcp_container_image = "asia-northeast1-docker.pkg.dev/your-project/ic-test/app:latest"
+
+# -----------------------------------------------------------------------------
+# OCR設定（オプション）
+# -----------------------------------------------------------------------------
+
+# OCRプロバイダー: AZURE, AWS, GCP, TESSERACT, NONE
+ocr_config = {
+  provider = "NONE"
+  # Azure Document Intelligence の場合:
+  # endpoint = "https://your-resource.cognitiveservices.azure.com/"
+  # api_key  = "your-di-key"
+}
+
+# -----------------------------------------------------------------------------
+# アプリケーション設定
+# -----------------------------------------------------------------------------
+
+app_settings = {
+  # 計画レビューの最大修正回数（0でスキップ）
+  max_plan_revisions = 1
+
+  # 判断レビューの最大修正回数（0でスキップ）
+  max_judgment_revisions = 1
+
+  # 計画作成を省略するか
+  skip_plan_creation = false
+
+  # 非同期モードを有効にするか
+  async_mode = true
+}

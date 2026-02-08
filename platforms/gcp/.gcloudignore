@@ -1,0 +1,45 @@
+# GCP Cloud Functions ignore file
+# デプロイパッケージから除外するファイル
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE and editor
+.idea/
+.vscode/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Local settings
+.env
+*.local
+
+# Logs
+logs/
+*.log
+
+# Test files
+test_*.py
+*_test.py
+
+# Markdown
+*.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Deployment files
+deploy.ps1
+.deploy/
+
+# Git
+.git/
+.gitignore
+
+# Node modules (if any)
+node_modules/

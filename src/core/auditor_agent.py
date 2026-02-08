@@ -1,7 +1,13 @@
 """
 ================================================================================
-auditor_agent.py - 監査オーケストレーター
+auditor_agent.py - 監査オーケストレーター（非推奨）
 ================================================================================
+
+【非推奨警告】
+このモジュールは非推奨です。代わりに graph_orchestrator.py の
+GraphAuditOrchestrator を使用してください。
+GraphAuditOrchestrator はセルフリフレクション機能を搭載し、
+より高品質な評価結果を生成します。
 
 【概要】
 内部統制テスト評価の中核コンポーネントです。
@@ -55,7 +61,16 @@ print(result.judgment_basis)     # 判断根拠
 
 ================================================================================
 """
+import warnings
 import logging
+
+# 非推奨警告を発行
+warnings.warn(
+    "AuditOrchestrator は非推奨です。"
+    "代わりに graph_orchestrator.GraphAuditOrchestrator を使用してください。",
+    DeprecationWarning,
+    stacklevel=2
+)
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from langchain_core.prompts import ChatPromptTemplate

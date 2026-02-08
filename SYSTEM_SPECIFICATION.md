@@ -1,1260 +1,2181 @@
-# 内部統制テスト評価AIシステム 仕様書
-
-================================================================================
-**バージョン**: 3.0
-**最終更新**: 2024年1月
-**対象読者**: システム管理者、開発者、内部監査担当者
-================================================================================
-
-## 目次
-
-1. [システム概要](#1-システム概要)
-2. [システムアーキテクチャ](#2-システムアーキテクチャ)
-3. [ファイル構成](#3-ファイル構成)
-4. [コンポーネント詳細](#4-コンポーネント詳細)
-5. [監査タスク詳細 (A1-A8)](#5-監査タスク詳細-a1-a8)
-6. [環境構築](#6-環境構築)
-7. [使用方法](#7-使用方法)
-8. [トラブルシューティング](#8-トラブルシューティング)
-9. [セキュリティ考慮事項](#9-セキュリティ考慮事項)
-10. [技術解説](#10-技術解説)
-11. [用語集](#11-用語集)
-12. [更新履歴](#12-更新履歴)
-
----
-
-## 1. システム概要
-
-### 1.1 このシステムは何をするものか？
-
-**内部統制テスト評価AIシステム**は、企業の内部監査業務を支援するAIツールです。
-
-#### 従来の監査業務の課題
-
-```
-従来の手作業による監査:
-┌─────────────────────────────────────────────────────────────┐
-│  監査担当者                                                  │
-│    │                                                        │
-│    ├── ① テスト項目を確認（Excel）                          │
-│    ├── ② エビデンス資料を1つずつ開く                        │
-│    ├── ③ 内容を読み込み、理解する                           │
-│    ├── ④ テスト手続きと照合して判断                         │
-│    ├── ⑤ 判定結果と根拠をExcelに記入                        │
-│    └── ⑥ 次のテスト項目へ（①に戻る）                       │
-│                                                              │
-│  問題点:                                                     │
-│    - 1件あたり15-30分かかる                                  │
-│    - 担当者による判断のばらつき                              │
-│    - 大量の文書を読む負担                                    │
-│    - 見落としリスク                                          │
-└─────────────────────────────────────────────────────────────┘
-```
-
-#### AIシステムによる自動化
-
-```
-AIシステムによる監査:
-┌─────────────────────────────────────────────────────────────┐
-│  監査担当者                      AIシステム                  │
-│    │                               │                        │
-│    ├── ① Excelでテスト項目準備 ──▶│                        │
-│    │                               ├── ② エビデンス自動収集 │
-│    │                               ├── ③ AI分析・評価       │
-│    │◀── ⑤ 結果確認・承認 ────────├── ④ 結果をExcelに記入  │
-│    │                               │                        │
-│  メリット:                                                   │
-│    - 1件あたり1-3分に短縮                                    │
-│    - 一貫した判断基準                                        │
-│    - 24時間稼働可能                                          │
-│    - 判断根拠の自動記録                                      │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### 1.2 主要機能
-
-本システムは以下の4つの主要機能を提供します:
-
-| 機能 | 説明 | 技術 |
-|------|------|------|
-| **データ読み込み** | Excelシートからテストデータを自動取得 | VBA マクロ |
-| **エビデンス収集** | 指定フォルダからPDF・画像等を自動収集 | PowerShell |
-| **AI評価** | 大規模言語モデル(LLM)による自動評価 | LangChain + クラウドAI |
-| **結果書き戻し** | 評価結果をExcelに自動記入 | VBA マクロ |
-
-### 1.3 対応クラウドプロバイダー
-
-本システムは「マルチクラウド対応」を特徴としており、以下のAIサービスを利用できます:
-
-| プロバイダー | 環境変数値 | 説明 | 推奨用途 |
-|-------------|-----------|------|---------|
-| **Azure AI Foundry** | `AZURE_FOUNDRY` | Microsoft統合AIプラットフォーム | **推奨** - GPT-4o利用 |
-| Azure OpenAI | `AZURE` | Azure OpenAI Service | GPT-4/GPT-3.5利用 |
-| GCP Vertex AI | `GCP` | Google Cloud Gemini | Gemini Pro利用 |
-| AWS Bedrock | `AWS` | Amazon Bedrock | Claude/Titan利用 |
-
-#### なぜマルチクラウド対応なのか？
-
-```
-マルチクラウド対応のメリット:
-
-1. ベンダーロックイン回避
-   ┌──────────┐    ┌──────────┐    ┌──────────┐
-   │  Azure   │ or │   GCP    │ or │   AWS    │
-   └──────────┘    └──────────┘    └──────────┘
-        ↓               ↓               ↓
-   ┌─────────────────────────────────────────┐
-   │          同じソースコード               │
-   └─────────────────────────────────────────┘
-
-2. コスト最適化
-   - プロバイダーごとの料金比較が可能
-   - 契約条件に応じて選択
-
-3. 可用性向上
-   - 1つのサービスが停止しても他で継続可能
-```
-
----
-
-## 2. システムアーキテクチャ
-
-### 2.1 システム構成の概念
-
-本システムは「クライアント・サーバー型」のアーキテクチャを採用しています。
-
-```text
-【クライアント・サーバー型とは？】
-
-┌────────────────────┐         ┌────────────────────┐
-│    クライアント     │ ──────▶ │     サーバー        │
-│  （あなたのPC）     │ ◀────── │  （クラウド上）     │
-└────────────────────┘         └────────────────────┘
-     Excel + VBA                Azure Functions
-
-・クライアント: リクエストを送る側（ユーザーのPC）
-・サーバー: リクエストを処理する側（クラウド上のAI）
-```
-
-### 2.2 全体構成図
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                      クライアント側（Excel VBA）                 │
-├─────────────────────────────────────────────────────────────────┤
-│  Excel VBA (ExcelToJson.bas)                                    │
-│    ├── setting.json 読み込み                                    │
-│    ├── Excelデータ → JSON変換                                   │
-│    ├── バッチ処理（batchSize件ずつ）                            │
-│    └── PowerShellスクリプト呼び出し                             │
-│                                                                 │
-│  PowerShell (CallCloudApi.ps1)                                  │
-│    ├── EvidenceLinkフォルダからファイル収集                     │
-│    ├── ファイル → Base64変換                                    │
-│    └── Azure Functions API呼び出し                              │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │ HTTPS POST（暗号化通信）
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│               サーバー側（クラウド Functions）                   │
-├─────────────────────────────────────────────────────────────────┤
-│  function_app.py (エントリポイント)                             │
-│    ├── /api/evaluate - 評価エンドポイント                       │
-│    ├── /api/health - ヘルスチェック                             │
-│    └── /api/config - 設定状態確認                               │
-│                                                                 │
-│  infrastructure/llm_factory.py                                  │
-│    └── マルチクラウドLLMインスタンス生成                        │
-│                                                                 │
-│  core/auditor_agent.py (AuditOrchestrator)                      │
-│    ├── タスク分解プランナー                                     │
-│    ├── A1-A8タスク実行制御                                      │
-│    └── 結果集約・最終判定                                       │
-│                                                                 │
-│  core/tasks/ (監査タスク A1-A8)                                 │
-│    ├── a1_semantic_search.py    - 意味検索                      │
-│    ├── a2_image_recognition.py  - 画像認識                      │
-│    ├── a3_data_extraction.py    - データ抽出                    │
-│    ├── a4_stepwise_reasoning.py - 段階的推論                    │
-│    ├── a5_semantic_reasoning.py - 意味推論                      │
-│    ├── a6_multi_document.py     - 複数文書統合                  │
-│    ├── a7_pattern_analysis.py   - パターン分析                  │
-│    └── a8_sod_detection.py      - 職務分掌検出                  │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │ LangChain（AIフレームワーク）
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       LLM プロバイダー                          │
-│  Azure AI Foundry / Azure OpenAI / GCP Vertex AI / AWS Bedrock │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### 2.3 各コンポーネントの役割
-
-| コンポーネント | 役割 | 技術 |
-| -------------- | ---- | ---- |
-| Excel VBA | テストデータの入出力、ユーザーインターフェース | VBA マクロ |
-| PowerShell | ファイル収集、API通信 | PowerShell 5.1+ |
-| Azure Functions | API エンドポイント、リクエスト処理 | Python 3.11 |
-| LLM Factory | AIモデルの切り替え管理 | LangChain |
-| Auditor Agent | 監査タスクのオーケストレーション | LangGraph |
-| Tasks (A1-A8) | 個別の監査評価ロジック | Python |
-
-### 2.4 データフロー詳細
-
-処理は以下の4ステップで行われます。
-
-```text
-【ステップ1】Excel → JSON変換
-┌──────────────────────────────────────────────────────────────────┐
-│  Excelシート                         JSON配列                    │
-│  ┌────┬────────┬────────┐           [                           │
-│  │ ID │ 統制   │ 手続き │    ──▶     { "ID": "CLC-01", ... },   │
-│  ├────┼────────┼────────┤             { "ID": "CLC-02", ... }   │
-│  │CLC1│ ...    │ ...    │           ]                           │
-│  └────┴────────┴────────┘                                       │
-└──────────────────────────────────────────────────────────────────┘
-
-【ステップ2】エビデンス収集（PowerShell）
-┌──────────────────────────────────────────────────────────────────┐
-│  EvidenceLink: C:\SampleData\CLC-01\                            │
-│                                                                  │
-│  フォルダ内のファイル:              Base64エンコード後:          │
-│  ├── 議事録.pdf          ──▶       "JVBERi0xLjQK..."            │
-│  ├── 承認書.xlsx         ──▶       "UEsDBBQAAAA..."             │
-│  └── スクリーンショット.png ──▶     "iVBORw0KGgo..."             │
-└──────────────────────────────────────────────────────────────────┘
-
-【ステップ3】API呼び出し・AI評価
-┌──────────────────────────────────────────────────────────────────┐
-│  リクエスト                          レスポンス                  │
-│  {                                   {                          │
-│    "ID": "CLC-01",                     "ID": "CLC-01",          │
-│    "ControlDescription": "...",        "evaluationResult": true,│
-│    "TestProcedure": "...",             "judgmentBasis": "...",  │
-│    "EvidenceFiles": [...]              "confidence": 0.85       │
-│  }                                   }                          │
-│                                                                  │
-│         ┌─────────────────────────────────┐                     │
-│         │  AI が以下を実行:                │                     │
-│         │  1. エビデンス内容を理解         │                     │
-│         │  2. テスト手続きと照合           │                     │
-│         │  3. 有効/非有効を判定            │                     │
-│         │  4. 判定根拠を生成               │                     │
-│         └─────────────────────────────────┘                     │
-└──────────────────────────────────────────────────────────────────┘
-
-【ステップ4】Excel書き戻し
-┌──────────────────────────────────────────────────────────────────┐
-│  レスポンスJSON                      Excelシート（結果列）       │
-│  {                                   ┌────┬────┬────┬────┐      │
-│    "evaluationResult": true,         │結果│根拠│参照│ファ│      │
-│    "judgmentBasis": "有効...",  ──▶  ├────┼────┼────┼────┤      │
-│    "documentReference": "...",       │有効│...│...│...│       │
-│    "fileName": "議事録.pdf"          └────┴────┴────┴────┘      │
-│  }                                                               │
-└──────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 3. ファイル構成
-
-```
-ic-test-ai-agent/
-├── ExcelToJson.bas          # Excel VBAモジュール（クライアント）
-├── CallCloudApi.ps1         # PowerShellスクリプト（API呼び出し）
-├── setting.json             # 設定ファイル（APIキー含む、Git除外）
-├── setting.json.example     # 設定ファイルサンプル
-├── .env                     # 環境変数（Git除外）
-├── .env.example             # 環境変数サンプル
-├── test_api.ps1             # APIテストスクリプト
-│
-├── src/                     # 共通コード（全プラットフォーム共有）
-│   ├── core/                # ビジネスロジック
-│   │   ├── handlers.py          # プラットフォーム非依存ハンドラー
-│   │   ├── auditor_agent.py     # 監査オーケストレーター
-│   │   ├── graph_orchestrator.py# LangGraphオーケストレーター
-│   │   ├── document_processor.py# ドキュメント処理
-│   │   └── tasks/
-│   │       ├── base_task.py           # 基底クラス
-│   │       ├── a1_semantic_search.py  # A1: 意味検索
-│   │       ├── a2_image_recognition.py# A2: 画像認識
-│   │       ├── a3_data_extraction.py  # A3: データ抽出
-│   │       ├── a4_stepwise_reasoning.py# A4: 段階的推論
-│   │       ├── a5_semantic_reasoning.py# A5: 意味推論
-│   │       ├── a6_multi_document.py   # A6: 複数文書統合
-│   │       ├── a7_pattern_analysis.py # A7: パターン分析
-│   │       └── a8_sod_detection.py    # A8: 職務分掌検出
-│   └── infrastructure/      # インフラ抽象化
-│       ├── llm_factory.py       # マルチLLM対応ファクトリー
-│       └── ocr_factory.py       # マルチOCR対応ファクトリー
-│
-├── platforms/               # プラットフォーム別エントリーポイント
-│   ├── azure/               # Azure Functions
-│   │   ├── function_app.py      # エントリーポイント
-│   │   ├── host.json            # Functions設定
-│   │   └── requirements.txt     # Azure用依存関係
-│   ├── gcp/                 # GCP Cloud Functions
-│   │   ├── main.py              # エントリーポイント
-│   │   └── requirements.txt     # GCP用依存関係
-│   └── aws/                 # AWS Lambda
-│       ├── lambda_handler.py    # エントリーポイント
-│       └── requirements.txt     # AWS用依存関係
-│
-├── requirements.txt         # 共通依存関係
-│
-└── SampleData/              # テスト用サンプルデータ
-    ├── CLC-01/              # テストケース別フォルダ
-    ├── CLC-02/
-    └── ...
-```
-
----
-
-## 4. コンポーネント詳細
-
-### 4.1 ExcelToJson.bas（VBAモジュール）
-
-#### 目的
-Excelシートのテストデータを読み込み、JSON形式に変換してAPIを呼び出す。
-
-#### 主要関数
-
-| 関数名 | 説明 |
-|--------|------|
-| `ProcessWithApi()` | メイン処理。バッチ処理でAPIを呼び出す |
-| `LoadSettings()` | setting.jsonから設定を読み込む |
-| `GenerateJsonForBatch()` | 指定範囲のデータをJSON変換 |
-| `CallPowerShellApi()` | PowerShellスクリプトを実行 |
-| `WriteResponseToExcel()` | APIレスポンスをExcelに書き戻す |
-
-#### バッチ処理フロー
-
-```
-1. setting.json読み込み（batchSize取得）
-2. Excelの有効データ行を収集
-3. batchSize件ずつループ:
-   a. JSON生成（GenerateJsonForBatch）
-   b. 一時ファイルに保存
-   c. PowerShell呼び出し（CallPowerShellApi）
-   d. レスポンスをExcelに反映
-4. 完了メッセージ表示
-```
-
-#### 設定構造 (SettingConfig)
-
-```vba
-Private Type SettingConfig
-    DataStartRow As Long        ' データ開始行（通常2）
-    SheetName As String         ' 対象シート名（空白=アクティブシート）
-    BatchSize As Long           ' バッチサイズ（デフォルト3）
-    ColID As String             ' ID列（例: "A"）
-    ColControlDescription As String
-    ColTestProcedure As String
-    ColEvidenceLink As String
-    ApiProvider As String       ' AZURE/GCP/AWS
-    ApiEndpoint As String       ' API URL
-    ApiKey As String            ' APIキー
-    ApiAuthHeader As String     ' 認証ヘッダー名
-    ColEvaluationResult As String
-    ColJudgmentBasis As String
-    ColDocumentReference As String
-    ColFileName As String
-    BooleanDisplayTrue As String   ' true表示（例: "有効"）
-    BooleanDisplayFalse As String  ' false表示（例: "非有効"）
-End Type
-```
-
----
-
-### 4.2 CallCloudApi.ps1（PowerShellスクリプト）
-
-#### 目的
-VBAから呼び出され、エビデンスファイルを収集してAPIを呼び出す。
-
-#### パラメータ
-
-| パラメータ | 必須 | 説明 |
-|-----------|------|------|
-| `-JsonFilePath` | Yes | 入力JSONファイルパス |
-| `-Endpoint` | Yes | API URL |
-| `-ApiKey` | Yes | APIキー |
-| `-OutputFilePath` | Yes | 出力JSONファイルパス |
-| `-Provider` | Yes | プロバイダー名（AZURE/GCP/AWS） |
-| `-AuthHeader` | No | 認証ヘッダー名（デフォルトはプロバイダー依存） |
-
-#### 処理フロー
-
-```
-1. JSONファイル読み込み
-2. 各アイテムのEvidenceLinkフォルダを走査
-3. ファイルをBase64変換してEvidenceFiles配列に追加
-4. プロバイダー別の認証ヘッダーを設定
-5. API呼び出し（Invoke-WebRequest）
-6. レスポンスを出力ファイルに保存
-```
-
-#### 対応ファイル形式
-
-| カテゴリ | 拡張子 |
-|---------|--------|
-| ドキュメント | .pdf, .doc, .docx |
-| スプレッドシート | .xls, .xlsx, .xlsm, .csv |
-| 画像 | .jpg, .jpeg, .png, .gif, .bmp, .webp, .tiff |
-| テキスト | .txt, .log, .json, .xml |
-| メール | .msg, .eml |
-
----
-
-### 4.3 setting.json（設定ファイル）
-
-```json
-{
-    "dataStartRow": 2,
-    "sheetName": "",
-    "batchSize": 3,
-    "columns": {
-        "ID": "A",
-        "ControlDescription": "C",
-        "TestProcedure": "D",
-        "EvidenceLink": "E"
-    },
-    "api": {
-        "provider": "AZURE",
-        "endpoint": "https://func-ic-test-evaluation.azurewebsites.net/api/evaluate",
-        "apiKey": "your-function-key",
-        "authHeader": "x-functions-key"
-    },
-    "responseMapping": {
-        "evaluationResult": "F",
-        "judgmentBasis": "G",
-        "documentReference": "H",
-        "fileName": "I"
-    },
-    "booleanDisplayTrue": "有効",
-    "booleanDisplayFalse": "非有効"
-}
-```
-
-#### 設定項目
-
-| 項目 | 説明 | デフォルト |
-|------|------|----------|
-| `dataStartRow` | データ開始行 | 2 |
-| `sheetName` | 対象シート名（空=アクティブ） | "" |
-| `batchSize` | 1回のAPI呼び出しで処理する件数 | 3 |
-| `columns.*` | 入力列マッピング | - |
-| `api.*` | API接続設定 | - |
-| `responseMapping.*` | 出力列マッピング | - |
-| `booleanDisplayTrue/False` | Boolean表示形式 | "有効"/"非有効" |
-
----
-
-### 4.4 function_app.py（Azure Functions）
-
-#### エンドポイント
-
-| パス | メソッド | 説明 |
-|------|---------|------|
-| `/api/evaluate` | POST | テスト評価実行 |
-| `/api/health` | GET | ヘルスチェック |
-| `/api/config` | GET | 設定状態確認 |
-
-#### /api/evaluate リクエスト形式
-
-```json
-[
+    # 内部統制テスト評価AIシステム 仕様書
+
+    ================================================================================
+    **バージョン**: 1.0.0
+    **リリース日**: 2026年1月29日
+    **対象読者**: システム管理者、開発者、内部監査担当者
+    ================================================================================
+
+    ## 目次
+
+    1. [システム概要](#1-システム概要)
+    2. [システムアーキテクチャ](#2-システムアーキテクチャ)
+    3. [ファイル構成](#3-ファイル構成)
+    4. [コンポーネント詳細](#4-コンポーネント詳細)
+    5. [監査タスク詳細 (A1-A8)](#5-監査タスク詳細-a1-a8)
+    6. [処理モード](#6-処理モード)
+    7. [環境構築](#7-環境構築)
+    8. [使用方法](#8-使用方法)
+    9. [トラブルシューティング](#9-トラブルシューティング)
+    10. [セキュリティ考慮事項](#10-セキュリティ考慮事項)
+    11. [テスト](#11-テスト)
+    12. [技術解説](#12-技術解説)
+    13. [用語集](#13-用語集)
+    14. [更新履歴](#14-更新履歴)
+
+    ---
+
+    ## 1. システム概要
+
+    ### 1.1 このシステムは何をするものか？
+
+    **内部統制テスト評価AIシステム**は、企業の内部監査業務を支援するAIツールです。
+
+    #### 従来の監査業務の課題
+
+    ```
+    従来の手作業による監査:
+    ┌─────────────────────────────────────────────────────────────┐
+    │  監査担当者                                                  │
+    │    │                                                        │
+    │    ├── ① テスト項目を確認（Excel）                          │
+    │    ├── ② エビデンス資料を1つずつ開く                        │
+    │    ├── ③ 内容を読み込み、理解する                           │
+    │    ├── ④ テスト手続きと照合して判断                         │
+    │    ├── ⑤ 判定結果と根拠をExcelに記入                        │
+    │    └── ⑥ 次のテスト項目へ（①に戻る）                       │
+    │                                                              │
+    │  問題点:                                                     │
+    │    - 1件あたり15-30分かかる                                  │
+    │    - 担当者による判断のばらつき                              │
+    │    - 大量の文書を読む負担                                    │
+    │    - 見落としリスク                                          │
+    └─────────────────────────────────────────────────────────────┘
+    ```
+
+    #### AIシステムによる自動化
+
+    ```
+    AIシステムによる監査:
+    ┌─────────────────────────────────────────────────────────────┐
+    │  監査担当者                      AIシステム                  │
+    │    │                               │                        │
+    │    ├── ① Excelでテスト項目準備 ──▶│                        │
+    │    │                               ├── ② エビデンス自動収集 │
+    │    │                               ├── ③ AI分析・評価       │
+    │    │◀── ⑤ 結果確認・承認 ────────├── ④ 結果をExcelに記入  │
+    │    │                               │                        │
+    │  メリット:                                                   │
+    │    - 1件あたり1-3分に短縮                                    │
+    │    - 一貫した判断基準                                        │
+    │    - 24時間稼働可能                                          │
+    │    - 判断根拠の自動記録                                      │
+    └─────────────────────────────────────────────────────────────┘
+    ```
+
+    ### 1.2 主要機能
+
+    本システムは以下の4つの主要機能を提供します:
+
+    | 機能 | 説明 | 技術 |
+    |------|------|------|
+    | **データ読み込み** | Excelシートからテストデータを自動取得 | VBA マクロ |
+    | **エビデンス収集** | 指定フォルダからPDF・画像等を自動収集 | PowerShell |
+    | **AI評価** | 大規模言語モデル(LLM)による自動評価 | LangChain + クラウドAI |
+    | **結果書き戻し** | 評価結果をExcelに自動記入 | VBA マクロ |
+
+    ### 1.3 対応クラウドプロバイダー
+
+    本システムは「マルチクラウド対応」を特徴としており、以下のAIサービスを利用できます:
+
+    | プロバイダー | 環境変数値 | 説明 | 推奨用途 |
+    |-------------|-----------|------|---------|
+    | **Azure AI Foundry** | `AZURE_FOUNDRY` | Microsoft統合AIプラットフォーム | **推奨** - GPT-4o利用 |
+    | Azure OpenAI | `AZURE` | Azure OpenAI Service | GPT-4/GPT-3.5利用 |
+    | GCP Vertex AI | `GCP` | Google Cloud Gemini | Gemini Pro利用 |
+    | AWS Bedrock | `AWS` | Amazon Bedrock | Claude/Titan利用 |
+
+    #### なぜマルチクラウド対応なのか？
+
+    ```
+    マルチクラウド対応のメリット:
+
+    1. ベンダーロックイン回避
+    ┌──────────┐    ┌──────────┐    ┌──────────┐
+    │  Azure   │ or │   GCP    │ or │   AWS    │
+    └──────────┘    └──────────┘    └──────────┘
+            ↓               ↓               ↓
+    ┌─────────────────────────────────────────┐
+    │          同じソースコード               │
+    └─────────────────────────────────────────┘
+
+    2. コスト最適化
+    - プロバイダーごとの料金比較が可能
+    - 契約条件に応じて選択
+
+    3. 可用性向上
+    - 1つのサービスが停止しても他で継続可能
+    ```
+
+    ---
+
+    ## 2. システムアーキテクチャ
+
+    ### 2.1 システム構成の概念
+
+    本システムは「クライアント・サーバー型」のアーキテクチャを採用しています。
+
+    ```text
+    【クライアント・サーバー型とは？】
+
+    ┌────────────────────┐         ┌────────────────────┐
+    │    クライアント     │ ──────▶ │     サーバー        │
+    │  （あなたのPC）     │ ◀────── │  （クラウド上）     │
+    └────────────────────┘         └────────────────────┘
+        Excel + VBA                Azure Functions
+
+    ・クライアント: リクエストを送る側（ユーザーのPC）
+    ・サーバー: リクエストを処理する側（クラウド上のAI）
+    ```
+
+    ### 2.2 全体構成図
+
+    ```text
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                      クライアント側（Excel VBA）                 │
+    ├─────────────────────────────────────────────────────────────────┤
+    │  Excel VBA (ExcelToJson.bas)                                    │
+    │    ├── setting.json 読み込み                                    │
+    │    ├── Excelデータ → JSON変換                                   │
+    │    ├── バッチ処理（batchSize件ずつ）                            │
+    │    └── PowerShellスクリプト呼び出し                             │
+    │                                                                 │
+    │  PowerShell (CallCloudApi.ps1)                                  │
+    │    ├── EvidenceLinkフォルダからファイル収集                     │
+    │    ├── ファイル → Base64変換                                    │
+    │    └── Azure Functions API呼び出し                              │
+    └───────────────────────────┬─────────────────────────────────────┘
+                                │ HTTPS POST（暗号化通信）
+                                ▼
+    ┌─────────────────────────────────────────────────────────────────┐
+    │               サーバー側（クラウド Functions）                   │
+    ├─────────────────────────────────────────────────────────────────┤
+    │  function_app.py (エントリポイント)                             │
+    │    ├── /api/evaluate - 評価エンドポイント                       │
+    │    ├── /api/health - ヘルスチェック                             │
+    │    └── /api/config - 設定状態確認                               │
+    │                                                                 │
+    │  infrastructure/llm_factory.py                                  │
+    │    └── マルチクラウドLLMインスタンス生成                        │
+    │                                                                 │
+    │  core/auditor_agent.py (AuditOrchestrator)                      │
+    │    ├── タスク分解プランナー                                     │
+    │    ├── A1-A8タスク実行制御                                      │
+    │    └── 結果集約・最終判定                                       │
+    │                                                                 │
+    │  core/tasks/ (監査タスク A1-A8)                                 │
+    │    ├── a1_semantic_search.py    - 意味検索                      │
+    │    ├── a2_image_recognition.py  - 画像認識                      │
+    │    ├── a3_data_extraction.py    - データ抽出                    │
+    │    ├── a4_stepwise_reasoning.py - 段階的推論                    │
+    │    ├── a5_semantic_reasoning.py - 意味推論                      │
+    │    ├── a6_multi_document.py     - 複数文書統合                  │
+    │    ├── a7_pattern_analysis.py   - パターン分析                  │
+    │    └── a8_sod_detection.py      - 職務分掌検出                  │
+    └───────────────────────────┬─────────────────────────────────────┘
+                                │ LangChain（AIフレームワーク）
+                                ▼
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                       LLM プロバイダー                          │
+    │  Azure AI Foundry / Azure OpenAI / GCP Vertex AI / AWS Bedrock │
+    └─────────────────────────────────────────────────────────────────┘
+    ```
+
+    ### 2.3 各コンポーネントの役割
+
+    | コンポーネント | 役割 | 技術 |
+    | -------------- | ---- | ---- |
+    | Excel VBA | テストデータの入出力、ユーザーインターフェース | VBA マクロ |
+    | PowerShell | ファイル収集、API通信 | PowerShell 5.1+ |
+    | Azure Functions | API エンドポイント、リクエスト処理 | Python 3.11 |
+    | LLM Factory | AIモデルの切り替え管理 | LangChain |
+    | Auditor Agent | 監査タスクのオーケストレーション | LangGraph |
+    | Tasks (A1-A8) | 個別の監査評価ロジック | Python |
+
+    ### 2.4 データフロー詳細
+
+    処理は以下の4ステップで行われます。
+
+    ```text
+    【ステップ1】Excel → JSON変換
+    ┌──────────────────────────────────────────────────────────────────┐
+    │  Excelシート                         JSON配列                    │
+    │  ┌────┬────────┬────────┐           [                           │
+    │  │ ID │ 統制   │ 手続き │    ──▶     { "ID": "CLC-01", ... },   │
+    │  ├────┼────────┼────────┤             { "ID": "CLC-02", ... }   │
+    │  │CLC1│ ...    │ ...    │           ]                           │
+    │  └────┴────────┴────────┘                                       │
+    └──────────────────────────────────────────────────────────────────┘
+
+    【ステップ2】エビデンス収集（PowerShell）
+    ┌──────────────────────────────────────────────────────────────────┐
+    │  EvidenceLink: C:\SampleData\CLC-01\                            │
+    │                                                                  │
+    │  フォルダ内のファイル:              Base64エンコード後:          │
+    │  ├── 議事録.pdf          ──▶       "JVBERi0xLjQK..."            │
+    │  ├── 承認書.xlsx         ──▶       "UEsDBBQAAAA..."             │
+    │  └── スクリーンショット.png ──▶     "iVBORw0KGgo..."             │
+    └──────────────────────────────────────────────────────────────────┘
+
+    【ステップ3】API呼び出し・AI評価
+    ┌──────────────────────────────────────────────────────────────────┐
+    │  リクエスト                          レスポンス                  │
+    │  {                                   {                          │
+    │    "ID": "CLC-01",                     "ID": "CLC-01",          │
+    │    "ControlDescription": "...",        "evaluationResult": true,│
+    │    "TestProcedure": "...",             "judgmentBasis": "...",  │
+    │    "EvidenceFiles": [...]              "confidence": 0.85       │
+    │  }                                   }                          │
+    │                                                                  │
+    │         ┌─────────────────────────────────┐                     │
+    │         │  AI が以下を実行:                │                     │
+    │         │  1. エビデンス内容を理解         │                     │
+    │         │  2. テスト手続きと照合           │                     │
+    │         │  3. 有効/非有効を判定            │                     │
+    │         │  4. 判定根拠を生成               │                     │
+    │         └─────────────────────────────────┘                     │
+    └──────────────────────────────────────────────────────────────────┘
+
+    【ステップ4】Excel書き戻し
+    ┌──────────────────────────────────────────────────────────────────┐
+    │  レスポンスJSON                      Excelシート（結果列）       │
+    │  {                                   ┌────┬────┬────┬────┐      │
+    │    "evaluationResult": true,         │結果│根拠│参照│ファ│      │
+    │    "judgmentBasis": "有効...",  ──▶  ├────┼────┼────┼────┤      │
+    │    "documentReference": "...",       │有効│...│...│...│       │
+    │    "fileName": "議事録.pdf"          └────┴────┴────┴────┘      │
+    │  }                                                               │
+    └──────────────────────────────────────────────────────────────────┘
+    ```
+
+    ---
+
+    ## 3. ファイル構成
+
+    ```
+    ic-test-ai-agent/
+    ├── ExcelToJson.bas          # Excel VBAモジュール（クライアント）
+    ├── CallCloudApi.ps1         # PowerShellスクリプト（同期API呼び出し）
+    ├── CallCloudApiAsync.ps1    # PowerShellスクリプト（非同期API呼び出し）
+    ├── setting.json             # 設定ファイル（APIキー含む、Git除外）
+    ├── setting.json.example     # 設定ファイルサンプル
+    ├── .env                     # 環境変数（Git除外）
+    ├── .env.example             # 環境変数サンプル
+    │
+    ├── src/                     # 共通コード（全プラットフォーム共有）
+    │   ├── core/                # ビジネスロジック
+    │   │   ├── handlers.py          # プラットフォーム非依存ハンドラー
+    │   │   ├── async_handlers.py    # 非同期API用ハンドラー
+    │   │   ├── async_job_manager.py # 非同期ジョブ管理
+    │   │   ├── auditor_agent.py     # 監査オーケストレーター（レガシー）
+    │   │   ├── graph_orchestrator.py# LangGraphオーケストレーター
+    │   │   ├── document_processor.py# ドキュメント処理
+    │   │   ├── prompts.py           # プロンプトテンプレート
+    │   │   └── tasks/
+    │   │       ├── base_task.py           # 基底クラス
+    │   │       ├── a1_semantic_search.py  # A1: 意味検索
+    │   │       ├── a2_image_recognition.py# A2: 画像認識
+    │   │       ├── a3_data_extraction.py  # A3: データ抽出
+    │   │       ├── a4_stepwise_reasoning.py# A4: 段階的推論
+    │   │       ├── a5_semantic_reasoning.py# A5: 意味推論
+    │   │       ├── a6_multi_document.py   # A6: 複数文書統合
+    │   │       ├── a7_pattern_analysis.py # A7: パターン分析
+    │   │       └── a8_sod_detection.py    # A8: 職務分掌検出
+    │   └── infrastructure/      # インフラ抽象化
+    │       ├── llm_factory.py       # マルチLLM対応ファクトリー
+    │       ├── ocr_factory.py       # マルチOCR対応ファクトリー
+    │       ├── logging_config.py    # ロギング設定
+    │       └── job_storage/         # 非同期ジョブストレージ
+    │           ├── __init__.py          # ファクトリー・インターフェース
+    │           ├── memory.py            # インメモリ実装（開発用）
+    │           ├── azure_table.py       # Azure Table Storage
+    │           ├── azure_blob.py        # Azure Blob Storage
+    │           ├── azure_queue.py       # Azure Queue Storage
+    │           ├── aws_dynamodb.py      # AWS DynamoDB
+    │           ├── aws_sqs.py           # AWS SQS
+    │           ├── gcp_firestore.py     # GCP Firestore
+    │           └── gcp_tasks.py         # GCP Cloud Tasks
+    │
+    ├── platforms/               # プラットフォーム別エントリーポイント
+    │   ├── README.md            # プラットフォーム選択ガイド
+    │   ├── azure/               # Azure Functions
+    │   │   ├── function_app.py      # エントリーポイント
+    │   │   ├── host.json            # Functions設定
+    │   │   ├── requirements.txt     # Azure用依存関係
+    │   │   ├── deploy.ps1           # デプロイスクリプト
+    │   │   ├── local.settings.json  # ローカル開発設定（Git除外）
+    │   │   ├── .funcignore          # デプロイ除外設定
+    │   │   └── README.md            # Azure固有の手順書
+    │   ├── gcp/                 # GCP Cloud Functions
+    │   │   ├── main.py              # エントリーポイント
+    │   │   ├── requirements.txt     # GCP用依存関係
+    │   │   ├── deploy.ps1           # デプロイスクリプト
+    │   │   ├── .gcloudignore        # デプロイ除外設定
+    │   │   └── README.md            # GCP固有の手順書
+    │   └── aws/                 # AWS Lambda
+    │       ├── lambda_handler.py    # エントリーポイント
+    │       ├── requirements.txt     # AWS用依存関係
+    │       ├── deploy.ps1           # デプロイスクリプト
+    │       ├── .lambdaignore        # デプロイ除外設定
+    │       └── README.md            # AWS固有の手順書
+    │
+    ├── scripts/                 # ユーティリティスクリプト
+    │   ├── setup-azure-ad-auth.ps1  # Azure AD認証設定
+    │   ├── setup-gcp-iap-auth.ps1   # GCP IAM認証設定
+    │   ├── setup-aws-cognito-auth.ps1 # AWS Cognito認証設定
+    │   └── test-azure-ad-auth.ps1   # Azure AD認証テスト
+    │
+    ├── web/                     # Webフロントエンド（EXPORTモード用）
+    │   ├── index.html               # メインHTML
+    │   ├── styles.css               # スタイルシート
+    │   ├── app.js                   # JavaScript
+    │   └── staticwebapp.config.json # Azure Static Web Apps設定
+    │
+    ├── docs/                    # ドキュメント
+    │   ├── README.md                # ドキュメント目次
+    │   └── AZURE_COST_ESTIMATION.md # コスト見積書
+    │
+    ├── tests/                   # テストスイート
+    │   ├── conftest.py              # テスト設定・フィクスチャ
+    │   ├── test_base_task.py        # タスク基底クラステスト
+    │   ├── test_document_processor.py# ドキュメント処理テスト
+    │   └── ...                      # その他テスト
+    │
+    ├── requirements.txt         # 共通依存関係
+    ├── requirements-dev.txt     # 開発用依存関係
+    │
+    └── SampleData/              # テスト用サンプルデータ
+        ├── CLC-01/              # テストケース別フォルダ
+        ├── CLC-02/
+        └── ...
+    ```
+
+    ---
+
+    ## 4. コンポーネント詳細
+
+    ### 4.1 ExcelToJson.bas（VBAモジュール）
+
+    #### 目的
+    Excelシートのテストデータを読み込み、JSON形式に変換してAPIを呼び出す。
+
+    #### 主要関数
+
+    | 関数名 | 説明 |
+    |--------|------|
+    | `ProcessWithApi()` | メイン処理。バッチ処理でAPIを呼び出す |
+    | `LoadSettings()` | setting.jsonから設定を読み込む |
+    | `GenerateJsonForBatch()` | 指定範囲のデータをJSON変換 |
+    | `CallPowerShellApi()` | PowerShellスクリプトを実行 |
+    | `WriteResponseToExcel()` | APIレスポンスをExcelに書き戻す |
+
+    #### バッチ処理フロー
+
+    ```
+    1. setting.json読み込み（batchSize取得）
+    2. Excelの有効データ行を収集
+    3. batchSize件ずつループ:
+    a. JSON生成（GenerateJsonForBatch）
+    b. 一時ファイルに保存
+    c. PowerShell呼び出し（CallPowerShellApi）
+    d. レスポンスをExcelに反映
+    4. 完了メッセージ表示
+    ```
+
+    #### 設定構造 (SettingConfig)
+
+    ```vba
+    Private Type SettingConfig
+        DataStartRow As Long        ' データ開始行（通常2）
+        SheetName As String         ' 対象シート名（空白=アクティブシート）
+        BatchSize As Long           ' バッチサイズ（デフォルト10、推奨5-20）
+        ColID As String             ' ID列（例: "A"）
+        ColControlDescription As String
+        ColTestProcedure As String
+        ColEvidenceLink As String
+        ApiProvider As String       ' AZURE/GCP/AWS
+        ApiEndpoint As String       ' API URL
+        ApiKey As String            ' APIキー
+        ApiAuthHeader As String     ' 認証ヘッダー名
+        ColEvaluationResult As String
+        ColJudgmentBasis As String
+        ColDocumentReference As String
+        ColFileName As String
+        BooleanDisplayTrue As String   ' true表示（例: "有効"）
+        BooleanDisplayFalse As String  ' false表示（例: "非有効"）
+    End Type
+    ```
+
+    ---
+
+    ### 4.2 CallCloudApi.ps1（PowerShellスクリプト）
+
+    #### 目的
+    VBAから呼び出され、エビデンスファイルを収集してAPIを呼び出す。
+
+    #### パラメータ
+
+    | パラメータ | 必須 | 説明 |
+    |-----------|------|------|
+    | `-JsonFilePath` | Yes | 入力JSONファイルパス |
+    | `-Endpoint` | Yes | API URL |
+    | `-ApiKey` | Yes | APIキー |
+    | `-OutputFilePath` | Yes | 出力JSONファイルパス |
+    | `-Provider` | Yes | プロバイダー名（AZURE/GCP/AWS） |
+    | `-AuthHeader` | No | 認証ヘッダー名（デフォルトはプロバイダー依存） |
+
+    #### 処理フロー
+
+    ```
+    1. JSONファイル読み込み
+    2. 各アイテムのEvidenceLinkフォルダを走査
+    3. ファイルをBase64変換してEvidenceFiles配列に追加
+    4. プロバイダー別の認証ヘッダーを設定
+    5. API呼び出し（Invoke-WebRequest）
+    6. レスポンスを出力ファイルに保存
+    ```
+
+    #### 対応ファイル形式
+
+    | カテゴリ | 拡張子 |
+    |---------|--------|
+    | ドキュメント | .pdf, .doc, .docx |
+    | スプレッドシート | .xls, .xlsx, .xlsm, .csv |
+    | 画像 | .jpg, .jpeg, .png, .gif, .bmp, .webp, .tiff |
+    | テキスト | .txt, .log, .json, .xml |
+    | メール | .msg, .eml |
+
+    ---
+
+    ### 4.3 setting.json（設定ファイル）
+
+    ```json
     {
-        "ID": "CLC-01",
-        "ControlDescription": "取締役会は四半期ごとに経営成績をレビューし...",
-        "TestProcedure": "取締役会議事録を閲覧し、レビューの実施を確認する",
-        "EvidenceLink": "C:\\SampleData\\CLC-01",
-        "EvidenceFiles": [
-            {
-                "fileName": "議事録.pdf",
-                "extension": ".pdf",
-                "mimeType": "application/pdf",
-                "base64": "JVBERi0xLjQK..."
-            }
-        ]
+        "dataStartRow": 2,
+        "sheetName": "",
+        "batchSize": 10,
+        "columns": {
+            "ID": "A",
+            "ControlDescription": "C",
+            "TestProcedure": "D",
+            "EvidenceLink": "E"
+        },
+        "api": {
+            "provider": "AZURE",
+            "endpoint": "https://func-ic-test-evaluation.azurewebsites.net/api/evaluate",
+            "apiKey": "your-function-key",
+            "authHeader": "x-functions-key"
+        },
+        "responseMapping": {
+            "evaluationResult": "F",
+            "judgmentBasis": "G",
+            "documentReference": "H",
+            "fileName": "I"
+        },
+        "booleanDisplayTrue": "有効",
+        "booleanDisplayFalse": "非有効"
     }
-]
-```
+    ```
 
-#### /api/evaluate レスポンス形式
+    #### 設定項目
 
-```json
-[
-    {
-        "ID": "CLC-01",
-        "evaluationResult": true,
-        "judgmentBasis": "[A5:意味検索 + 推論] 有効 - 取締役会議事録に経営成績レビューの記載あり...",
-        "documentReference": "取締役会議事録 2024年第3四半期",
-        "fileName": "議事録.pdf",
-        "_debug": {
-            "confidence": 0.85,
-            "executionPlan": {
-                "analysis": { "control_type": "全社統制", ... },
-                "steps": [ { "task_type": "A5", ... } ],
-                "reasoning": "..."
-            },
-            "taskResults": [
+    | 項目 | 説明 | デフォルト |
+    |------|------|----------|
+    | `dataStartRow` | データ開始行 | 2 |
+    | `sheetName` | 対象シート名（空=アクティブ） | "" |
+    | `batchSize` | 1回のAPI呼び出しで処理する件数（5-20推奨） | 10 |
+    | `columns.*` | 入力列マッピング | - |
+    | `api.*` | API接続設定 | - |
+    | `responseMapping.*` | 出力列マッピング | - |
+    | `booleanDisplayTrue/False` | Boolean表示形式 | "有効"/"非有効" |
+
+    ---
+
+    ### 4.4 function_app.py（Azure Functions）
+
+    #### エンドポイント
+
+    | パス | メソッド | 説明 |
+    |------|---------|------|
+    | `/api/evaluate` | POST | テスト評価実行 |
+    | `/api/health` | GET | ヘルスチェック |
+    | `/api/config` | GET | 設定状態確認 |
+
+    #### /api/evaluate リクエスト形式
+
+    ```json
+    [
+        {
+            "ID": "CLC-01",
+            "ControlDescription": "取締役会は四半期ごとに経営成績をレビューし...",
+            "TestProcedure": "取締役会議事録を閲覧し、レビューの実施を確認する",
+            "EvidenceLink": "C:\\SampleData\\CLC-01",
+            "EvidenceFiles": [
                 {
-                    "taskType": "A5",
-                    "taskName": "意味検索 + 推論",
-                    "success": true,
-                    "confidence": 0.85,
-                    "reasoning": "...",
-                    "evidenceReferences": ["議事録.pdf"]
+                    "fileName": "議事録.pdf",
+                    "extension": ".pdf",
+                    "mimeType": "application/pdf",
+                    "base64": "JVBERi0xLjQK..."
                 }
             ]
         }
+    ]
+    ```
+
+    #### /api/evaluate レスポンス形式
+
+    ```json
+    [
+        {
+            "ID": "CLC-01",
+            "evaluationResult": true,
+            "judgmentBasis": "[A5:意味検索 + 推論] 有効 - 取締役会議事録に経営成績レビューの記載あり...",
+            "documentReference": "取締役会議事録 2024年第3四半期",
+            "fileName": "議事録.pdf",
+            "_debug": {
+                "confidence": 0.85,
+                "executionPlan": {
+                    "analysis": { "control_type": "全社統制", ... },
+                    "steps": [ { "task_type": "A5", ... } ],
+                    "reasoning": "..."
+                },
+                "taskResults": [
+                    {
+                        "taskType": "A5",
+                        "taskName": "意味検索 + 推論",
+                        "success": true,
+                        "confidence": 0.85,
+                        "reasoning": "...",
+                        "evidenceReferences": ["議事録.pdf"]
+                    }
+                ]
+            }
+        }
+    ]
+    ```
+
+    #### 非同期処理・タイムアウト制御
+
+    ```python
+    # サーバー側の同時実行制御
+    semaphore = asyncio.Semaphore(3)  # 最大3並列
+
+    # アイテム単位のタイムアウト
+    timeout_seconds = 90
+
+    # Functions全体のタイムアウト（host.json）
+    "functionTimeout": "00:10:00"  # 10分
+    ```
+
+    ---
+
+    ### 4.5 llm_factory.py（LLMファクトリ）
+
+    #### プロバイダー設定
+
+    | プロバイダー | 必須環境変数 |
+    |-------------|-------------|
+    | `AZURE` | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT_NAME` |
+    | `AZURE_FOUNDRY` | `AZURE_FOUNDRY_ENDPOINT`, `AZURE_FOUNDRY_API_KEY` |
+    | `GCP` | `GCP_PROJECT_ID`, `GCP_LOCATION` |
+    | `AWS` | `AWS_REGION` |
+
+    #### Temperature非対応モデル
+
+    以下のモデルは`temperature`パラメータをサポートしないため、自動的にスキップ:
+
+    ```python
+    MODELS_WITHOUT_TEMPERATURE = ["gpt-5-nano", "o1", "o1-mini", "o1-preview"]
+    ```
+
+    ---
+
+    ### 4.6 auditor_agent.py（監査オーケストレーター）
+
+    #### 処理フロー
+
+    ```
+    1. _create_plan(): LLMでタスク分解計画を作成
+    - 統制記述・テスト手続きを分析
+    - A1-A8から適切なタスクを選択
+    - 依存関係を考慮した実行順序を決定
+
+    2. _execute_plan(): 計画に従いタスクを実行
+    - 各タスクを順次実行
+    - 結果をログ出力
+
+    3. _aggregate_results(): 結果を集約
+    - 成功タスクの割合を計算
+    - 信頼度加重平均を算出
+    - 最終判定（有効/非有効）を決定
+    ```
+
+    #### プランナープロンプト
+
+    ```
+    あなたは内部統制監査のAIプランナーです。
+    与えられた統制記述とテスト手続きを分析し、最適な評価タスクの実行計画を立案してください。
+
+    【利用可能なタスクタイプ】
+    A1: 意味検索（セマンティックサーチ）
+    A2: 画像認識 + 情報抽出
+    A3: 構造化データ抽出
+    A4: 段階的推論 + 計算
+    A5: 意味検索 + 推論
+    A6: 複数文書統合理解
+    A7: パターン分析（時系列）
+    A8: 競合検出（SoD/職務分掌）
+    ```
+
+    ---
+
+    ## 5. 監査タスク詳細 (A1-A8)
+
+    ### 5.1 タスク一覧
+
+    | ID | タスク名 | 説明 | 主な用途 |
+    |----|---------|------|---------|
+    | A1 | 意味検索 | キーワード完全一致に頼らない意味的検索 | 規程文書の検索 |
+    | A2 | 画像認識 | PDF/画像から承認印・日付・氏名を抽出 | 承認証跡の確認 |
+    | A3 | データ抽出 | 表から数値抽出、単位・科目名の正規化 | 財務データの突合 |
+    | A4 | 段階的推論 | Chain-of-Thoughtで複雑な計算を検証 | 計算ロジックの確認 |
+    | A5 | 意味推論 | 抽象的な規程要求と実施記録の整合性判定 | コンプライアンス評価 |
+    | A6 | 複数文書統合 | バラバラな証跡からプロセスを再構成 | ワークフロー確認 |
+    | A7 | パターン分析 | 継続性確認、記録欠落の検出 | 定期処理の確認 |
+    | A8 | 職務分掌検出 | 権限の競合・SoD違反の検出 | 権限管理の確認 |
+
+    ### 5.2 基底クラス (BaseAuditTask)
+
+    ```python
+    class BaseAuditTask(ABC):
+        task_type: TaskType      # タスク種別（A1-A8）
+        task_name: str           # 日本語名
+        description: str         # 説明
+
+        def __init__(self, llm=None): ...
+        async def execute(self, context: AuditContext) -> TaskResult: ...
+    ```
+
+    ### 5.3 データ構造
+
+    #### AuditContext（入力）
+
+    ```python
+    @dataclass
+    class AuditContext:
+        item_id: str                    # テストID（例: "CLC-01"）
+        control_description: str        # 統制記述
+        test_procedure: str             # テスト手続き
+        evidence_link: str              # エビデンスフォルダパス
+        evidence_files: List[EvidenceFile]  # エビデンスファイル群
+        additional_context: Dict[str, Any]   # 追加コンテキスト
+    ```
+
+    #### TaskResult（出力）
+
+    ```python
+    @dataclass
+    class TaskResult:
+        task_type: TaskType             # タスク種別
+        task_name: str                  # タスク名
+        success: bool                   # 成功/失敗
+        result: Any                     # 詳細結果（JSON）
+        reasoning: str                  # 判定根拠
+        confidence: float               # 信頼度（0.0-1.0）
+        evidence_references: List[str]  # 参照エビデンス
+    ```
+
+    ---
+
+    ## 6. 処理モード
+
+    本システムは、用途に応じて複数の処理モードを提供しています。
+
+    ### 6.1 同期モードと非同期モード
+
+    Azure Functions等のサーバーレス環境では、230秒のタイムアウト制限があります。
+    複数のテスト項目を評価する場合、この制限を超える可能性があるため、非同期モードを推奨します。
+
+    ```text
+    【同期モード（asyncMode: false）】
+    Excel ──POST /api/evaluate──▶ API ──待機──▶ 結果
+            └────────最大230秒で504タイムアウトの可能性────────┘
+
+    【非同期モード（asyncMode: true、推奨）】
+    Excel ──POST /api/evaluate/submit──▶ API ──即座に──▶ job_id返却
+                                            │
+                                            ▼ バックグラウンド処理
+                                        ┌─────────────────┐
+                                        │ 評価処理を実行  │
+                                        └─────────────────┘
+                                            │
+    Excel ◀──GET /api/evaluate/status────────┤ ポーリング
+    Excel ◀──GET /api/evaluate/results───────┘ 結果取得
+    ```
+
+    #### 設定方法（setting.json）
+
+    ```json
+    {
+        "asyncMode": true,
+        "pollingIntervalSec": 5
     }
-]
-```
+    ```
 
-#### 非同期処理・タイムアウト制御
+    | 設定項目 | 説明 | デフォルト |
+    |---------|------|-----------|
+    | `asyncMode` | 非同期モードの有効/無効 | `true`（推奨） |
+    | `pollingIntervalSec` | ポーリング間隔（秒） | `5` |
 
-```python
-# サーバー側の同時実行制御
-semaphore = asyncio.Semaphore(3)  # 最大3並列
+    ### 6.2 APIクライアント方式
 
-# アイテム単位のタイムアウト
-timeout_seconds = 90
+    2つのAPI呼び出し方式を選択可能です：
 
-# Functions全体のタイムアウト（host.json）
-"functionTimeout": "00:10:00"  # 10分
-```
+    | 方式 | 設定値 | 特徴 | 推奨 |
+    |------|--------|------|------|
+    | PowerShell | `POWERSHELL` | 大容量ファイル対応、安定性高 | **推奨** |
+    | VBA Native | `VBA` | PowerShell不可環境用、COM経由HTTP通信 | 特殊環境用 |
+    | Export/Import | `EXPORT` | PowerShell/VBA両方禁止環境用、Webブラウザ経由 | 最終手段 |
 
----
+    #### 設定方法（setting.json）
 
-### 4.5 llm_factory.py（LLMファクトリ）
-
-#### プロバイダー設定
-
-| プロバイダー | 必須環境変数 |
-|-------------|-------------|
-| `AZURE` | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT_NAME` |
-| `AZURE_FOUNDRY` | `AZURE_FOUNDRY_ENDPOINT`, `AZURE_FOUNDRY_API_KEY` |
-| `GCP` | `GCP_PROJECT_ID`, `GCP_LOCATION` |
-| `AWS` | `AWS_REGION` |
-
-#### Temperature非対応モデル
-
-以下のモデルは`temperature`パラメータをサポートしないため、自動的にスキップ:
-
-```python
-MODELS_WITHOUT_TEMPERATURE = ["gpt-5-nano", "o1", "o1-mini", "o1-preview"]
-```
-
----
-
-### 4.6 auditor_agent.py（監査オーケストレーター）
-
-#### 処理フロー
-
-```
-1. _create_plan(): LLMでタスク分解計画を作成
-   - 統制記述・テスト手続きを分析
-   - A1-A8から適切なタスクを選択
-   - 依存関係を考慮した実行順序を決定
-
-2. _execute_plan(): 計画に従いタスクを実行
-   - 各タスクを順次実行
-   - 結果をログ出力
-
-3. _aggregate_results(): 結果を集約
-   - 成功タスクの割合を計算
-   - 信頼度加重平均を算出
-   - 最終判定（有効/非有効）を決定
-```
-
-#### プランナープロンプト
-
-```
-あなたは内部統制監査のAIプランナーです。
-与えられた統制記述とテスト手続きを分析し、最適な評価タスクの実行計画を立案してください。
-
-【利用可能なタスクタイプ】
-A1: 意味検索（セマンティックサーチ）
-A2: 画像認識 + 情報抽出
-A3: 構造化データ抽出
-A4: 段階的推論 + 計算
-A5: 意味検索 + 推論
-A6: 複数文書統合理解
-A7: パターン分析（時系列）
-A8: 競合検出（SoD/職務分掌）
-```
-
----
-
-## 5. 監査タスク詳細 (A1-A8)
-
-### 5.1 タスク一覧
-
-| ID | タスク名 | 説明 | 主な用途 |
-|----|---------|------|---------|
-| A1 | 意味検索 | キーワード完全一致に頼らない意味的検索 | 規程文書の検索 |
-| A2 | 画像認識 | PDF/画像から承認印・日付・氏名を抽出 | 承認証跡の確認 |
-| A3 | データ抽出 | 表から数値抽出、単位・科目名の正規化 | 財務データの突合 |
-| A4 | 段階的推論 | Chain-of-Thoughtで複雑な計算を検証 | 計算ロジックの確認 |
-| A5 | 意味推論 | 抽象的な規程要求と実施記録の整合性判定 | コンプライアンス評価 |
-| A6 | 複数文書統合 | バラバラな証跡からプロセスを再構成 | ワークフロー確認 |
-| A7 | パターン分析 | 継続性確認、記録欠落の検出 | 定期処理の確認 |
-| A8 | 職務分掌検出 | 権限の競合・SoD違反の検出 | 権限管理の確認 |
-
-### 5.2 基底クラス (BaseAuditTask)
-
-```python
-class BaseAuditTask(ABC):
-    task_type: TaskType      # タスク種別（A1-A8）
-    task_name: str           # 日本語名
-    description: str         # 説明
-
-    def __init__(self, llm=None): ...
-    async def execute(self, context: AuditContext) -> TaskResult: ...
-```
-
-### 5.3 データ構造
-
-#### AuditContext（入力）
-
-```python
-@dataclass
-class AuditContext:
-    item_id: str                    # テストID（例: "CLC-01"）
-    control_description: str        # 統制記述
-    test_procedure: str             # テスト手続き
-    evidence_link: str              # エビデンスフォルダパス
-    evidence_files: List[EvidenceFile]  # エビデンスファイル群
-    additional_context: Dict[str, Any]   # 追加コンテキスト
-```
-
-#### TaskResult（出力）
-
-```python
-@dataclass
-class TaskResult:
-    task_type: TaskType             # タスク種別
-    task_name: str                  # タスク名
-    success: bool                   # 成功/失敗
-    result: Any                     # 詳細結果（JSON）
-    reasoning: str                  # 判定根拠
-    confidence: float               # 信頼度（0.0-1.0）
-    evidence_references: List[str]  # 参照エビデンス
-```
-
----
-
-## 6. 環境構築
-
-### 6.1 前提条件
-
-本システムを動作させるために必要なソフトウェアの一覧です。
-
-| ソフトウェア | バージョン | 用途 | インストール方法 |
-| ------------ | ---------- | ---- | ---------------- |
-| Python | 3.11以上 | サーバーサイド実行 | python.org からダウンロード |
-| Azure Functions Core Tools | v4以上 | ローカル開発・デプロイ | npm または直接インストール |
-| PowerShell | 5.1以上 | API呼び出しスクリプト | Windows標準搭載 |
-| Excel | 2016以上 | VBAマクロ実行 | Microsoft Office |
-| Git | 最新版 | ソースコード管理 | git-scm.com |
-
-#### 各ソフトウェアのインストール確認方法
-
-```powershell
-# Pythonバージョン確認
-python --version
-# 出力例: Python 3.11.5
-
-# Azure Functions Core Toolsバージョン確認
-func --version
-# 出力例: 4.0.5455
-
-# PowerShellバージョン確認
-$PSVersionTable.PSVersion
-# 出力例: 5.1.22621.2506
-
-# Gitバージョン確認
-git --version
-# 出力例: git version 2.42.0.windows.2
-```
-
-### 6.2 ローカル環境セットアップ（詳細手順）
-
-#### ステップ1: プロジェクトのクローン
-
-```powershell
-# 作業ディレクトリに移動
-cd C:\Users\your-name\Documents\VSCode_Dev
-
-# リポジトリをクローン
-git clone https://github.com/your-org/ic-test-ai-agent.git
-
-# プロジェクトディレクトリに移動
-cd ic-test-ai-agent
-```
-
-#### ステップ2: Python仮想環境の作成
-
-```powershell
-# プラットフォームディレクトリに移動
-cd platforms\azure
-
-# 仮想環境を作成
-python -m venv .venv
-
-# 仮想環境を有効化
-.\.venv\Scripts\Activate.ps1
-
-# 有効化の確認（プロンプトに(.venv)が表示される）
-# (.venv) PS C:\...\platforms\azure>
-```
-
-#### ステップ3: 依存パッケージのインストール
-
-```powershell
-# pipを最新版に更新
-python -m pip install --upgrade pip
-
-# 依存パッケージをインストール
-pip install -r requirements.txt
-
-# インストール確認
-pip list
-```
-
-#### ステップ4: 環境変数の設定
-
-```powershell
-# プロジェクトルートに戻る
-cd ..\..
-
-# サンプルファイルをコピー
-Copy-Item .env.example .env
-
-# .envファイルを編集
-notepad .env
-```
-
-.envファイルの設定例:
-
-```ini
-# ==================================================
-# LLMプロバイダー設定
-# ==================================================
-LLM_PROVIDER=AZURE_FOUNDRY
-
-# Azure AI Foundry設定
-AZURE_FOUNDRY_ENDPOINT=https://your-project.openai.azure.com/
-AZURE_FOUNDRY_API_KEY=your-api-key-here
-AZURE_FOUNDRY_MODEL=gpt-4o
-AZURE_FOUNDRY_API_VERSION=2024-02-15-preview
-
-# ==================================================
-# OCRプロバイダー設定（オプション）
-# ==================================================
-OCR_PROVIDER=AZURE
-AZURE_DOC_INTELLIGENCE_ENDPOINT=https://your-doc-intel.cognitiveservices.azure.com/
-AZURE_DOC_INTELLIGENCE_KEY=your-key-here
-```
-
-#### ステップ5: Azure Functionsランタイム設定
-
-```powershell
-# platforms/azureディレクトリに移動
-cd platforms\azure
-
-# local.settings.jsonを作成
-@"
-{
-    "IsEncrypted": false,
-    "Values": {
-        "AzureWebJobsStorage": "UseDevelopmentStorage=true",
-        "FUNCTIONS_WORKER_RUNTIME": "python"
+    ```json
+    {
+        "apiClient": "POWERSHELL"
     }
-}
-"@ | Out-File -FilePath local.settings.json -Encoding utf8
-```
-
-#### ステップ6: ローカルサーバーの起動
-
-```powershell
-# Azure Functionsをローカルで起動
-func start
-
-# 正常起動時の出力例:
-# Azure Functions Core Tools
-# Core Tools Version: 4.0.5455
-# Function Runtime Version: 4.27.5.21554
-#
-# Functions:
-#   evaluate: [POST] http://localhost:7071/api/evaluate
-#   health: [GET] http://localhost:7071/api/health
-#   config: [GET] http://localhost:7071/api/config
-```
-
-#### ステップ7: 動作確認
-
-```powershell
-# 別のPowerShellウィンドウを開いて実行
-
-# ヘルスチェック
-Invoke-RestMethod -Uri "http://localhost:7071/api/health" -Method GET
-
-# 設定確認
-Invoke-RestMethod -Uri "http://localhost:7071/api/config" -Method GET
-```
-
-### 6.3 Azureへのデプロイ（詳細手順）
-
-#### ステップ1: Azureリソースの作成
-
-```powershell
-# Azureにログイン
-az login
-
-# リソースグループを作成
-az group create --name rg-ic-test-evaluation --location japaneast
-
-# ストレージアカウントを作成
-az storage account create `
-    --name stictestevaluation `
-    --resource-group rg-ic-test-evaluation `
-    --location japaneast `
-    --sku Standard_LRS
-
-# Function Appを作成
-az functionapp create `
-    --name func-ic-test-evaluation `
-    --resource-group rg-ic-test-evaluation `
-    --storage-account stictestevaluation `
-    --consumption-plan-location japaneast `
-    --runtime python `
-    --runtime-version 3.11 `
-    --functions-version 4
-```
-
-#### ステップ2: 環境変数の設定
-
-```powershell
-# 環境変数を設定
-az functionapp config appsettings set `
-    --name func-ic-test-evaluation `
-    --resource-group rg-ic-test-evaluation `
-    --settings `
-        LLM_PROVIDER=AZURE_FOUNDRY `
-        AZURE_FOUNDRY_ENDPOINT=https://your-project.openai.azure.com/ `
-        AZURE_FOUNDRY_API_KEY=your-api-key `
-        AZURE_FOUNDRY_MODEL=gpt-4o
-```
-
-#### ステップ3: デプロイ
-
-```powershell
-# platforms/azureディレクトリから実行
-cd platforms\azure
-
-# デプロイ
-func azure functionapp publish func-ic-test-evaluation
-
-# デプロイ確認
-az functionapp show --name func-ic-test-evaluation --resource-group rg-ic-test-evaluation
-```
-
----
-
-## 7. 使用方法
-
-### 7.1 Excelシートの準備（詳細）
-
-#### 7.1.1 シートの列構成
-
-テストデータシートは以下の列構成で作成します:
-
-| 列 | ヘッダー名 | 説明 | 入力例 |
-| -- | ---------- | ---- | ------ |
-| A | ID | テスト項目の一意識別子 | CLC-01 |
-| B | (予備) | 必要に応じて使用 | - |
-| C | ControlDescription | 統制の説明文 | 取締役会は四半期ごとに... |
-| D | TestProcedure | テスト手続きの説明 | 取締役会議事録を閲覧し... |
-| E | EvidenceLink | エビデンスフォルダのパス | C:\SampleData\CLC-01 |
-| F | EvaluationResult | 【出力】評価結果 | 有効 / 非有効 |
-| G | JudgmentBasis | 【出力】判定根拠 | AI生成テキスト |
-| H | DocumentReference | 【出力】参照文書 | 議事録2024年Q3 |
-| I | FileName | 【出力】参照ファイル名 | 議事録.pdf |
-
-#### 7.1.2 エビデンスフォルダの準備
-
-```text
-C:\SampleData\
-├── CLC-01\                    ← テストID別フォルダ
-│   ├── 議事録.pdf             ← エビデンスファイル
-│   ├── 承認書.xlsx
-│   └── スクリーンショット.png
-├── CLC-02\
-│   └── 申請書.pdf
-└── CLC-03\
-    ├── 規程.docx
-    └── 実施記録.xlsx
-```
-
-#### 7.1.3 対応ファイル形式
-
-| カテゴリ | 拡張子 | 処理方法 |
-| -------- | ------ | -------- |
-| PDF | .pdf | テキスト抽出 + OCR（必要時） |
-| Word | .doc, .docx | テキスト抽出 |
-| Excel | .xls, .xlsx, .xlsm, .csv | セルデータ抽出 |
-| 画像 | .jpg, .jpeg, .png, .gif, .bmp, .webp, .tiff | OCR + 画像認識 |
-| テキスト | .txt, .log, .json, .xml | 直接読み込み |
-| メール | .msg, .eml | 本文・添付抽出 |
-
-### 7.2 VBAマクロの実行
-
-#### ステップ1: VBAモジュールのインポート
-
-```text
-1. Excelを開く
-2. Alt + F11 でVBAエディタを開く
-3. [ファイル] → [ファイルのインポート]
-4. ExcelToJson.bas を選択
-5. VBAエディタを閉じる
-```
-
-#### ステップ2: 設定ファイルの確認
-
-setting.jsonがプロジェクトルートに存在することを確認:
-
-```json
-{
-    "dataStartRow": 2,
-    "sheetName": "",
-    "batchSize": 3,
-    "columns": {
-        "ID": "A",
-        "ControlDescription": "C",
-        "TestProcedure": "D",
-        "EvidenceLink": "E"
-    },
-    "api": {
-        "provider": "AZURE",
-        "endpoint": "https://func-ic-test-evaluation.azurewebsites.net/api/evaluate",
-        "apiKey": "your-function-key",
-        "authHeader": "x-functions-key"
-    },
-    "responseMapping": {
-        "evaluationResult": "F",
-        "judgmentBasis": "G",
-        "documentReference": "H",
-        "fileName": "I"
-    },
-    "booleanDisplayTrue": "有効",
-    "booleanDisplayFalse": "非有効"
-}
-```
-
-#### ステップ3: マクロの実行
-
-```text
-1. Alt + F8 でマクロダイアログを開く
-2. ProcessWithApi を選択
-3. [実行] をクリック
-4. 処理完了を待つ（進捗がステータスバーに表示）
-5. F〜I列に結果が書き込まれる
-```
-
-### 7.3 バッチサイズの調整
-
-バッチサイズは1回のAPI呼び出しで処理するテスト項目数です。
-
-| バッチサイズ | 処理速度 | タイムアウトリスク | 推奨ケース |
-| ------------ | -------- | ------------------ | ---------- |
-| 1 | 遅い | 低い | 大きなエビデンスファイル |
-| 3 | 中程度 | 中程度 | 標準的な使用 |
-| 5 | 速い | 高い | 小さなファイルのみ |
-
----
-
-## 8. トラブルシューティング
-
-### 8.1 エラー別対処法
-
-#### 8.1.1 504 Gateway Timeout
-
-```text
-【症状】
-API呼び出しが「504 Gateway Timeout」でエラー終了する
-
-【原因】
-処理時間がタイムアウト設定（デフォルト5分）を超過
-
-【対策】
-1. setting.json の batchSize を減らす（3 → 1）
-2. host.json の functionTimeout を延長:
-   {
-     "functionTimeout": "00:10:00"  // 10分に延長
-   }
-3. エビデンスファイルを軽量化（PDFの最適化等）
-```
-
-#### 8.1.2 401 Unauthorized
-
-```text
-【症状】
-「401 Unauthorized」または「認証エラー」
-
-【原因】
-APIキーが無効または未設定
-
-【対策】
-1. setting.json の api.apiKey を確認
-2. Azure Portalで Function App のキーを再取得
-3. .env の LLM関連キーを確認
-```
-
-#### 8.1.3 LLM not configured
-
-```text
-【症状】
-「LLM not configured」エラー
-
-【原因】
-LLMプロバイダーの環境変数が未設定
-
-【対策】
-1. /api/config エンドポイントにアクセス
-2. missing_vars を確認
-3. 不足している環境変数を .env に追加
-```
-
-#### 8.1.4 Temperature parameter error
-
-```text
-【症状】
-「Temperature parameter not supported」
-
-【原因】
-o1シリーズなど一部モデルはtemperatureパラメータ非対応
-
-【対策】
-自動対応済み。llm_factory.py で自動スキップ。
-手動対応が必要な場合は MODELS_WITHOUT_TEMPERATURE に追加。
-```
-
-### 8.2 ログの確認方法
-
-#### ローカル環境
-
-```powershell
-# func start のコンソール出力を確認
-# または Application Insights をローカルに設定
-```
-
-#### Azure環境
-
-```powershell
-# Azure Portal → Function App → ログストリーム
-
-# または CLI で確認
-az functionapp log tail --name func-ic-test-evaluation --resource-group rg-ic-test-evaluation
-```
-
----
-
-## 9. セキュリティ考慮事項
-
-### 9.1 APIキーの管理
-
-| 方法 | セキュリティレベル | 推奨環境 |
-| ---- | ------------------ | -------- |
-| .envファイル | 低（開発用） | ローカル開発 |
-| Azure App Settings | 中 | 小規模本番 |
-| Azure Key Vault | 高 | エンタープライズ |
-
-#### Key Vault使用時の設定
-
-```powershell
-# Key Vaultの作成
-az keyvault create --name kv-ic-test-eval --resource-group rg-ic-test-evaluation
-
-# シークレットの追加
-az keyvault secret set --vault-name kv-ic-test-eval --name "LLM-API-KEY" --value "your-key"
-
-# Function AppにKey Vault参照を設定
-az functionapp config appsettings set `
-    --name func-ic-test-evaluation `
-    --resource-group rg-ic-test-evaluation `
-    --settings "AZURE_FOUNDRY_API_KEY=@Microsoft.KeyVault(SecretUri=https://kv-ic-test-eval.vault.azure.net/secrets/LLM-API-KEY/)"
-```
-
-### 9.2 データ保護
-
-- エビデンスファイルはBase64エンコードで送信
-- HTTPS暗号化通信を使用
-- 機密データはメモリ上で処理後速やかに破棄
-
-### 9.3 ネットワークセキュリティ
-
-- VNet統合による通信保護を検討
-- IP制限の設定を推奨
-- Private Endpointの利用を検討
-
----
-
-## 10. 技術解説
-
-### 10.1 使用技術スタック
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                        技術スタック                             │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  【クライアント層】                                             │
-│  ┌──────────────┐  ┌──────────────┐                            │
-│  │  Excel VBA   │  │  PowerShell  │                            │
-│  │  (マクロ)     │  │  (スクリプト) │                            │
-│  └──────────────┘  └──────────────┘                            │
-│                                                                 │
-│  【API層】                                                      │
-│  ┌──────────────────────────────────────────────────────┐      │
-│  │  Azure Functions / GCP Cloud Functions / AWS Lambda  │      │
-│  │  ┌────────────────────────────────────────────────┐  │      │
-│  │  │  Python 3.11 + async/await                     │  │      │
-│  │  └────────────────────────────────────────────────┘  │      │
-│  └──────────────────────────────────────────────────────┘      │
-│                                                                 │
-│  【AIオーケストレーション層】                                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │  LangChain   │  │  LangGraph   │  │   Factory    │         │
-│  │  (AI連携)    │  │  (ワークフロー)│  │  Pattern     │         │
-│  └──────────────┘  └──────────────┘  └──────────────┘         │
-│                                                                 │
-│  【LLMプロバイダー層】                                          │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐          │
-│  │  Azure   │ │  Azure   │ │   GCP    │ │   AWS    │          │
-│  │  Foundry │ │  OpenAI  │ │  Vertex  │ │  Bedrock │          │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘          │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### 10.2 LangChainとは
-
-LangChainは、大規模言語モデル（LLM）を活用したアプリケーション開発のためのフレームワークです。
-
-```text
-【LangChainの役割】
-
-従来のアプローチ:
-  アプリ ──直接呼び出し──▶ OpenAI API
-  アプリ ──直接呼び出し──▶ Azure OpenAI API  ← 個別実装が必要
-  アプリ ──直接呼び出し──▶ Vertex AI API
-
-LangChainを使用:
-  アプリ ──統一インターフェース──▶ LangChain ──▶ 各種LLM
-                                         ├──▶ OpenAI
-                                         ├──▶ Azure OpenAI
-                                         ├──▶ Vertex AI
-                                         └──▶ Bedrock
-```
-
-### 10.3 LangGraphとは
-
-LangGraphは、複雑なAIワークフローをグラフ構造で定義・実行するライブラリです。
-
-```text
-【LangGraphのワークフロー例】
-
-      ┌──────────────┐
-      │    開始      │
-      └──────┬───────┘
+    ```
+
+    #### EXPORTモード（Webフロントエンド連携）
+
+    PowerShellとVBA COMの両方が禁止されている環境向けの代替手段です。
+
+    ```text
+    【ワークフロー】
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ Excel                                                           │
+    │  1. ProcessForExport マクロ実行                                 │
+    │     → export_YYYYMMDD_HHMMSS.json が生成される                 │
+    └─────────────────────────────────────────────────────────────────┘
+                                  ↓
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ Webブラウザ (web/index.html)                                    │
+    │  2. JSONファイルをドラッグ&ドロップでアップロード               │
+    │  3. APIエンドポイントとキーを入力                               │
+    │  4. 「AI評価を開始」をクリック                                  │
+    │  5. 処理完了後、結果JSONをダウンロード                          │
+    └─────────────────────────────────────────────────────────────────┘
+                                  ↓
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ Excel                                                           │
+    │  6. ImportResults マクロ実行                                    │
+    │  7. ダウンロードしたJSONファイルを選択                          │
+    │  8. 評価結果がExcelに反映される                                 │
+    └─────────────────────────────────────────────────────────────────┘
+    ```
+
+    **VBAマクロ**:
+
+    | マクロ名 | 機能 |
+    |----------|------|
+    | `ProcessForExport` | 評価用JSONをエクスポート |
+    | `ImportResults` | 評価結果JSONをインポート |
+
+    **Webフロントエンド**:
+
+    - 場所: `web/index.html`
+    - 対応ブラウザ: Chrome 80+, Firefox 75+, Safari 13+, Edge 80+
+    - デプロイ: ローカル使用 または Azure Static Web Apps
+
+    ### 6.3 セルフリフレクション機能
+
+    AI評価の品質向上のため、評価結果を自動的にレビュー・修正する機能です。
+
+    ```text
+    【処理フロー】
+    1. execute_task: 初期評価を実行
+        ↓
+    2. review_judgment: 評価結果をレビュー
+        ↓
+    3. refine_judgment: フィードバックに基づき修正
+        ↓
+    4. finalize: 最終結果を出力
+    ```
+
+    #### 出力フィールド
+
+    | フィールド | 説明 |
+    |-----------|------|
+    | `evaluationResult` | 評価結果（true=有効, false=非有効） |
+    | `executionPlanSummary` | 実行計画の概要 |
+    | `judgmentBasis` | 判断根拠（詳細説明） |
+    | `documentReference` | 参照文書（引用情報） |
+    | `evidenceFileNames` | 証跡ファイル名リスト |
+
+    ### 6.4 大容量証跡ファイル対応
+
+    Azure Table Storageの64KB制限を回避するため、**全ての証跡ファイル**をBlob Storageに自動分離します。
+
+    > **重要**: Azure Table Storageは1エンティティあたり64KBの制限があります。
+    > 複数の小さな証跡ファイル（例: 10KB × 10ファイル = 100KB）でも合計で制限を超える
+    > 可能性があるため、サイズに関わらず全ての証跡ファイルをBlob Storageに保存します。
+
+    ```text
+    【処理フロー】
+    送信時: 全ての証跡ファイル ──▶ Blob Storage保存 ──▶ 参照情報に置換
+                                                        │
+                                                        ▼
+                                              Table Storageに参照のみ保存
+                                              （64KB制限を確実に回避）
+
+    取得時: 参照 ──▶ Blob Storageから復元 ──▶ 評価処理
+    ```
+
+    #### Blobストレージ構造
+
+    ```text
+    evidence-files/                          # Blobコンテナ
+    └── {job_id}/                            # ジョブ別フォルダ
+        └── {item_id}/                       # アイテム別フォルダ
+            ├── 0_議事録.pdf                 # 証跡ファイル（Base64）
+            ├── 1_承認書.xlsx
+            └── 2_スクリーンショット.png
+    ```
+
+    #### 必要な環境変数
+
+    ```ini
+    AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...
+    ```
+
+    ---
+
+    ## 7. 環境構築
+
+    ### 7.1 前提条件
+
+    本システムを動作させるために必要なソフトウェアの一覧です。
+
+    | ソフトウェア | バージョン | 用途 | インストール方法 |
+    | ------------ | ---------- | ---- | ---------------- |
+    | Python | 3.11以上 | サーバーサイド実行 | python.org からダウンロード |
+    | Azure Functions Core Tools | v4以上 | ローカル開発・デプロイ | npm または直接インストール |
+    | PowerShell | 5.1以上 | API呼び出しスクリプト | Windows標準搭載 |
+    | Excel | 2016以上 | VBAマクロ実行 | Microsoft Office |
+    | Git | 最新版 | ソースコード管理 | git-scm.com |
+
+    #### 各ソフトウェアのインストール確認方法
+
+    ```powershell
+    # Pythonバージョン確認
+    python --version
+    # 出力例: Python 3.11.5
+
+    # Azure Functions Core Toolsバージョン確認
+    func --version
+    # 出力例: 4.0.5455
+
+    # PowerShellバージョン確認
+    $PSVersionTable.PSVersion
+    # 出力例: 5.1.22621.2506
+
+    # Gitバージョン確認
+    git --version
+    # 出力例: git version 2.42.0.windows.2
+    ```
+
+    ### 7.2 ローカル環境セットアップ（詳細手順）
+
+    #### ステップ1: プロジェクトのクローン
+
+    ```powershell
+    # 作業ディレクトリに移動
+    cd C:\Users\your-name\Documents\VSCode_Dev
+
+    # リポジトリをクローン
+    git clone https://github.com/your-org/ic-test-ai-agent.git
+
+    # プロジェクトディレクトリに移動
+    cd ic-test-ai-agent
+    ```
+
+    #### ステップ2: Python仮想環境の作成
+
+    ```powershell
+    # プラットフォームディレクトリに移動
+    cd platforms\azure
+
+    # 仮想環境を作成
+    python -m venv .venv
+
+    # 仮想環境を有効化
+    .\.venv\Scripts\Activate.ps1
+
+    # 有効化の確認（プロンプトに(.venv)が表示される）
+    # (.venv) PS C:\...\platforms\azure>
+    ```
+
+    #### ステップ3: 依存パッケージのインストール
+
+    ```powershell
+    # pipを最新版に更新
+    python -m pip install --upgrade pip
+
+    # 依存パッケージをインストール
+    pip install -r requirements.txt
+
+    # インストール確認
+    pip list
+    ```
+
+    #### ステップ4: 環境変数の設定
+
+    ```powershell
+    # プロジェクトルートに戻る
+    cd ..\..
+
+    # サンプルファイルをコピー
+    Copy-Item .env.example .env
+
+    # .envファイルを編集
+    notepad .env
+    ```
+
+    .envファイルの設定例:
+
+    ```ini
+    # ==================================================
+    # LLMプロバイダー設定
+    # ==================================================
+    LLM_PROVIDER=AZURE_FOUNDRY
+
+    # Azure AI Foundry設定
+    AZURE_FOUNDRY_ENDPOINT=https://your-project.openai.azure.com/
+    AZURE_FOUNDRY_API_KEY=your-api-key-here
+    AZURE_FOUNDRY_MODEL=gpt-4o
+    AZURE_FOUNDRY_API_VERSION=2024-02-15-preview
+
+    # ==================================================
+    # OCRプロバイダー設定（オプション）
+    # ==================================================
+    OCR_PROVIDER=AZURE
+    AZURE_DOC_INTELLIGENCE_ENDPOINT=https://your-doc-intel.cognitiveservices.azure.com/
+    AZURE_DOC_INTELLIGENCE_KEY=your-key-here
+    ```
+
+    #### ステップ5: Azure Functionsランタイム設定
+
+    ```powershell
+    # platforms/azureディレクトリに移動
+    cd platforms\azure
+
+    # local.settings.jsonを作成
+    @"
+    {
+        "IsEncrypted": false,
+        "Values": {
+            "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+            "FUNCTIONS_WORKER_RUNTIME": "python"
+        }
+    }
+    "@ | Out-File -FilePath local.settings.json -Encoding utf8
+    ```
+
+    #### ステップ6: ローカルサーバーの起動
+
+    ```powershell
+    # Azure Functionsをローカルで起動
+    func start
+
+    # 正常起動時の出力例:
+    # Azure Functions Core Tools
+    # Core Tools Version: 4.0.5455
+    # Function Runtime Version: 4.27.5.21554
+    #
+    # Functions:
+    #   evaluate: [POST] http://localhost:7071/api/evaluate
+    #   health: [GET] http://localhost:7071/api/health
+    #   config: [GET] http://localhost:7071/api/config
+    ```
+
+    #### ステップ7: 動作確認
+
+    ```powershell
+    # 別のPowerShellウィンドウを開いて実行
+
+    # ヘルスチェック
+    Invoke-RestMethod -Uri "http://localhost:7071/api/health" -Method GET
+
+    # 設定確認
+    Invoke-RestMethod -Uri "http://localhost:7071/api/config" -Method GET
+    ```
+
+    ### 7.3 Azureへのデプロイ（詳細手順）
+
+    #### ステップ1: Azureリソースの作成
+
+    ```powershell
+    # Azureにログイン
+    az login
+
+    # リソースグループを作成
+    az group create --name rg-ic-test-evaluation --location japaneast
+
+    # ストレージアカウントを作成
+    az storage account create `
+        --name stictestevaluation `
+        --resource-group rg-ic-test-evaluation `
+        --location japaneast `
+        --sku Standard_LRS
+
+    # Function Appを作成
+    az functionapp create `
+        --name func-ic-test-evaluation `
+        --resource-group rg-ic-test-evaluation `
+        --storage-account stictestevaluation `
+        --consumption-plan-location japaneast `
+        --runtime python `
+        --runtime-version 3.11 `
+        --functions-version 4
+    ```
+
+    #### ステップ2: 環境変数の設定
+
+    ```powershell
+    # 環境変数を設定
+    az functionapp config appsettings set `
+        --name func-ic-test-evaluation `
+        --resource-group rg-ic-test-evaluation `
+        --settings `
+            LLM_PROVIDER=AZURE_FOUNDRY `
+            AZURE_FOUNDRY_ENDPOINT=https://your-project.openai.azure.com/ `
+            AZURE_FOUNDRY_API_KEY=your-api-key `
+            AZURE_FOUNDRY_MODEL=gpt-4o
+    ```
+
+    #### ステップ3: デプロイ
+
+    ```powershell
+    # platforms/azureディレクトリから実行
+    cd platforms\azure
+
+    # デプロイ
+    func azure functionapp publish func-ic-test-evaluation
+
+    # デプロイ確認
+    az functionapp show --name func-ic-test-evaluation --resource-group rg-ic-test-evaluation
+    ```
+
+    ---
+
+    ## 8. 使用方法
+
+    ### 8.1 Excelシートの準備（詳細）
+
+    #### 8.1.1 シートの列構成
+
+    テストデータシートは以下の列構成で作成します:
+
+    | 列 | ヘッダー名 | 説明 | 入力例 |
+    | -- | ---------- | ---- | ------ |
+    | A | ID | テスト項目の一意識別子 | CLC-01 |
+    | B | (予備) | 必要に応じて使用 | - |
+    | C | ControlDescription | 統制の説明文 | 取締役会は四半期ごとに... |
+    | D | TestProcedure | テスト手続きの説明 | 取締役会議事録を閲覧し... |
+    | E | EvidenceLink | エビデンスフォルダのパス | C:\SampleData\CLC-01 |
+    | F | EvaluationResult | 【出力】評価結果 | 有効 / 非有効 |
+    | G | JudgmentBasis | 【出力】判定根拠 | AI生成テキスト |
+    | H | DocumentReference | 【出力】参照文書 | 議事録2024年Q3 |
+    | I | FileName | 【出力】参照ファイル名 | 議事録.pdf |
+
+    #### 8.1.2 エビデンスフォルダの準備
+
+    ```text
+    C:\SampleData\
+    ├── CLC-01\                    ← テストID別フォルダ
+    │   ├── 議事録.pdf             ← エビデンスファイル
+    │   ├── 承認書.xlsx
+    │   └── スクリーンショット.png
+    ├── CLC-02\
+    │   └── 申請書.pdf
+    └── CLC-03\
+        ├── 規程.docx
+        └── 実施記録.xlsx
+    ```
+
+    #### 8.1.3 対応ファイル形式
+
+    | カテゴリ | 拡張子 | 処理方法 |
+    | -------- | ------ | -------- |
+    | PDF | .pdf | テキスト抽出 + OCR（必要時） |
+    | Word | .doc, .docx | テキスト抽出 |
+    | Excel | .xls, .xlsx, .xlsm, .csv | セルデータ抽出 |
+    | 画像 | .jpg, .jpeg, .png, .gif, .bmp, .webp, .tiff | OCR + 画像認識 |
+    | テキスト | .txt, .log, .json, .xml | 直接読み込み |
+    | メール | .msg, .eml | 本文・添付抽出 |
+
+    ### 8.2 VBAマクロの実行
+
+    #### ステップ1: VBAモジュールのインポート
+
+    ```text
+    1. Excelを開く
+    2. Alt + F11 でVBAエディタを開く
+    3. [ファイル] → [ファイルのインポート]
+    4. ExcelToJson.bas を選択
+    5. VBAエディタを閉じる
+    ```
+
+    #### ステップ2: 設定ファイルの確認
+
+    setting.jsonがプロジェクトルートに存在することを確認:
+
+    ```json
+    {
+        "dataStartRow": 2,
+        "sheetName": "",
+        "batchSize": 10,
+        "columns": {
+            "ID": "A",
+            "ControlDescription": "C",
+            "TestProcedure": "D",
+            "EvidenceLink": "E"
+        },
+        "api": {
+            "provider": "AZURE",
+            "endpoint": "https://func-ic-test-evaluation.azurewebsites.net/api/evaluate",
+            "apiKey": "your-function-key",
+            "authHeader": "x-functions-key"
+        },
+        "responseMapping": {
+            "evaluationResult": "F",
+            "judgmentBasis": "G",
+            "documentReference": "H",
+            "fileName": "I"
+        },
+        "booleanDisplayTrue": "有効",
+        "booleanDisplayFalse": "非有効"
+    }
+    ```
+
+    #### ステップ3: マクロの実行
+
+    ```text
+    1. Alt + F8 でマクロダイアログを開く
+    2. ProcessWithApi を選択
+    3. [実行] をクリック
+    4. 処理完了を待つ（進捗がステータスバーに表示）
+    5. F〜I列に結果が書き込まれる
+    ```
+
+    ### 8.3 バッチサイズの調整
+
+    バッチサイズは1回のAPI呼び出しで処理するテスト項目数です。非同期モードでは大きな値も安全に使用できます。
+
+    | バッチサイズ | 処理速度 | タイムアウトリスク | 推奨ケース |
+    | ------------ | -------- | ------------------ | ---------- |
+    | 5 | 中程度 | 低い | 大きなエビデンスファイル |
+    | 10 | 速い | 中程度 | 標準的な使用（推奨） |
+    | 20 | 非常に速い | 高い | 小さなファイルのみ・非同期モード |
+
+    ---
+
+    ## 9. トラブルシューティング
+
+    ### 9.1 エラー別対処法
+
+    #### 9.1.1 504 Gateway Timeout
+
+    ```text
+    【症状】
+    API呼び出しが「504 Gateway Timeout」でエラー終了する
+
+    【原因】
+    処理時間がタイムアウト設定（デフォルト5分）を超過
+
+    【対策】
+    1. setting.json の batchSize を減らす（10 → 5）
+    2. host.json の functionTimeout を延長:
+    {
+        "functionTimeout": "00:10:00"  // 10分に延長
+    }
+    3. エビデンスファイルを軽量化（PDFの最適化等）
+    ```
+
+    #### 9.1.2 401 Unauthorized
+
+    ```text
+    【症状】
+    「401 Unauthorized」または「認証エラー」
+
+    【原因】
+    APIキーが無効または未設定
+
+    【対策】
+    1. setting.json の api.apiKey を確認
+    2. Azure Portalで Function App のキーを再取得
+    3. .env の LLM関連キーを確認
+    ```
+
+    #### 9.1.3 LLM not configured
+
+    ```text
+    【症状】
+    「LLM not configured」エラー
+
+    【原因】
+    LLMプロバイダーの環境変数が未設定
+
+    【対策】
+    1. /api/config エンドポイントにアクセス
+    2. missing_vars を確認
+    3. 不足している環境変数を .env に追加
+    ```
+
+    #### 9.1.4 Temperature parameter error
+
+    ```text
+    【症状】
+    「Temperature parameter not supported」
+
+    【原因】
+    o1シリーズなど一部モデルはtemperatureパラメータ非対応
+
+    【対策】
+    自動対応済み。llm_factory.py で自動スキップ。
+    手動対応が必要な場合は MODELS_WITHOUT_TEMPERATURE に追加。
+    ```
+
+    ### 9.2 ログの確認方法
+
+    #### ローカル環境
+
+    ```powershell
+    # func start のコンソール出力を確認
+    # または Application Insights をローカルに設定
+    ```
+
+    #### Azure環境
+
+    ```powershell
+    # Azure Portal → Function App → ログストリーム
+
+    # または CLI で確認
+    az functionapp log tail --name func-ic-test-evaluation --resource-group rg-ic-test-evaluation
+    ```
+
+    ---
+
+    ## 10. セキュリティ考慮事項
+
+    ### 10.1 APIキーの管理
+
+    | 方法 | セキュリティレベル | 推奨環境 |
+    | ---- | ------------------ | -------- |
+    | .envファイル | 低（開発用） | ローカル開発 |
+    | Azure App Settings | 中 | 小規模本番 |
+    | Azure Key Vault | 高 | エンタープライズ |
+
+    #### Key Vault使用時の設定
+
+    ```powershell
+    # Key Vaultの作成
+    az keyvault create --name kv-ic-test-eval --resource-group rg-ic-test-evaluation
+
+    # シークレットの追加
+    az keyvault secret set --vault-name kv-ic-test-eval --name "LLM-API-KEY" --value "your-key"
+
+    # Function AppにKey Vault参照を設定
+    az functionapp config appsettings set `
+        --name func-ic-test-evaluation `
+        --resource-group rg-ic-test-evaluation `
+        --settings "AZURE_FOUNDRY_API_KEY=@Microsoft.KeyVault(SecretUri=https://kv-ic-test-eval.vault.azure.net/secrets/LLM-API-KEY/)"
+    ```
+
+    ### 10.2 データ保護
+
+    - エビデンスファイルはBase64エンコードで送信
+    - HTTPS暗号化通信を使用
+    - 機密データはメモリ上で処理後速やかに破棄
+
+    ### 10.3 ネットワークセキュリティ
+
+    - VNet統合による通信保護を検討
+    - IP制限の設定を推奨
+    - Private Endpointの利用を検討
+
+    ### 10.4 Azure AD認証によるアクセス制御（推奨・本番環境必須）
+
+    本システムでは、**Azure AD認証のみ**によるセキュアなアクセス制御を推奨しています。
+    Functions Keyは使用せず、Azure ADで認証・認可を一元管理します。
+
+    #### 10.4.1 認証方式の比較
+
+    | 認証方式 | セキュリティ | 管理性 | 推奨環境 |
+    | -------- | ----------- | ------ | -------- |
+    | Functions Key のみ | 低 | 簡単 | ローカル開発のみ |
+    | **Azure AD のみ** | **高** | **中程度** | **本番環境（推奨）** |
+    | Azure AD + Functions Key | 中 | 複雑 | 非推奨（Key流出リスク） |
+
+    > **重要**: Functions Keyは設定ファイルに記載するため、流出リスクがあります。
+    > 本番環境では必ずAzure AD認証を使用してください。
+
+    #### 10.4.2 Azure AD認証の仕組み
+
+    ```text
+    【認証フロー（ブラウザ認証 + トークンキャッシュ）】
+
+    本システムでは、Authorization Code Flow with PKCE を使用したブラウザベース認証を採用しています。
+    これにより、デバイスコードを手動入力する必要がなく、ブラウザが自動で開いて認証が完了します。
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                         初回認証                                 │
+    ├─────────────────────────────────────────────────────────────────┤
+    │                                                                  │
+    │  ユーザー（Excel）                                               │
+    │      │                                                          │
+    │      ▼                                                          │
+    │  ① PowerShell起動                                               │
+    │      │                                                          │
+    │      ├── まずサイレント認証を試行（prompt=none）                │
+    │      │   └── 成功: ブラウザ操作なしでトークン取得 ──────▶ ④へ  │
+    │      │                                                          │
+    │      └── サイレント認証失敗の場合:                              │
+    │          ▼                                                      │
+    │  ② ブラウザが自動で開く（Azure ADログインページ）               │
+    │      │                                                          │
+    │      ▼                                                          │
+    │  ③ ユーザーがログイン（初回のみ権限承認）                       │
+    │      │                                                          │
+    │      ├── 認証成功 → localhost:8400-8499 にリダイレクト          │
+    │      │             （PowerShellがHTTPリスナーで待機）            │
+    │      │                                                          │
+    │      ▼                                                          │
+    │  ④ アクセストークン + リフレッシュトークン取得                   │
+    │      │                                                          │
+    │      ├──▶ トークンをローカルにキャッシュ保存                    │
+    │      │    （%TEMP%\ic-test-azure-ad-token.json）                 │
+    │      │                                                          │
+    │      ▼                                                          │
+    │  ⑤ API呼び出し（Authorization: Bearer {token}）                 │
+    │      │                                                          │
+    │      ▼                                                          │
+    │  Azure Functions（AuthLevel.ANONYMOUS）                         │
+    │      │                                                          │
+    │      ├── ⑥ Azure ADプラットフォーム認証でトークン検証           │
+    │      │                                                          │
+    │      ├── ⑦ グループメンバーシップ確認                           │
+    │      │       └── 許可グループに所属？ → Yes: 処理続行           │
+    │      │                                  → No: 403 Forbidden     │
+    │      │                                                          │
+    │      ▼                                                          │
+    │  評価処理実行                                                    │
+    │                                                                  │
+    └─────────────────────────────────────────────────────────────────┘
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                     2回目以降（キャッシュ利用）                   │
+    ├─────────────────────────────────────────────────────────────────┤
+    │                                                                  │
+    │  ユーザー（Excel）                                               │
+    │      │                                                          │
+    │      ▼                                                          │
+    │  ① キャッシュからトークン読み込み                               │
+    │      │                                                          │
+    │      ├── 有効期限内？ → Yes: そのまま使用                       │
+    │      │                                                          │
+    │      └── 期限切れ？ → リフレッシュトークンで自動更新            │
+    │                        （ユーザー操作不要）                      │
+    │      │                                                          │
+    │      ▼                                                          │
+    │  ② API呼び出し（ブラウザ操作なし）                              │
+    │                                                                  │
+    │  ※ リフレッシュトークンが無効（90日以上経過）の場合は           │
+    │    サイレント認証を試行し、失敗時のみブラウザ認証               │
+    │                                                                  │
+    └─────────────────────────────────────────────────────────────────┘
+    ```
+
+    #### 10.4.3 トークンキャッシュ機能
+
+    毎回の認証操作を避けるため、トークンキャッシュ機能を実装しています。
+
+    | 項目 | 説明 |
+    | ---- | ---- |
+    | キャッシュ場所 | `%TEMP%\ic-test-azure-ad-token.json` |
+    | 保存内容 | access_token, refresh_token, expires_at, client_id |
+    | 有効期間 | アクセストークン: 約1時間 / リフレッシュトークン: 90日 |
+    | 自動更新 | 期限切れ時にリフレッシュトークンで自動取得 |
+
+    ```text
+    【トークンキャッシュの動作】
+
+    API呼び出し時:
+    ┌──────────────────┐
+    │ キャッシュ確認   │
+    └────────┬─────────┘
+             │
              ▼
-      ┌──────────────┐
-      │  プラン作成   │ ← LLMがタスクを分解
-      └──────┬───────┘
+    ┌──────────────────┐     Yes     ┌──────────────────┐
+    │ 有効なトークン？  │────────────▶│ そのまま使用     │
+    └────────┬─────────┘             └──────────────────┘
+             │ No
              ▼
-    ┌────────┴────────┐
-    ▼                 ▼
-┌────────┐      ┌────────┐
-│ タスクA1│      │ タスクA5│  ← 並列実行可能
-└────┬───┘      └────┬───┘
-     └────────┬──────┘
-              ▼
-      ┌──────────────┐
-      │  結果集約     │
-      └──────┬───────┘
+    ┌──────────────────┐     Yes     ┌──────────────────┐
+    │ リフレッシュ可？  │────────────▶│ 自動でトークン   │
+    │ (refresh_token)  │             │ 更新             │
+    └────────┬─────────┘             └──────────────────┘
+             │ No
              ▼
-      ┌──────────────┐
-      │    終了      │
-      └──────────────┘
-```
+    ┌──────────────────┐     Yes     ┌──────────────────┐
+    │ サイレント認証   │────────────▶│ トークン取得     │
+    │ (prompt=none)    │             │ ブラウザ操作なし │
+    └────────┬─────────┘             └──────────────────┘
+             │ No（未ログインの場合）
+             ▼
+    ┌──────────────────┐
+    │ ブラウザ認証     │ ← 初回または90日以上経過時
+    │ （自動でブラウザ │   ブラウザが自動で開く
+    │   が開く）       │   ユーザーがログインして完了
+    └──────────────────┘
+    ```
 
-### 10.4 Factory Patternとは
+    #### 10.4.4 Azureセットアップ手順（手動）
 
-本システムでは「Factory Pattern（ファクトリーパターン）」を使用してLLMインスタンスを生成しています。
+    以下の手順でAzure AD認証を設定します。
 
-```text
-【Factory Patternの仕組み】
+    **ステップ1: App Registrationの作成**
 
-環境変数: LLM_PROVIDER=AZURE_FOUNDRY
+    ```text
+    Azure Portal → Microsoft Entra ID → アプリの登録 → 新規登録
 
-          ┌─────────────────┐
-          │  llm_factory.py │
-          │                 │
-          │  create_llm()   │
-          └────────┬────────┘
-                   │
-    ┌──────────────┼──────────────┐
-    ▼              ▼              ▼
-┌────────┐    ┌────────┐    ┌────────┐
-│ AZURE  │    │  GCP   │    │  AWS   │
-│ Foundry│    │ Vertex │    │Bedrock │
-└────────┘    └────────┘    └────────┘
+    名前: func-ic-test-evaluation-auth（任意）
+    サポートされているアカウントの種類: この組織ディレクトリのみ
+    リダイレクトURI: （空欄のまま）
+    ```
 
-メリット:
-- コードを変更せずにプロバイダーを切り替え可能
-- 新しいプロバイダーの追加が容易
-- テスト時にモックへの置き換えが容易
-```
+    **ステップ2: API識別子URIとスコープの設定**
 
----
+    ```text
+    作成したApp Registration → APIの公開
 
-## 11. 用語集
+    1. アプリケーションID URIの設定:
+       「設定」→ api://{clientId} の形式で自動生成
 
-| 用語 | 読み方 | 説明 |
-| ---- | ------ | ---- |
-| API | エーピーアイ | Application Programming Interface。システム間の通信規約 |
-| Azure Functions | アジュール ファンクションズ | Microsoftのサーバーレスコンピューティングサービス |
-| Base64 | ベースろくじゅうよん | バイナリデータをテキストに変換するエンコード方式 |
-| Claude | クロード | Anthropic社が開発したAIモデル |
-| Endpoint | エンドポイント | APIの接続先URL |
-| Factory Pattern | ファクトリーパターン | オブジェクト生成を専用クラスに委譲するデザインパターン |
-| Functions Core Tools | ファンクションズ コアツールズ | Azure Functionsのローカル開発ツール |
-| Gemini | ジェミニ | Google社が開発したAIモデル |
-| GPT | ジーピーティー | OpenAI社が開発したAIモデル |
-| JSON | ジェイソン | JavaScript Object Notation。データ交換形式 |
-| Key Vault | キーボルト | Azureのシークレット管理サービス |
-| LangChain | ラングチェーン | LLMアプリケーション開発フレームワーク |
-| LangGraph | ラングラフ | AIワークフロー定義ライブラリ |
-| LLM | エルエルエム | Large Language Model。大規模言語モデル |
-| OCR | オーシーアール | Optical Character Recognition。光学文字認識 |
-| Orchestrator | オーケストレーター | 複数の処理を統括・調整するコンポーネント |
-| PowerShell | パワーシェル | Windowsのスクリプト実行環境 |
-| Serverless | サーバーレス | サーバー管理不要のクラウドサービス形態 |
-| SoD | エスオーディー | Segregation of Duties。職務分掌 |
-| VBA | ブイビーエー | Visual Basic for Applications。Officeマクロ言語 |
-| Vertex AI | バーテックス エーアイ | Google Cloudの機械学習プラットフォーム |
+    2. スコープの追加:
+       「スコープの追加」をクリック
+       スコープ名: user_impersonation
+       同意できるのは: 管理者とユーザー
+       管理者の同意の表示名: IC Test Evaluation API へのアクセス
+       管理者の同意の説明: 内部統制テスト評価APIへのアクセスを許可します
+       状態: 有効
+    ```
 
----
+    **ステップ3: リダイレクトURIとパブリッククライアントフローの設定**
 
-## 12. 更新履歴
+    ```text
+    App Registration → 認証
 
-| 日付 | バージョン | 変更内容 |
-| ---- | ---------- | -------- |
-| 2024-01-04 | 1.0 | 初版作成 |
-| 2024-01-05 | 2.0 | Azure AI Foundry対応、マルチクラウド対応 |
-| 2024-01-06 | 2.1 | バッチ処理実装、タイムアウト対策 |
-| 2024-01-07 | 3.0 | 仕様書大幅拡充、技術解説・用語集追加 |
+    1. リダイレクトURIの追加（ブラウザ認証に必要）:
+       「プラットフォームを追加」→「モバイル アプリケーションとデスクトップ アプリケーション」
+       カスタム リダイレクトURI:
+         - http://localhost:8400/callback
+         - http://localhost:8401/callback
+         - http://localhost:8402/callback
+         - ... （8400-8499の範囲で必要な分だけ追加）
+
+       ※ 複数ポートを登録しておくと、ポート競合時に自動的に別ポートを使用
+
+    2. 詳細設定:
+       「パブリック クライアント フローを許可する」: はい
+
+       ※ Device Code Flow（フォールバック用）に必要な設定
+    ```
+
+    **ステップ4: Azure ADグループの作成**
+
+    ```text
+    Azure Portal → Microsoft Entra ID → グループ → 新しいグループ
+
+    グループの種類: セキュリティ
+    グループ名: IC-Test-Users
+    グループの説明: 内部統制テストツール利用者
+    メンバー: 許可するユーザーを追加
+    ```
+
+    **ステップ5: Service Principal（Enterprise Application）の設定**
+
+    ```text
+    Azure Portal → Microsoft Entra ID → エンタープライズアプリケーション
+    → 作成したアプリ名を検索 → プロパティ
+
+    1. ユーザーの割り当てが必要ですか？: はい
+
+    2. ユーザーとグループ → 追加
+       → IC-Test-Users グループを選択
+    ```
+
+    **ステップ6: Function Appの認証設定**
+
+    ```text
+    Azure Portal → Function App → 認証 → IDプロバイダーの追加
+
+    IDプロバイダー: Microsoft
+    アプリの登録の種類: 既存のアプリの登録の詳細を指定する
+    アプリケーション（クライアント）ID: {App RegistrationのクライアントID}
+    クライアントシークレット: （空欄）
+    発行者のURL: https://login.microsoftonline.com/{tenantId}/v2.0
+    許可されるトークン対象ユーザー:
+      - api://{clientId}
+      - {clientId}
+    認証されていない要求: HTTP 401 Unauthorized
+    トークンストア: 有効
+    ```
+
+    **ステップ7: Function Appコードの設定**
+
+    `platforms/azure/function_app.py` で `AuthLevel.ANONYMOUS` を設定：
+
+    ```python
+    # Azure ADによるプラットフォームレベル認証を使用
+    # Functions Keyは不要（AuthLevel.ANONYMOUS）
+    app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
+    ```
+
+    #### 10.4.5 Azureセットアップ手順（自動スクリプト）
+
+    `scripts/setup-azure-ad-auth.ps1` を使用して自動セットアップできます。
+
+    **前提条件**
+
+    - Azure CLI (`az`) がインストール済み
+    - Function App が既にデプロイ済み
+    - 適切な権限（Application Administrator または Global Administrator）
+
+    **実行方法**
+
+    ```powershell
+    # プロジェクトディレクトリに移動
+    cd c:\path\to\ic-test-ai-agent
+
+    # スクリプトを実行
+    .\scripts\setup-azure-ad-auth.ps1 `
+        -FunctionAppName "func-ic-test-evaluation" `
+        -ResourceGroup "rg-ic-test" `
+        -GroupName "IC-Test-Users"
+    ```
+
+    **スクリプトが行う処理**
+
+    1. Azure CLIログイン確認
+    2. Function App存在確認
+    3. App Registration作成（または既存を使用）
+    4. API識別子URIとスコープ設定
+    5. **リダイレクトURI設定（localhost:8400-8409）**
+    6. パブリッククライアントフロー有効化
+    7. Service Principal作成
+    8. ユーザー割り当て必須設定
+    9. Azure ADグループ作成（または既存を使用）
+    10. 現在のユーザーをグループに追加
+    11. グループをアプリに割り当て
+    12. Function App認証設定
+    13. 設定情報の出力
+
+    **出力例**
+
+    ```text
+    ============================================================
+    セットアップ完了！
+    ============================================================
+
+    以下の設定を setting.json に追加してください:
+
+    {
+        "api": {
+            "provider": "AZURE",
+            "authType": "azureAd",
+            "endpoint": "https://func-ic-test-evaluation.azurewebsites.net/api/evaluate"
+        },
+        "azureAd": {
+            "tenantId": "1f6ccb61-70c2-46fa-bab8-55e19b2fcc9b",
+            "clientId": "262cd06b-dcd2-4237-9eb3-4c0536a665b1",
+            "scope": "api://262cd06b-dcd2-4237-9eb3-4c0536a665b1/user_impersonation openid offline_access"
+        }
+    }
+    ```
+
+    #### 10.4.6 クライアント設定（setting.json）
+
+    ```json
+    {
+        "apiClient": "POWERSHELL",
+        "asyncMode": true,
+        "pollingIntervalSec": 5,
+        "api": {
+            "provider": "AZURE",
+            "endpoint": "https://func-ic-test-evaluation.azurewebsites.net/api/evaluate",
+            "authType": "azureAd"
+        },
+        "azureAd": {
+            "tenantId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+            "clientId": "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy",
+            "scope": "api://yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy/user_impersonation openid offline_access"
+        }
+    }
+    ```
+
+    **設定項目の説明**
+
+    | 項目 | 説明 | 確認場所 |
+    | ---- | ---- | -------- |
+    | `authType` | 認証方式。`azureAd` を指定 | - |
+    | `tenantId` | Azure ADテナントID | Azure Portal → Entra ID → 概要 |
+    | `clientId` | App RegistrationのクライアントID | App Registration → 概要 |
+    | `scope` | APIスコープ。`user_impersonation` を含める | App Registration → APIの公開 |
+
+    > **スコープの形式**: `api://{clientId}/user_impersonation openid offline_access`
+    > - `user_impersonation`: APIアクセス権限
+    > - `openid`: ユーザー情報取得
+    > - `offline_access`: リフレッシュトークン取得（キャッシュに必要）
+
+    #### 10.4.7 初回認証の流れ
+
+    初回実行時、以下のフローで認証が行われます：
+
+    ```text
+    ┌─────────────────────────────────────────────────────────┐
+    │  ブラウザ認証フロー（Authorization Code Flow + PKCE）   │
+    ├─────────────────────────────────────────────────────────┤
+    │                                                         │
+    │  1. Excel VBAからPowerShell起動                         │
+    │     ↓                                                   │
+    │  2. サイレント認証を試行（prompt=none）                  │
+    │     ├── 成功: トークン取得 → API呼び出しへ             │
+    │     └── 失敗: ブラウザ認証へ                           │
+    │     ↓                                                   │
+    │  3. ブラウザが自動で開く                                │
+    │     ┌───────────────────────────────────────────────┐   │
+    │     │  Azure ADログインページ                        │   │
+    │     │                                                │   │
+    │     │  会社アカウントでサインイン                    │   │
+    │     │  ┌──────────────────────────┐                 │   │
+    │     │  │ user@company.com         │                 │   │
+    │     │  └──────────────────────────┘                 │   │
+    │     │                                                │   │
+    │     │  初回は権限承認ダイアログも表示                │   │
+    │     │  「IC Test Evaluation APIへのアクセス」       │   │
+    │     │  [承諾] [キャンセル]                           │   │
+    │     └───────────────────────────────────────────────┘   │
+    │     ↓                                                   │
+    │  4. 認証成功 → ブラウザに「認証成功」と表示            │
+    │     ↓                                                   │
+    │  5. トークン取得 → API呼び出し実行                     │
+    │                                                         │
+    └─────────────────────────────────────────────────────────┘
+
+    ユーザーの操作:
+    1. Excelマクロを実行
+    2. ブラウザが自動で開く（既にログイン済みならスキップ）
+    3. 会社アカウントでサインイン
+    4. 権限の承認（初回のみ）
+    5. ブラウザに「認証が完了しました」と表示されれば完了
+       （ブラウザを閉じてOK）
+
+    ※ 2回目以降はキャッシュされたトークンを使用するため、
+      ブラウザは開きません（約90日間有効）
+    ※ ブラウザでAzure ADに既にログイン済みの場合は、
+      サイレント認証で自動的にトークンが取得されます
+    ```
+
+    **Device Code Flow（フォールバック）**
+
+    ブラウザ認証が失敗した場合（ファイアウォール等でlocalhostへのリダイレクトが
+    ブロックされる環境）、Device Code Flowにフォールバックします：
+
+    ```text
+    ┌─────────────────────────────────────────────────────────┐
+    │  PowerShellウィンドウに表示されるメッセージ              │
+    ├─────────────────────────────────────────────────────────┤
+    │                                                         │
+    │  ========================================                │
+    │  Azure AD 認証（Device Code）                            │
+    │  ========================================                │
+    │                                                         │
+    │  URL: https://microsoft.com/devicelogin                 │
+    │  Code: ABC123DEF                                        │
+    │                                                         │
+    │  上記URLにアクセスしてコードを入力してください           │
+    │                                                         │
+    └─────────────────────────────────────────────────────────┘
+    ```
+
+    #### 10.4.8 認証テスト
+
+    `scripts/test-azure-ad-auth.ps1` で認証をテストできます：
+
+    ```powershell
+    .\scripts\test-azure-ad-auth.ps1 `
+        -TenantId "1f6ccb61-70c2-46fa-bab8-55e19b2fcc9b" `
+        -ClientId "262cd06b-dcd2-4237-9eb3-4c0536a665b1" `
+        -FunctionUrl "https://func-ic-test-evaluation.azurewebsites.net/api/health" `
+        -Scope "api://262cd06b-dcd2-4237-9eb3-4c0536a665b1/user_impersonation openid offline_access"
+    ```
+
+    **成功時の出力**
+
+    ```text
+    ============================================================
+    テスト成功！
+    ============================================================
+
+    レスポンス:
+    {
+        "status": "healthy",
+        "llm_configured": true,
+        ...
+    }
+    ```
+
+    #### 10.4.9 トラブルシューティング
+
+    | エラー | 原因 | 対策 |
+    | ------ | ---- | ---- |
+    | AADSTS7000218 | Public Client Flow未有効 | App Registration → 認証 → パブリッククライアントフロー: はい |
+    | AADSTS90009 | スコープ形式エラー | `api://{clientId}/user_impersonation` 形式を使用 |
+    | 401 Unauthorized | トークン対象不一致 | Function App認証の許可されるトークン対象ユーザーに `api://{clientId}` と `{clientId}` の両方を追加 |
+    | 403 Forbidden | グループ未割り当て | Enterprise App → ユーザーとグループ でグループを割り当て |
+
+    #### 10.4.10 セキュリティのベストプラクティス
+
+    ```text
+    【推奨構成】
+
+    ┌────────────────────────────────────────────────────────────┐
+    │  Azure Functions                                           │
+    │                                                            │
+    │  function_app.py:                                          │
+    │    AuthLevel.ANONYMOUS  ← Functions Keyを使用しない        │
+    │                                                            │
+    │  認証設定:                                                  │
+    │    ・Azure ADプラットフォーム認証: 有効                    │
+    │    ・認証されていない要求: HTTP 401                        │
+    │    ・許可されるトークン対象: api://{clientId}, {clientId} │
+    │                                                            │
+    │  Enterprise Application:                                   │
+    │    ・ユーザー割り当て必須: はい                            │
+    │    ・許可グループ: IC-Test-Users                          │
+    │                                                            │
+    └────────────────────────────────────────────────────────────┘
+
+    【セキュリティメリット】
+
+    1. 認証情報の流出リスク低減
+       - Functions Keyを設定ファイルに記載不要
+       - トークンは一時的（1時間）で自動失効
+
+    2. アクセス制御の一元管理
+       - Azure ADグループでユーザー管理
+       - 退職者は即座にアクセス無効化可能
+
+    3. 監査ログ
+       - Azure ADでアクセスログを自動記録
+       - 誰がいつアクセスしたか追跡可能
+    ```
+
+    ---
+
+    ## 11. テスト
+
+    ### 11.1 テスト構成概要
+
+    本システムは、以下のテスト構成を採用しています。
+
+    ```text
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                      テスト構成                                  │
+    ├─────────────────────────────────────────────────────────────────┤
+    │                                                                  │
+    │  【Pythonバックエンド】                                          │
+    │  ┌──────────────────────────────────────────────────────────┐   │
+    │  │  pytest フレームワーク                                     │   │
+    │  │  ├── ユニットテスト（@pytest.mark.unit）                   │   │
+    │  │  │   └── 137件 - 外部依存なし、高速実行                   │   │
+    │  │  └── 統合テスト（@pytest.mark.integration）               │   │
+    │  │       └── 10件 - Azure接続必要、CI/CD環境で実行           │   │
+    │  └──────────────────────────────────────────────────────────┘   │
+    │                                                                  │
+    │  【PowerShell】                                                  │
+    │  ┌──────────────────────────────────────────────────────────┐   │
+    │  │  手動E2Eテスト                                            │   │
+    │  │  └── scripts/test-azure-ad-auth.ps1                       │   │
+    │  │      └── Azure AD認証フローの動作確認                     │   │
+    │  └──────────────────────────────────────────────────────────┘   │
+    │                                                                  │
+    │  【VBA（Excel）】                                                │
+    │  ┌──────────────────────────────────────────────────────────┐   │
+    │  │  手動テスト                                                │   │
+    │  │  └── Excel上での統合動作確認                              │   │
+    │  │      └── SampleDataフォルダを使用                         │   │
+    │  └──────────────────────────────────────────────────────────┘   │
+    │                                                                  │
+    └─────────────────────────────────────────────────────────────────┘
+    ```
+
+    ### 11.2 Pythonテストの実行
+
+    #### 11.2.1 前提条件
+
+    ```powershell
+    # 仮想環境を有効化
+    cd platforms\azure
+    .\.venv\Scripts\Activate.ps1
+
+    # テスト依存パッケージをインストール
+    pip install pytest pytest-asyncio pytest-cov
+    ```
+
+    #### 11.2.2 テスト実行コマンド
+
+    | コマンド | 説明 |
+    | -------- | ---- |
+    | `python -m pytest tests/ -v` | 全テスト実行（156件） |
+    | `python -m pytest tests/ -v -m "unit"` | ユニットテストのみ |
+    | `python -m pytest tests/ -v -m "integration"` | 統合テストのみ（Azure接続必要） |
+    | `python -m pytest tests/ -v -m "integration and azure"` | Azure統合テストのみ |
+    | `python -m pytest tests/ -v --cov=src` | カバレッジ付き実行 |
+    | `python -m pytest tests/ -v -m "not integration"` | 統合テスト除外（CI用） |
+
+    #### 11.2.3 テストファイル構成
+
+    ```text
+    tests/
+    ├── __init__.py              # パッケージマーカー
+    ├── conftest.py              # 共通フィクスチャ（.env自動読み込み）
+    ├── test_base_task.py        # 基底クラス・データ構造テスト（21件）
+    ├── test_document_processor.py # ドキュメント処理テスト（21件）
+    ├── test_handlers.py         # ハンドラーテスト（17件）
+    ├── test_llm_factory.py      # LLMファクトリーテスト（14件）
+    ├── test_job_storage.py      # ジョブストレージテスト（39件）※Azure統合テスト含む
+    └── test_tasks.py            # A1-A8タスクテスト（20件）
+    ```
+
+    **合計: 156件**（うち統合テスト2件はAzure接続が必要）
+
+    ### 11.3 テスト対象モジュール
+
+    | モジュール | テストファイル | テスト件数 | カバー内容 |
+    | ---------- | -------------- | ---------- | ---------- |
+    | `core/tasks/base_task.py` | test_base_task.py | 21 | TaskType, TaskResult, EvidenceFile, AuditContext, BaseAuditTask |
+    | `core/document_processor.py` | test_document_processor.py | 21 | TextElement, ExtractedContent, テキスト/PDF/Excel抽出 |
+    | `core/handlers.py` | test_handlers.py | 17 | EvaluationError, evaluate_single_item, mock_evaluate |
+    | `infrastructure/llm_factory.py` | test_llm_factory.py | 14 | LLMProvider, LLMConfigError, LLMFactory |
+    | `infrastructure/job_storage/` | test_job_storage.py | 39 | InMemoryJobStorage, InMemoryJobQueue, EvidenceBlobStorage, AzureQueueJobQueue, Azure統合テスト |
+    | `core/tasks/a1-a8` | test_tasks.py | 20 | 各タスククラスのインポート・属性・基本動作 |
+    | **合計** | - | **156** | - |
+
+    ### 11.4 テストマーカー
+
+    pytest.iniで以下のマーカーを定義しています:
+
+    ```ini
+    [pytest]
+    markers =
+        unit: ユニットテスト（高速、外部依存なし）
+        integration: 統合テスト（Azure接続が必要）
+        azure: Azureサービス依存テスト
+    ```
+
+    | マーカー | 説明 | 実行タイミング |
+    | -------- | ---- | -------------- |
+    | `@pytest.mark.unit` | 外部依存なしの高速テスト | 開発中常時 |
+    | `@pytest.mark.integration` | Azure接続が必要なテスト | CI/CD、デプロイ前 |
+    | `@pytest.mark.azure` | Azureサービス固有テスト | Azure環境でのみ |
+    | `@pytest.mark.asyncio` | 非同期テスト | pytest-asyncioが自動検出 |
+
+    ### 11.5 Azure統合テスト
+
+    Azure Blob Storage / Queue Storageの実接続テストです。
+
+    #### 11.5.1 前提条件
+
+    ```bash
+    # .envファイルに接続文字列を設定
+    AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...
+    ```
+
+    #### 11.5.2 テスト対象
+
+    | テスト名 | 対象 | 操作 |
+    | -------- | ---- | ---- |
+    | `test_store_and_restore_evidence_files_real` | Blob Storage | ファイル保存・復元・削除 |
+    | `test_enqueue_dequeue_real` | Queue Storage | メッセージ追加・取得・クリア |
+
+    #### 11.5.3 実行方法
+
+    ```bash
+    # Azure統合テストのみ実行
+    python -m pytest tests/test_job_storage.py -v -m "integration and azure"
+
+    # 全テスト実行（Azure統合テスト含む）
+    python -m pytest tests/ -v
+    ```
+
+    #### 11.5.4 テスト分離
+
+    統合テストは以下の方法で本番環境から分離されています：
+    - Blobテスト: 一意のジョブID（`test-job-{uuid}`）を使用し、テスト後に削除
+    - Queueテスト: テスト専用キュー名（`test-evaluation-jobs`）を使用し、テスト後にクリア
+
+    ### 11.6 共通フィクスチャ（conftest.py）
+
+    テスト間で共有するモックとサンプルデータを定義しています。
+
+    | フィクスチャ名 | 説明 |
+    | -------------- | ---- |
+    | `sample_base64_text` | テスト用Base64エンコードテキスト |
+    | `sample_evidence_dict` | 証跡ファイル辞書形式 |
+    | `sample_request_item` | APIリクエストアイテム形式 |
+    | `sample_audit_context` | AuditContextオブジェクト |
+    | `mock_llm` | LLMクライアントモック |
+    | `mock_ocr_client` | OCRクライアントモック |
+    | `mock_job_storage` | ジョブストレージモック |
+    | `mock_azure_env` | Azure環境変数モック |
+
+    **注意**: conftest.pyは`.env`ファイルを自動的に読み込みます（統合テスト用）。
+
+    ### 11.7 PowerShellテスト
+
+    #### 11.7.1 Azure AD認証テスト
+
+    `scripts/test-azure-ad-auth.ps1` を使用して認証フローをテストします。
+
+    ```powershell
+    .\scripts\test-azure-ad-auth.ps1 `
+        -TenantId "your-tenant-id" `
+        -ClientId "your-client-id" `
+        -FunctionUrl "https://your-function.azurewebsites.net/api/health"
+    ```
+
+    **テスト内容**:
+    - Azure ADトークン取得
+    - Function AppへのAPI呼び出し
+    - 認証エラーの診断
+
+    ### 11.8 VBA/Excelテスト
+
+    VBAコードの自動テストフレームワークは未実装です。以下の手動テストを実施してください。
+
+    #### 11.8.1 手動テスト手順
+
+    1. **テストデータ準備**
+       - `SampleData/` フォルダに証跡ファイルを配置
+       - Excelテストシートを作成（ID, ControlDescription, TestProcedure, EvidenceLink列）
+
+    2. **VBAモジュール動作確認**
+       - `LoadSettings()`: setting.json読み込み確認
+       - `GenerateJsonForBatch()`: JSON生成確認
+       - `WriteResponseToExcel()`: 結果書き戻し確認
+
+    3. **統合動作確認**
+       - `ProcessWithApi()` をローカルAPIで実行
+       - 評価結果がExcelに正しく書き込まれることを確認
+
+    ### 11.8 CI/CD統合
+
+    GitHub Actions等でのCI/CD統合例:
+
+    ```yaml
+    # .github/workflows/test.yml
+    name: Python Tests
+    on: [push, pull_request]
+    jobs:
+      test:
+        runs-on: ubuntu-latest
+        steps:
+          - uses: actions/checkout@v4
+          - name: Set up Python
+            uses: actions/setup-python@v5
+            with:
+              python-version: '3.11'
+          - name: Install dependencies
+            run: |
+              pip install -r requirements.txt
+              pip install pytest pytest-asyncio pytest-cov
+          - name: Run unit tests
+            run: python -m pytest tests/ -v -m "not integration"
+          - name: Run integration tests
+            if: github.ref == 'refs/heads/main'
+            env:
+              LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
+              AZURE_FOUNDRY_ENDPOINT: ${{ secrets.AZURE_FOUNDRY_ENDPOINT }}
+              AZURE_FOUNDRY_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
+            run: python -m pytest tests/ -v -m "integration"
+    ```
+
+    ---
+
+    ## 12. 技術解説
+
+    ### 11.1 使用技術スタック
+
+    ```text
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                        技術スタック                             │
+    ├─────────────────────────────────────────────────────────────────┤
+    │                                                                 │
+    │  【クライアント層】                                             │
+    │  ┌──────────────┐  ┌──────────────┐                            │
+    │  │  Excel VBA   │  │  PowerShell  │                            │
+    │  │  (マクロ)     │  │  (スクリプト) │                            │
+    │  └──────────────┘  └──────────────┘                            │
+    │                                                                 │
+    │  【API層】                                                      │
+    │  ┌──────────────────────────────────────────────────────┐      │
+    │  │  Azure Functions / GCP Cloud Functions / AWS Lambda  │      │
+    │  │  ┌────────────────────────────────────────────────┐  │      │
+    │  │  │  Python 3.11 + async/await                     │  │      │
+    │  │  └────────────────────────────────────────────────┘  │      │
+    │  └──────────────────────────────────────────────────────┘      │
+    │                                                                 │
+    │  【AIオーケストレーション層】                                   │
+    │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
+    │  │  LangChain   │  │  LangGraph   │  │   Factory    │         │
+    │  │  (AI連携)    │  │  (ワークフロー)│  │  Pattern     │         │
+    │  └──────────────┘  └──────────────┘  └──────────────┘         │
+    │                                                                 │
+    │  【LLMプロバイダー層】                                          │
+    │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐          │
+    │  │  Azure   │ │  Azure   │ │   GCP    │ │   AWS    │          │
+    │  │  Foundry │ │  OpenAI  │ │  Vertex  │ │  Bedrock │          │
+    │  └──────────┘ └──────────┘ └──────────┘ └──────────┘          │
+    │                                                                 │
+    └─────────────────────────────────────────────────────────────────┘
+    ```
+
+    ### 11.2 LangChainとは
+
+    LangChainは、大規模言語モデル（LLM）を活用したアプリケーション開発のためのフレームワークです。
+
+    ```text
+    【LangChainの役割】
+
+    従来のアプローチ:
+    アプリ ──直接呼び出し──▶ OpenAI API
+    アプリ ──直接呼び出し──▶ Azure OpenAI API  ← 個別実装が必要
+    アプリ ──直接呼び出し──▶ Vertex AI API
+
+    LangChainを使用:
+    アプリ ──統一インターフェース──▶ LangChain ──▶ 各種LLM
+                                            ├──▶ OpenAI
+                                            ├──▶ Azure OpenAI
+                                            ├──▶ Vertex AI
+                                            └──▶ Bedrock
+    ```
+
+    ### 11.3 LangGraphとは
+
+    LangGraphは、複雑なAIワークフローをグラフ構造で定義・実行するライブラリです。
+
+    ```text
+    【LangGraphのワークフロー例】
+
+        ┌──────────────┐
+        │    開始      │
+        └──────┬───────┘
+                ▼
+        ┌──────────────┐
+        │  プラン作成   │ ← LLMがタスクを分解
+        └──────┬───────┘
+                ▼
+        ┌────────┴────────┐
+        ▼                 ▼
+    ┌────────┐      ┌────────┐
+    │ タスクA1│      │ タスクA5│  ← 並列実行可能
+    └────┬───┘      └────┬───┘
+        └────────┬──────┘
+                ▼
+        ┌──────────────┐
+        │  結果集約     │
+        └──────┬───────┘
+                ▼
+        ┌──────────────┐
+        │    終了      │
+        └──────────────┘
+    ```
+
+    ### 11.4 Factory Patternとは
+
+    本システムでは「Factory Pattern（ファクトリーパターン）」を使用してLLMインスタンスを生成しています。
+
+    ```text
+    【Factory Patternの仕組み】
+
+    環境変数: LLM_PROVIDER=AZURE_FOUNDRY
+
+            ┌─────────────────┐
+            │  llm_factory.py │
+            │                 │
+            │  create_llm()   │
+            └────────┬────────┘
+                    │
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+    ┌────────┐    ┌────────┐    ┌────────┐
+    │ AZURE  │    │  GCP   │    │  AWS   │
+    │ Foundry│    │ Vertex │    │Bedrock │
+    └────────┘    └────────┘    └────────┘
+
+    メリット:
+    - コードを変更せずにプロバイダーを切り替え可能
+    - 新しいプロバイダーの追加が容易
+    - テスト時にモックへの置き換えが容易
+    ```
+
+    ---
+
+    ## 13. 用語集
+
+    | 用語 | 読み方 | 説明 |
+    | ---- | ------ | ---- |
+    | API | エーピーアイ | Application Programming Interface。システム間の通信規約 |
+    | Azure Functions | アジュール ファンクションズ | Microsoftのサーバーレスコンピューティングサービス |
+    | Base64 | ベースろくじゅうよん | バイナリデータをテキストに変換するエンコード方式 |
+    | Claude | クロード | Anthropic社が開発したAIモデル |
+    | Endpoint | エンドポイント | APIの接続先URL |
+    | Factory Pattern | ファクトリーパターン | オブジェクト生成を専用クラスに委譲するデザインパターン |
+    | Functions Core Tools | ファンクションズ コアツールズ | Azure Functionsのローカル開発ツール |
+    | Gemini | ジェミニ | Google社が開発したAIモデル |
+    | GPT | ジーピーティー | OpenAI社が開発したAIモデル |
+    | JSON | ジェイソン | JavaScript Object Notation。データ交換形式 |
+    | Key Vault | キーボルト | Azureのシークレット管理サービス |
+    | LangChain | ラングチェーン | LLMアプリケーション開発フレームワーク |
+    | LangGraph | ラングラフ | AIワークフロー定義ライブラリ |
+    | LLM | エルエルエム | Large Language Model。大規模言語モデル |
+    | OCR | オーシーアール | Optical Character Recognition。光学文字認識 |
+    | Orchestrator | オーケストレーター | 複数の処理を統括・調整するコンポーネント |
+    | PowerShell | パワーシェル | Windowsのスクリプト実行環境 |
+    | Serverless | サーバーレス | サーバー管理不要のクラウドサービス形態 |
+    | SoD | エスオーディー | Segregation of Duties。職務分掌 |
+    | VBA | ブイビーエー | Visual Basic for Applications。Officeマクロ言語 |
+    | Vertex AI | バーテックス エーアイ | Google Cloudの機械学習プラットフォーム |
+
+    ---
+
+    ## 14. 更新履歴
+
+    | 日付 | バージョン | 変更内容 |
+    | ---- | ---------- | -------- |
+    | 2026-01-30 | 1.1.2 | pytestベースのユニットテスト・統合テストスイート追加（156件）、Azure Blob/Queue統合テスト追加、テストドキュメント整備 |
+    | 2026-01-30 | 1.1.1 | Azure Table Storage 64KB制限対策を強化（全証跡ファイルをBlob Storageに保存） |
+    | 2026-01-30 | 1.1.0 | Azure AD認証のみ方式に変更（Functions Key廃止）、トークンキャッシュ機能追加、セットアップスクリプト整備 |
+    | 2026-01-29 | 1.0.0 | 初版リリース |

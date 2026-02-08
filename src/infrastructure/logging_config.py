@@ -227,10 +227,20 @@ class LoggingConfig:
         # 環境変数から設定を読み込む
         self.log_level = os.environ.get("LOG_LEVEL", DEFAULT_LOG_LEVEL).upper()
         self.log_dir = os.environ.get("LOG_DIR", DEFAULT_LOG_DIR)
-        self.log_to_file = os.environ.get("LOG_TO_FILE", "true").lower() == "true"
         self.log_format = os.environ.get("LOG_FORMAT", "standard").lower()
 
-        # ログディレクトリを作成
+        # Azure Functions環境を検出（ファイル書き込みが制限される）
+        is_azure_functions = os.environ.get("FUNCTIONS_WORKER_RUNTIME") is not None
+
+        # LOG_TO_FILE設定（Azure Functionsではデフォルトでfalse）
+        log_to_file_env = os.environ.get("LOG_TO_FILE")
+        if log_to_file_env is not None:
+            self.log_to_file = log_to_file_env.lower() == "true"
+        else:
+            # 環境変数未設定の場合、Azure Functionsではfalse、それ以外はtrue
+            self.log_to_file = not is_azure_functions
+
+        # ログディレクトリを作成（ファイル出力有効時のみ）
         if self.log_to_file:
             self._ensure_log_directory()
 
@@ -597,5 +607,9 @@ class AuditLogger:
 # モジュール初期化
 # =============================================================================
 
-# モジュールがインポートされた時点でログ設定を初期化
-setup_logging()
+# NOTE: Azure Functions環境では自動初期化を無効化
+# get_logger()を呼び出した時点で遅延初期化される
+# ローカル開発時に明示的に初期化したい場合は setup_logging() を呼び出す
+#
+# 以前のコード（Azure Functionsで問題が発生）:
+# setup_logging()

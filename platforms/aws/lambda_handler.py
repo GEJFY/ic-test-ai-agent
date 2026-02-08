@@ -8,9 +8,17 @@ lambda_handler.py - AWS Lambda エントリーポイント
 API Gateway経由でExcel VBAマクロからのリクエストを受け付け、AI評価結果を返します。
 
 【エンドポイント】（API Gateway設定）
-1. POST /evaluate - テスト評価実行
-2. GET /health - ヘルスチェック
-3. GET /config - 設定状態確認
+=== 同期API（asyncMode: false）===
+1. POST /evaluate - テスト評価実行（同期処理）
+
+=== 非同期API（asyncMode: true、推奨）===
+2. POST /evaluate/submit - ジョブ送信（即座にジョブIDを返却）
+3. GET /evaluate/status/{job_id} - ステータス確認
+4. GET /evaluate/results/{job_id} - 結果取得
+
+=== 管理API ===
+5. GET /health - ヘルスチェック
+6. GET /config - 設定状態確認
 
 【ディレクトリ構成】
 ic-test-ai-agent/
@@ -44,8 +52,7 @@ aws lambda create-function \\
   --environment Variables='{
     "LLM_PROVIDER":"AWS",
     "AWS_REGION":"ap-northeast-1",
-    "OCR_PROVIDER":"AWS",
-    "USE_GRAPH_ORCHESTRATOR":"true"
+    "OCR_PROVIDER":"AWS"
   }'
 
 # 4. 更新（2回目以降）
@@ -210,8 +217,14 @@ def handler(event, context):
     if method == "OPTIONS":
         return create_response({})
 
-    # ルーティング
-    if "/evaluate" in path:
+    # ルーティング（より具体的なパスを先にマッチ）
+    if "/evaluate/submit" in path:
+        return handle_evaluate_submit_request(event)
+    elif "/evaluate/status" in path:
+        return handle_evaluate_status_request(event)
+    elif "/evaluate/results" in path:
+        return handle_evaluate_results_request(event)
+    elif "/evaluate" in path:
         return handle_evaluate_request(event)
     elif "/health" in path:
         return handle_health_request(event)
@@ -290,6 +303,130 @@ def handle_config_request(event):
     }
 
     return create_response(config)
+
+
+# =============================================================================
+# 非同期APIエンドポイント（504タイムアウト対策）
+# =============================================================================
+
+def handle_evaluate_submit_request(event):
+    """
+    POST /evaluate/submit - 非同期ジョブ送信エンドポイント
+    """
+    from core.handlers import parse_request_body
+    from core.async_handlers import handle_submit
+
+    logger.info("=" * 60)
+    logger.info("[AWS Lambda] /evaluate/submit が呼び出されました")
+
+    method = get_method(event)
+    if method != "POST":
+        return create_error_response("Method not allowed", 405)
+
+    try:
+        body = get_body(event)
+        items, error = parse_request_body(body)
+
+        if error:
+            logger.error(f"[AWS Lambda] リクエスト解析エラー: {error}")
+            return create_error_response(error, 400)
+
+        logger.info(f"[AWS Lambda] 受信: {len(items)}件のテスト項目")
+
+        # テナントIDを取得
+        headers = event.get("headers", {}) or {}
+        tenant_id = headers.get("x-tenant-id", headers.get("X-Tenant-ID", "default"))
+
+        response = run_async(handle_submit(items=items, tenant_id=tenant_id))
+
+        if response.get("error"):
+            logger.error(f"[AWS Lambda] ジョブ送信エラー: {response.get('message')}")
+            return create_response(response, 500)
+
+        logger.info(f"[AWS Lambda] ジョブ送信完了: {response.get('job_id')}")
+        return create_response(response, 202)
+
+    except Exception as e:
+        error_details = traceback.format_exc()
+        logger.error(f"[AWS Lambda] 予期せぬエラー: {e}")
+        return create_error_response(str(e), 500, error_details)
+
+
+def handle_evaluate_status_request(event):
+    """
+    GET /evaluate/status/{job_id} - ジョブステータス確認エンドポイント
+    """
+    from core.async_handlers import handle_status
+
+    path = get_path(event)
+    # パスからjob_idを抽出: /evaluate/status/{job_id}
+    parts = path.split("/")
+    job_id = parts[-1] if len(parts) > 0 else None
+
+    if not job_id or job_id == "status":
+        # クエリパラメータから取得を試みる
+        query_params = event.get("queryStringParameters", {}) or {}
+        job_id = query_params.get("job_id")
+
+    if not job_id:
+        return create_error_response("job_id is required", 400)
+
+    logger.debug(f"[AWS Lambda] /evaluate/status/{job_id} が呼び出されました")
+
+    try:
+        response = run_async(handle_status(job_id))
+
+        if response.get("status") == "not_found":
+            return create_error_response(f"Job not found: {job_id}", 404)
+
+        return create_response(response)
+
+    except Exception as e:
+        error_details = traceback.format_exc()
+        logger.error(f"[AWS Lambda] 予期せぬエラー: {e}")
+        return create_error_response(str(e), 500, error_details)
+
+
+def handle_evaluate_results_request(event):
+    """
+    GET /evaluate/results/{job_id} - ジョブ結果取得エンドポイント
+    """
+    from core.async_handlers import handle_results
+
+    path = get_path(event)
+    # パスからjob_idを抽出: /evaluate/results/{job_id}
+    parts = path.split("/")
+    job_id = parts[-1] if len(parts) > 0 else None
+
+    if not job_id or job_id == "results":
+        query_params = event.get("queryStringParameters", {}) or {}
+        job_id = query_params.get("job_id")
+
+    if not job_id:
+        return create_error_response("job_id is required", 400)
+
+    logger.info(f"[AWS Lambda] /evaluate/results/{job_id} が呼び出されました")
+
+    try:
+        response = run_async(handle_results(job_id))
+
+        if response.get("status") == "not_found":
+            return create_error_response(f"Job not found: {job_id}", 404)
+
+        if response.get("status") not in ["completed", "failed"]:
+            return create_response({
+                "job_id": job_id,
+                "status": response.get("status"),
+                "message": "Job not completed yet. Please check status endpoint."
+            }, 202)
+
+        logger.info(f"[AWS Lambda] 結果返却: {len(response.get('results', []))}件")
+        return create_response(response)
+
+    except Exception as e:
+        error_details = traceback.format_exc()
+        logger.error(f"[AWS Lambda] 予期せぬエラー: {e}")
+        return create_error_response(str(e), 500, error_details)
 
 
 # =============================================================================

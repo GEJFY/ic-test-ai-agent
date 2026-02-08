@@ -180,6 +180,7 @@ class LLMProvider(Enum):
     │ AZURE_FOUNDRY    │ 複数モデル対応、統合管理、モデルカタログ    │
     │ GCP              │ Gemini、Google検索連携、マルチモーダル      │
     │ AWS              │ Claude、既存AWSサービスとの統合、IAM連携    │
+    │ LOCAL            │ Ollama、ローカル実行、プライバシー重視      │
     └──────────────────┴─────────────────────────────────────────────┘
 
     【使用例】
@@ -197,6 +198,7 @@ class LLMProvider(Enum):
     AZURE_FOUNDRY = "AZURE_FOUNDRY"    # Azure AI Foundry
     GCP = "GCP"                        # Google Cloud Vertex AI
     AWS = "AWS"                        # Amazon Bedrock
+    LOCAL = "LOCAL"                    # Ollama (ローカルLLM)
 
 
 # =============================================================================
@@ -267,28 +269,121 @@ class LLMFactory:
         LLMProvider.AWS: [
             "AWS_REGION",                     # AWSリージョン（例: us-east-1）
         ],
+        LLMProvider.LOCAL: [
+            # Ollamaはデフォルトでlocalhost:11434で動作するため必須環境変数なし
+            # OLLAMA_BASE_URLはオプション（カスタムエンドポイント用）
+        ],
     }
 
     # -------------------------------------------------------------------------
-    # デフォルトモデル（プロバイダー別）
+    # デフォルトモデル（プロバイダー別）- 2026年2月最新
     # -------------------------------------------------------------------------
     # 明示的にモデルが指定されない場合に使用されるデフォルト値
+    # Note: AWS Bedrockでは on-demand throughput には inference profile ID が必要
     DEFAULT_MODELS: Dict[LLMProvider, Optional[str]] = {
         LLMProvider.AZURE: None,  # Azure OpenAIはデプロイ名を使用
-        LLMProvider.AZURE_FOUNDRY: "gpt-4o",
-        LLMProvider.GCP: "gemini-1.5-pro",
-        LLMProvider.AWS: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+        LLMProvider.AZURE_FOUNDRY: "gpt-5-nano",  # GPT-5 Nano (動作確認済み)
+        LLMProvider.GCP: "gemini-2.5-flash",  # Gemini 2.5 Flash (動作確認済み)
+        LLMProvider.AWS: "jp.anthropic.claude-sonnet-4-5-20250929-v1:0",  # Claude Sonnet 4.5 JP (動作確認済み)
+        LLMProvider.LOCAL: "llama3.2:8b",      # Llama 3.2 8B (Ollama)
     }
 
     # -------------------------------------------------------------------------
-    # 画像認識対応モデル
+    # コスト重視モデル（プロバイダー別）- 2026年2月最新
+    # -------------------------------------------------------------------------
+    # 低コスト・高速応答を優先する場合に使用
+    COST_EFFECTIVE_MODELS: Dict[LLMProvider, Optional[str]] = {
+        LLMProvider.AZURE: None,
+        LLMProvider.AZURE_FOUNDRY: "gpt-5-nano",        # GPT-5 Nano (高速・低コスト)
+        LLMProvider.GCP: "gemini-2.5-flash-lite",       # Gemini 2.5 Flash Lite (動作確認済み)
+        LLMProvider.AWS: "anthropic.claude-3-haiku-20240307-v1:0",  # Claude 3 Haiku
+        LLMProvider.LOCAL: "phi4:3.8b",                 # Phi-4 3.8B (超軽量)
+    }
+
+    # -------------------------------------------------------------------------
+    # ハイエンドモデル（プロバイダー別）- 2026年2月最新
+    # -------------------------------------------------------------------------
+    # 最高精度を求める場合に使用（コスト高）
+    # Note: AWS Bedrockでは on-demand throughput には inference profile ID が必要
+    HIGH_END_MODELS: Dict[LLMProvider, Optional[str]] = {
+        LLMProvider.AZURE: None,
+        LLMProvider.AZURE_FOUNDRY: "gpt-5-nano",        # GPT-5 Nano (デプロイ済み)
+        LLMProvider.GCP: "gemini-2.5-pro",              # Gemini 2.5 Pro (動作確認済み)
+        LLMProvider.AWS: "global.anthropic.claude-opus-4-6-v1",  # Claude Opus 4.6 (動作確認済み)
+        LLMProvider.LOCAL: "llama3.2:70b",              # Llama 3.2 70B
+    }
+
+    # -------------------------------------------------------------------------
+    # 画像認識対応モデル - 2026年2月最新
     # -------------------------------------------------------------------------
     # Vision（画像認識）機能をサポートするモデル
     VISION_MODELS: Dict[LLMProvider, Optional[str]] = {
         LLMProvider.AZURE: None,  # Visionデプロイまたはデフォルト
-        LLMProvider.AZURE_FOUNDRY: "gpt-4o",    # GPT-4oはVision対応
-        LLMProvider.GCP: "gemini-1.5-pro",      # GeminiはネイティブでVision対応
-        LLMProvider.AWS: "anthropic.claude-3-5-sonnet-20241022-v2:0",  # Claude 3はVision対応
+        LLMProvider.AZURE_FOUNDRY: "gpt-5-nano",        # GPT-5 NanoはVision対応
+        LLMProvider.GCP: "gemini-2.5-flash",            # Gemini 2.5はネイティブでVision対応（動作確認済み）
+        LLMProvider.AWS: "anthropic.claude-3-sonnet-20240229-v1:0",  # Claude 3 Sonnet Vision対応
+        LLMProvider.LOCAL: "llava:34b",                 # LLaVA 34B (Vision対応、Ollama)
+    }
+
+    # -------------------------------------------------------------------------
+    # 利用可能なモデル一覧（プロバイダー別）
+    # -------------------------------------------------------------------------
+    AVAILABLE_MODELS: Dict[LLMProvider, Dict[str, str]] = {
+        LLMProvider.AZURE_FOUNDRY: {
+            # GPT-5.2 シリーズ (2026年1月〜)
+            "gpt-5.2": "GPT-5.2 - 企業エージェント・コーディング向けフラッグシップ",
+            "gpt-5.2-codex": "GPT-5.2 Codex - コード特化モデル",
+            # GPT-5.1 シリーズ
+            "gpt-5.1": "GPT-5.1 - 推論機能付きモデル",
+            "gpt-5.1-chat": "GPT-5.1 Chat - 推論機能付き会話モデル",
+            # GPT-5 シリーズ
+            "gpt-5": "GPT-5 - ロジック・マルチステップタスク向け",
+            "gpt-5-chat": "GPT-5 Chat - 会話・マルチモーダル向け",
+            "gpt-5-mini": "GPT-5 Mini - 軽量版",
+            "gpt-5-nano": "GPT-5 Nano - 高速・低レイテンシ向け",
+            "gpt-5-codex": "GPT-5 Codex - コード特化",
+            # レガシー
+            "gpt-4o": "GPT-4o - 旧世代フラッグシップ",
+            "gpt-4o-mini": "GPT-4o Mini - 旧世代軽量版",
+            # Claude モデル (Anthropic via Microsoft Foundry)
+            "claude-opus-4-6": "Claude Opus 4.6 - Anthropic最高性能（エージェントチーム、1Mトークン）",
+            "claude-opus-4-5": "Claude Opus 4.5 - Anthropic高性能モデル",
+            "claude-sonnet-4-5": "Claude Sonnet 4.5 - Anthropicバランス型",
+            "claude-haiku-4-5": "Claude Haiku 4.5 - Anthropic高速・低コスト",
+        },
+        LLMProvider.GCP: {
+            # Gemini 3.x シリーズ (Preview - 申請が必要)
+            "gemini-3-pro-preview": "Gemini 3 Pro - 高度な推論・エージェント向け（Preview）",
+            "gemini-3-flash-preview": "Gemini 3 Flash - 高速・マルチモーダル（Preview）",
+            # Gemini 2.5 シリーズ (GA - 動作確認済み)
+            "gemini-2.5-pro": "Gemini 2.5 Pro - 高度な推論・コーディング（動作確認済み）",
+            "gemini-2.5-flash": "Gemini 2.5 Flash - 高速・コスト効率（動作確認済み・推奨）",
+            "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite - 超軽量（動作確認済み）",
+            # Gemini 2.0 シリーズ (Legacy - 2026/3/31廃止予定)
+            "gemini-2.0-flash-001": "Gemini 2.0 Flash - レガシー（2026/3/31廃止予定）",
+        },
+        LLMProvider.AWS: {
+            # Claude Opus 4.x シリーズ (2026年〜)
+            # Note: on-demand throughput には inference profile ID が必要
+            #       global.* = グローバル推論プロファイル
+            #       jp.* = 日本リージョン推論プロファイル
+            "global.anthropic.claude-opus-4-6-v1": "Claude Opus 4.6 - 最高性能モデル（動作確認済み）",
+            "global.anthropic.claude-opus-4-5-20251101-v1:0": "Claude Opus 4.5 - 高性能モデル（動作確認済み）",
+            "global.anthropic.claude-sonnet-4-5-v1": "Claude Sonnet 4.5 - バランス型",
+            "global.anthropic.claude-haiku-4-5-v1": "Claude Haiku 4.5 - 高速・低コスト",
+            # JP リージョン inference profile
+            "jp.anthropic.claude-sonnet-4-5-20250929-v1:0": "Claude Sonnet 4.5 (JP) - 日本リージョン（動作確認済み）",
+            # レガシー（Vision対応）
+            "anthropic.claude-3-sonnet-20240229-v1:0": "Claude 3 Sonnet - Vision対応",
+            "anthropic.claude-3-haiku-20240307-v1:0": "Claude 3 Haiku - 高速・低コスト",
+        },
+        LLMProvider.LOCAL: {
+            "llama3.2:8b": "Llama 3.2 8B - バランス型",
+            "llama3.2:70b": "Llama 3.2 70B - 高精度",
+            "phi4:3.8b": "Phi-4 3.8B - 超軽量",
+            "mistral:7b": "Mistral 7B - 軽量高速",
+            "llava:34b": "LLaVA 34B - Vision対応",
+        },
     }
 
     # -------------------------------------------------------------------------
@@ -297,11 +392,18 @@ class LLMFactory:
     # これらのモデル（主に推論系）はtemperatureパラメータを受け付けません
     # temperatureを渡すとエラーになるため、自動的にスキップします
     MODELS_WITHOUT_TEMPERATURE: List[str] = [
+        # GPT-5.x 推論系
         "gpt-5-nano",
+        "gpt-5.1",
+        "gpt-5.1-chat",
+        # o シリーズ
         "o1",
         "o1-mini",
         "o1-preview",
-        "deepseek-r1",  # 推論モデル
+        "o3",
+        "o3-mini",
+        # その他推論モデル
+        "deepseek-r1",
     ]
 
     # =========================================================================
@@ -348,6 +450,7 @@ class LLMFactory:
                 "  AZURE_FOUNDRY - Azure AI Foundry\n"
                 "  GCP           - Google Cloud Vertex AI\n"
                 "  AWS           - Amazon Bedrock\n"
+                "  LOCAL         - Ollama (ローカルLLM)\n"
                 "\n"
                 "【設定方法】\n"
                 "  環境変数: export LLM_PROVIDER=AZURE_FOUNDRY\n"
@@ -523,6 +626,8 @@ class LLMFactory:
                 llm = cls._create_gcp_model(temperature, model, **kwargs)
             elif provider == LLMProvider.AWS:
                 llm = cls._create_aws_model(temperature, model, **kwargs)
+            elif provider == LLMProvider.LOCAL:
+                llm = cls._create_local_model(temperature, model, **kwargs)
             else:
                 # 通常到達しないが、念のため
                 raise LLMConfigError(f"未対応のプロバイダー: {provider}")
@@ -668,12 +773,19 @@ class LLMFactory:
         # temperatureパラメータ対応を確認
         # 一部のモデル（推論系）はtemperatureを受け付けない
         model_lower = model_name.lower() if model_name else ""
-        if not any(m in model_lower for m in cls.MODELS_WITHOUT_TEMPERATURE):
+        is_temp_unsupported = any(m in model_lower for m in cls.MODELS_WITHOUT_TEMPERATURE)
+
+        if not is_temp_unsupported:
             model_kwargs["temperature"] = temperature
         else:
+            # temperature非対応モデルでも安定性を高めるためseedを設定
+            # seedは再現可能な出力を促す（完全な再現は保証されない）
+            # 環境変数LLM_SEEDで制御可能（デフォルト: 42）
+            seed = int(os.getenv("LLM_SEED", "42"))
+            model_kwargs["seed"] = seed  # LangChain推奨: 明示的パラメータとして指定
             logger.info(
                 f"[LLMFactory] モデル '{model_name}' は "
-                f"temperatureパラメータ非対応のためスキップ"
+                f"temperatureパラメータ非対応のためseed={seed}で安定化"
             )
 
         # モデルを作成
@@ -770,7 +882,7 @@ class LLMFactory:
         # 環境変数から設定を取得
         region = os.getenv("AWS_REGION", "us-east-1")
         profile = os.getenv("AWS_PROFILE")
-        model_id = model or cls.DEFAULT_MODELS[LLMProvider.AWS]
+        model_id = model or os.getenv("AWS_BEDROCK_MODEL_ID", cls.DEFAULT_MODELS[LLMProvider.AWS])
 
         logger.debug(
             f"[LLMFactory] AWS Bedrock設定: "
@@ -779,23 +891,173 @@ class LLMFactory:
             f"model={model_id}"
         )
 
-        # モデルを作成
-        llm = ChatBedrock(
-            region_name=region,
-            model_id=model_id,
-            model_kwargs={
+        # モデルパラメータを構築
+        bedrock_kwargs = {
+            "region_name": region,
+            "model_id": model_id,
+            "model_kwargs": {
                 "temperature": temperature,
                 **kwargs.get("model_kwargs", {})
             },
-            credentials_profile_name=profile,
-        )
+        }
+
+        # プロファイルが指定されている場合のみ追加（Lambda環境ではIAMロールを使用）
+        if profile:
+            bedrock_kwargs["credentials_profile_name"] = profile
+
+        # モデルを作成
+        llm = ChatBedrock(**bedrock_kwargs)
 
         logger.info(f"[LLMFactory] AWS Bedrockモデル作成完了: {model_id}")
+        return llm
+
+    @classmethod
+    def _create_local_model(
+        cls,
+        temperature: float,
+        model: Optional[str],
+        **kwargs
+    ):
+        """
+        Ollama (ローカルLLM) ChatModelを作成する（内部メソッド）
+
+        【Ollamaとは】
+        ローカル環境でLLMを実行するためのツールです。
+        LLaMA、Mistral、Phi等のオープンソースモデルが利用可能です。
+
+        【特徴】
+        - プライバシー: データが外部に送信されない
+        - オフライン: ネットワーク接続不要
+        - 無料: 追加コストなし
+        - カスタマイズ: モデルの微調整が可能
+
+        【推奨モデル】
+        - llama3.1:8b   : バランスの取れた汎用モデル
+        - llama3.1:70b  : 高精度モデル（要高スペック）
+        - mistral:7b    : 軽量高速モデル
+        - phi3:3.8b     : 超軽量モデル
+        - llava:13b     : Vision対応モデル
+
+        【必要条件】
+        - Ollamaがインストール・起動していること
+        - 使用するモデルがpullされていること
+          例: ollama pull llama3.1:8b
+
+        Args:
+            temperature: 生成の多様性
+            model: モデル名の上書き
+            **kwargs: 追加パラメータ
+
+        Returns:
+            ChatOllama: Ollamaチャットモデル
+        """
+        logger.debug("[LLMFactory] Ollamaモデル作成開始")
+
+        from langchain_ollama import ChatOllama
+
+        # 環境変数から設定を取得
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        model_name = model or os.getenv("OLLAMA_MODEL", cls.DEFAULT_MODELS[LLMProvider.LOCAL])
+
+        logger.debug(
+            f"[LLMFactory] Ollama設定: "
+            f"base_url={base_url}, "
+            f"model={model_name}"
+        )
+
+        # モデルを作成
+        llm = ChatOllama(
+            base_url=base_url,
+            model=model_name,
+            temperature=temperature,
+            **kwargs
+        )
+
+        logger.info(f"[LLMFactory] Ollamaモデル作成完了: {model_name}")
         return llm
 
     # =========================================================================
     # Vision対応モデル作成メソッド
     # =========================================================================
+
+    @classmethod
+    def create_cost_effective_model(
+        cls,
+        temperature: float = 0.0,
+        **kwargs
+    ):
+        """
+        コスト重視モデルを作成する
+
+        高速・低コストを優先する場合に使用します。
+        処理速度が重要な場合や、大量のリクエストを処理する場合に推奨。
+
+        Args:
+            temperature: 生成の多様性
+            **kwargs: 追加パラメータ
+
+        Returns:
+            ChatModel: コスト重視LLMインスタンス
+
+        【対応モデル】
+        - Azure: GPT-5 Nano
+        - GCP: Gemini 3 Flash
+        - AWS: Claude Haiku 4.5
+        """
+        provider = cls.get_provider()
+        model = cls.COST_EFFECTIVE_MODELS.get(provider)
+        logger.info(f"[LLMFactory] コスト重視モデル作成: {model}")
+        return cls.create_chat_model(temperature=temperature, model=model, **kwargs)
+
+    @classmethod
+    def create_high_end_model(
+        cls,
+        temperature: float = 0.0,
+        **kwargs
+    ):
+        """
+        ハイエンドモデルを作成する
+
+        最高精度を求める場合に使用します。
+        複雑な推論や高品質な出力が必要な場合に推奨。
+
+        Args:
+            temperature: 生成の多様性
+            **kwargs: 追加パラメータ
+
+        Returns:
+            ChatModel: ハイエンドLLMインスタンス
+
+        【対応モデル】
+        - Azure: GPT-5.2
+        - GCP: Gemini 3 Pro
+        - AWS: Claude Opus 4.6
+        """
+        provider = cls.get_provider()
+        model = cls.HIGH_END_MODELS.get(provider)
+        logger.info(f"[LLMFactory] ハイエンドモデル作成: {model}")
+        return cls.create_chat_model(temperature=temperature, model=model, **kwargs)
+
+    @classmethod
+    def get_available_models(cls) -> Dict[str, str]:
+        """
+        現在のプロバイダーで利用可能なモデル一覧を取得する
+
+        Returns:
+            dict: モデルID -> 説明 のマッピング
+
+        【使用例】
+        ```python
+        models = LLMFactory.get_available_models()
+        for model_id, description in models.items():
+            print(f"{model_id}: {description}")
+        ```
+        """
+        try:
+            provider = cls.get_provider()
+            return cls.AVAILABLE_MODELS.get(provider, {})
+        except LLMConfigError:
+            return {}
 
     @classmethod
     def create_vision_model(cls, **kwargs):
@@ -852,6 +1114,10 @@ class LLMFactory:
             ),
             LLMProvider.GCP: cls.VISION_MODELS[LLMProvider.GCP],
             LLMProvider.AWS: cls.VISION_MODELS[LLMProvider.AWS],
+            LLMProvider.LOCAL: os.getenv(
+                "OLLAMA_VISION_MODEL",
+                cls.VISION_MODELS[LLMProvider.LOCAL]
+            ),
         }
 
         selected_model = vision_models.get(provider)
@@ -964,7 +1230,7 @@ class LLMFactory:
             "AZURE": {
                 "name": "Azure OpenAI Service",
                 "description": "MicrosoftのマネージドOpenAIサービス。企業向けSLA保証あり。",
-                "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-35-turbo"],
+                "models": ["gpt-5.2", "gpt-5", "gpt-5-nano", "gpt-4o"],
                 "required_env_vars": cls.REQUIRED_ENV_VARS[LLMProvider.AZURE],
                 "optional_env_vars": [
                     "AZURE_OPENAI_API_VERSION",
@@ -974,8 +1240,11 @@ class LLMFactory:
             },
             "AZURE_FOUNDRY": {
                 "name": "Azure AI Foundry",
-                "description": "Azure AI Foundry - 統合AIプラットフォーム。モデルカタログから多様なモデルを選択可能。",
-                "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "Phi-4", "DeepSeek-R1", "Mistral"],
+                "description": "Azure AI Foundry - 統合AIプラットフォーム。GPT-5.2、Phi-4、DeepSeek-R1等が利用可能。",
+                "models": list(cls.AVAILABLE_MODELS.get(LLMProvider.AZURE_FOUNDRY, {}).keys()),
+                "models_detail": cls.AVAILABLE_MODELS.get(LLMProvider.AZURE_FOUNDRY, {}),
+                "high_end": cls.HIGH_END_MODELS[LLMProvider.AZURE_FOUNDRY],
+                "cost_effective": cls.COST_EFFECTIVE_MODELS[LLMProvider.AZURE_FOUNDRY],
                 "required_env_vars": cls.REQUIRED_ENV_VARS[LLMProvider.AZURE_FOUNDRY],
                 "optional_env_vars": [
                     "AZURE_FOUNDRY_MODEL",
@@ -986,8 +1255,11 @@ class LLMFactory:
             },
             "GCP": {
                 "name": "Google Cloud Vertex AI",
-                "description": "Google CloudのAIプラットフォーム。Geminiモデルとマルチモーダル対応。",
-                "models": ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash-exp"],
+                "description": "Google CloudのAIプラットフォーム。Gemini 3シリーズとマルチモーダル対応。",
+                "models": list(cls.AVAILABLE_MODELS.get(LLMProvider.GCP, {}).keys()),
+                "models_detail": cls.AVAILABLE_MODELS.get(LLMProvider.GCP, {}),
+                "high_end": cls.HIGH_END_MODELS[LLMProvider.GCP],
+                "cost_effective": cls.COST_EFFECTIVE_MODELS[LLMProvider.GCP],
                 "required_env_vars": cls.REQUIRED_ENV_VARS[LLMProvider.GCP],
                 "optional_env_vars": [
                     "GOOGLE_APPLICATION_CREDENTIALS"
@@ -996,19 +1268,34 @@ class LLMFactory:
             },
             "AWS": {
                 "name": "Amazon Bedrock",
-                "description": "AWSのマネージド基盤モデルサービス。Claude、Titan等が利用可能。",
-                "models": [
-                    "anthropic.claude-3-5-sonnet-20241022-v2:0",
-                    "anthropic.claude-3-haiku-20240307-v1:0",
-                    "amazon.titan-text-express-v1"
-                ],
+                "description": "AWSのマネージド基盤モデルサービス。Claude Opus 4.6が利用可能。",
+                "models": list(cls.AVAILABLE_MODELS.get(LLMProvider.AWS, {}).keys()),
+                "models_detail": cls.AVAILABLE_MODELS.get(LLMProvider.AWS, {}),
+                "high_end": cls.HIGH_END_MODELS[LLMProvider.AWS],
+                "cost_effective": cls.COST_EFFECTIVE_MODELS[LLMProvider.AWS],
                 "required_env_vars": cls.REQUIRED_ENV_VARS[LLMProvider.AWS],
                 "optional_env_vars": [
                     "AWS_ACCESS_KEY_ID",
                     "AWS_SECRET_ACCESS_KEY",
-                    "AWS_PROFILE"
+                    "AWS_PROFILE",
+                    "AWS_BEDROCK_MODEL_ID"
                 ],
                 "documentation": "https://docs.aws.amazon.com/bedrock/"
+            },
+            "LOCAL": {
+                "name": "Ollama (ローカルLLM)",
+                "description": "ローカル環境で動作するLLM。プライバシー重視・オフライン対応。",
+                "models": list(cls.AVAILABLE_MODELS.get(LLMProvider.LOCAL, {}).keys()),
+                "models_detail": cls.AVAILABLE_MODELS.get(LLMProvider.LOCAL, {}),
+                "high_end": cls.HIGH_END_MODELS[LLMProvider.LOCAL],
+                "cost_effective": cls.COST_EFFECTIVE_MODELS[LLMProvider.LOCAL],
+                "required_env_vars": cls.REQUIRED_ENV_VARS[LLMProvider.LOCAL],
+                "optional_env_vars": [
+                    "OLLAMA_BASE_URL",
+                    "OLLAMA_MODEL",
+                    "OLLAMA_VISION_MODEL"
+                ],
+                "documentation": "https://ollama.ai/"
             }
         }
 

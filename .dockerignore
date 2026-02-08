@@ -1,0 +1,76 @@
+# =============================================================================
+# .dockerignore - Docker ビルド除外ファイル
+# =============================================================================
+
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv/
+ENV/
+.eggs
+*.egg-info/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 環境設定（機密情報）
+.env
+.env.*
+!.env.example
+*.local.settings.json
+local.settings.json
+
+# テスト
+tests/
+pytest.ini
+.pytest_cache/
+htmlcov/
+.coverage
+
+# ドキュメント
+docs/
+*.md
+!README.md
+
+# 一時ファイル
+*.log
+*.tmp
+.deploy/
+deploy.zip
+
+# プラットフォーム別（Dockerでは不要）
+platforms/azure/
+platforms/aws/
+platforms/gcp/
+
+# Terraform
+terraform/
+*.tf
+*.tfstate*
+.terraform/
+
+# Excel/VBA
+*.xlsm
+*.xlsb
+*.bas
+
+# スクリプト
+*.ps1
+*.bat
+*.sh
+
+# その他
+.DS_Store
+Thumbs.db

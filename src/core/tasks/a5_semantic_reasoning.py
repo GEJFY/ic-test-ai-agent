@@ -51,75 +51,14 @@ from langchain_core.output_parsers import JsonOutputParser
 
 from .base_task import BaseAuditTask, TaskType, TaskResult, AuditContext
 
+# プロンプトをprompts.pyからインポート
+from ..prompts import A5_SEMANTIC_REASONING_PROMPT
+
 # =============================================================================
 # ログ設定
 # =============================================================================
 
 logger = logging.getLogger(__name__)
-
-# =============================================================================
-# プロンプトテンプレート
-# =============================================================================
-
-SEMANTIC_REASONING_PROMPT = """あなたは内部統制監査の専門家です。
-規程の抽象的な要求事項と、実際の実施記録が意図に沿っているかを判定してください。
-
-【重要な指示】
-1. 規程の抽象的な要求（「重要取引は適切に審査」等）を具体的な判定基準に分解
-2. AIが自律的に以下の判定基準を定義して評価：
-   - 金額基準（重要性の閾値）
-   - 専門家の関与（必要な資格・経験）
-   - 承認プロセス（承認者の適格性、タイミング）
-   - 文書化要件（記録の完全性）
-3. 実際の記録がこれらの基準を満たしているか判定
-4. 証跡の具体的な記載内容を引用して説明
-
-【統制記述（規程要求）】
-{control_description}
-
-【テスト手続き】
-{test_procedure}
-
-【実施記録・エビデンス】
-{evidence_data}
-
-【出力形式】
-以下のJSON形式で回答してください：
-{{
-    "requirement_analysis": {{
-        "abstract_requirement": "規程の抽象的な要求",
-        "interpreted_criteria": [
-            {{
-                "criterion_name": "判定基準名",
-                "description": "基準の説明",
-                "threshold_or_standard": "具体的な閾値・基準",
-                "rationale": "この基準を設定した根拠"
-            }}
-        ]
-    }},
-    "evidence_evaluation": [
-        {{
-            "criterion_name": "判定基準名",
-            "evidence_found": "発見されたエビデンスの具体的な記載内容（引用）",
-            "evidence_source": "証跡ファイル名とその箇所",
-            "meets_criterion": true/false,
-            "gap_analysis": "基準との差異（あれば）"
-        }}
-    ],
-    "overall_assessment": {{
-        "compliance_level": "完全準拠/概ね準拠/一部不備/重大な不備",
-        "criteria_met": 満たした基準数,
-        "criteria_total": 総基準数,
-        "key_findings": ["主要な発見事項"]
-    }},
-    "confidence": 0.0-1.0,
-    "reasoning": {{
-        "verification_summary": "何を検証して何が確認できたか（具体的に）",
-        "evidence_details": "どの証跡のどの部分で確認したか（引用含む）",
-        "conclusion": "結論とその根拠"
-    }}
-}}
-"""
 
 
 # =============================================================================
@@ -170,7 +109,7 @@ class SemanticReasoningTask(BaseAuditTask):
             llm: LangChain ChatModel
         """
         super().__init__(llm)
-        self.prompt = ChatPromptTemplate.from_template(SEMANTIC_REASONING_PROMPT)
+        self.prompt = ChatPromptTemplate.from_template(A5_SEMANTIC_REASONING_PROMPT)
         self.parser = JsonOutputParser()
 
         logger.debug("[A5] SemanticReasoningTask初期化完了")

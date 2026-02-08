@@ -35,6 +35,15 @@
 Option Explicit
 
 '===============================================================================
+' Windows API宣言
+'===============================================================================
+#If VBA7 Then
+    Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As LongPtr)
+#Else
+    Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
+#End If
+
+'===============================================================================
 ' 定数定義セクション
 ' システム全体で使用する固定値を定義します
 '===============================================================================
@@ -78,6 +87,8 @@ Private Type SettingConfig
     DataStartRow As Long        ' データ開始行（通常は2行目、ヘッダーが1行目のため）
     SheetName As String         ' 対象シート名（空欄の場合はアクティブシート）
     BatchSize As Long           ' 一度に処理する項目数（タイムアウト対策用）
+    AsyncMode As Boolean        ' 非同期モード（True=504タイムアウト対策）
+    PollingIntervalSec As Long  ' ポーリング間隔（秒）
 
     '--- 入力列マッピング（Excelのどの列にどのデータがあるか）---
     ColID As String                  ' ID列（例："A"）
@@ -92,9 +103,16 @@ Private Type SettingConfig
     ApiEndpoint As String       ' APIのURL
     ApiKey As String            ' 認証用APIキー
     ApiAuthHeader As String     ' 認証ヘッダー名（例：x-functions-key）
+    ApiClient As String         ' APIクライアント（POWERSHELL/VBA）
+    ApiAuthType As String       ' 認証タイプ（functionsKey/azureAd）
+
+    '--- Azure AD認証設定（authType="azureAd"の場合に使用）---
+    AzureAdTenantId As String   ' Azure ADテナントID
+    AzureAdClientId As String   ' アプリケーション（クライアント）ID
+    AzureAdScope As String      ' スコープ（api://{clientId}/.default）
 
     '--- 出力列マッピング（APIの応答をどの列に書き込むか）---
-    ColEvaluationResult As String    ' 評価結果列（True/False → 有効/非有効）
+    ColEvaluationResult As String    ' 評価結果列（True/False → 有効/不備）
     ColExecutionPlanSummary As String ' 実行計画サマリー列（テスト計画）
     ColJudgmentBasis As String       ' 判断根拠列
     ColDocumentReference As String   ' 文書参照列
@@ -102,7 +120,7 @@ Private Type SettingConfig
 
     '--- 表示設定 ---
     BooleanDisplayTrue As String     ' Trueの表示文字列（例："有効"）
-    BooleanDisplayFalse As String    ' Falseの表示文字列（例："非有効"）
+    BooleanDisplayFalse As String    ' Falseの表示文字列（例："不備"）
 End Type
 
 '===============================================================================
@@ -111,6 +129,9 @@ End Type
 '===============================================================================
 Private m_LogFilePath As String     ' ログファイルのフルパス
 Private m_SessionId As String       ' 処理セッションの一意識別子
+Private m_AzureAdNotified As Boolean ' Azure AD認証通知済みフラグ（1回だけ表示）
+Private m_TokenCacheChecked As Boolean ' トークンキャッシュ確認済みフラグ
+Private m_HasCachedToken As Boolean ' キャッシュ済みトークンが存在するか
 
 '===============================================================================
 ' メイン処理: ProcessWithApi
@@ -286,8 +307,13 @@ Public Sub ProcessWithApi()
             Exit For
         End If
 
-        '--- 6c: PowerShell経由でAPI呼び出し ---
-        success = CallPowerShellApi(inputJsonPath, outputJsonPath, config)
+        '--- 6c: 古い出力ファイルを削除（キャッシュ対策）---
+        On Error Resume Next
+        Kill outputJsonPath
+        On Error GoTo 0
+
+        '--- 6d: API呼び出し（PowerShell/VBA切り替え）---
+        success = CallApi(inputJsonPath, outputJsonPath, config)
 
         If Not success Then
             WriteLog LOG_LEVEL_ERROR, "ProcessWithApi", "API呼び出し失敗 - バッチ " & batchNum
@@ -361,6 +387,190 @@ Public Sub ProcessWithApi()
 End Sub
 
 '===============================================================================
+' エクスポート処理: ProcessForExport
+'===============================================================================
+' 【機能】
+' PowerShell/VBA COM両方が使用できない環境向けに、
+' 評価用JSONファイルをエクスポートします。
+'
+' 【EXPORTモードの使い方】
+' 1. setting.jsonで "apiClient": "EXPORT" を設定
+' 2. このマクロ（ProcessForExport）を実行
+' 3. エクスポートされたJSONをブラウザ（web/index.html）でアップロード
+' 4. AI評価完了後、結果JSONをダウンロード
+' 5. ImportResultsマクロで結果をExcelにインポート
+'===============================================================================
+Public Sub ProcessForExport()
+    Dim config As SettingConfig
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim rowIndices() As Long
+    Dim rowCount As Long
+    Dim i As Long
+    Dim jsonText As String
+    Dim exportPath As String
+    Dim fso As Object
+    Dim baseDir As String
+
+    '--- セッション初期化 ---
+    InitializeSession
+    WriteLog LOG_LEVEL_INFO, "ProcessForExport", "===== エクスポート処理開始 ====="
+
+    '--- 設定ファイルの読み込み ---
+    If Not LoadSettings(config) Then
+        ShowErrorMessage ERR_SETTING_NOT_FOUND, "設定ファイルの読み込みに失敗しました。"
+        Exit Sub
+    End If
+
+    '--- 対象シートの取得 ---
+    If config.SheetName = "" Then
+        Set ws = ActiveSheet
+    Else
+        On Error Resume Next
+        Set ws = ThisWorkbook.Worksheets(config.SheetName)
+        On Error GoTo 0
+        If ws Is Nothing Then
+            ShowErrorMessage ERR_SHEET_NOT_FOUND, "シート '" & config.SheetName & "' が見つかりません。"
+            Exit Sub
+        End If
+    End If
+
+    '--- データ行の収集 ---
+    lastRow = ws.Cells(ws.Rows.Count, config.ColID).End(xlUp).Row
+
+    If lastRow < config.DataStartRow Then
+        ShowErrorMessage ERR_NO_DATA, "処理対象のデータがありません。"
+        Exit Sub
+    End If
+
+    rowCount = 0
+    ReDim rowIndices(1 To lastRow - config.DataStartRow + 1)
+
+    For i = config.DataStartRow To lastRow
+        Dim cellValue As Variant
+        cellValue = ws.Cells(i, config.ColID).Value
+        If Not IsEmpty(cellValue) And Trim(CStr(cellValue)) <> "" Then
+            ' TestTarget列がある場合、TRUEの行のみ対象
+            If config.ColTestTarget <> "" Then
+                Dim testTargetValue As Variant
+                testTargetValue = ws.Cells(i, config.ColTestTarget).Value
+                If UCase(CStr(testTargetValue)) = "TRUE" Or testTargetValue = True Then
+                    rowCount = rowCount + 1
+                    rowIndices(rowCount) = i
+                End If
+            Else
+                rowCount = rowCount + 1
+                rowIndices(rowCount) = i
+            End If
+        End If
+    Next i
+
+    If rowCount = 0 Then
+        ShowErrorMessage ERR_NO_DATA, "処理対象のデータがありません。"
+        Exit Sub
+    End If
+
+    ReDim Preserve rowIndices(1 To rowCount)
+    WriteLog LOG_LEVEL_INFO, "ProcessForExport", "対象データ: " & rowCount & " 件"
+
+    '--- JSON生成 ---
+    jsonText = GenerateJsonForBatch(ws, rowIndices, 1, rowCount, config)
+
+    '--- Base64エンコード済みのEvidenceFilesを追加 ---
+    jsonText = AddEvidenceFilesToJson(jsonText)
+
+    '--- エクスポート先の決定 ---
+    baseDir = ThisWorkbook.Path
+    exportPath = baseDir & "\export_" & Format(Now, "yyyymmdd_hhmmss") & ".json"
+
+    '--- ファイル出力 ---
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim stream As Object
+    Set stream = CreateObject("ADODB.Stream")
+    With stream
+        .Type = 2  ' テキストモード
+        .Charset = "UTF-8"
+        .Open
+        .WriteText jsonText
+        .SaveToFile exportPath, 2  ' 上書き
+        .Close
+    End With
+    Set stream = Nothing
+    Set fso = Nothing
+
+    WriteLog LOG_LEVEL_INFO, "ProcessForExport", "エクスポート完了: " & exportPath
+
+    '--- 完了メッセージ ---
+    MsgBox "JSONファイルをエクスポートしました。" & vbCrLf & vbCrLf & _
+           "ファイル: " & exportPath & vbCrLf & vbCrLf & _
+           "【次のステップ】" & vbCrLf & _
+           "1. web/index.html をブラウザで開く" & vbCrLf & _
+           "2. エクスポートしたJSONファイルをアップロード" & vbCrLf & _
+           "3. AI評価完了後、結果をダウンロード" & vbCrLf & _
+           "4. ImportResultsマクロで結果をインポート", _
+           vbInformation, "エクスポート完了"
+End Sub
+
+'===============================================================================
+' インポート処理: ImportResults
+'===============================================================================
+' 【機能】
+' AI評価結果のJSONファイルを読み込み、Excelに書き戻します。
+' EXPORTモードでWebフロントエンドから取得した結果を取り込む際に使用します。
+'===============================================================================
+Public Sub ImportResults()
+    Dim config As SettingConfig
+    Dim filePath As Variant
+    Dim jsonText As String
+
+    '--- セッション初期化 ---
+    InitializeSession
+    WriteLog LOG_LEVEL_INFO, "ImportResults", "===== インポート処理開始 ====="
+
+    '--- 設定ファイルの読み込み ---
+    If Not LoadSettings(config) Then
+        ShowErrorMessage ERR_SETTING_NOT_FOUND, "設定ファイルの読み込みに失敗しました。"
+        Exit Sub
+    End If
+
+    '--- ファイル選択ダイアログ ---
+    filePath = Application.GetOpenFilename( _
+        FileFilter:="JSONファイル (*.json),*.json", _
+        Title:="AI評価結果のJSONファイルを選択してください")
+
+    If filePath = False Then
+        WriteLog LOG_LEVEL_INFO, "ImportResults", "ファイル選択がキャンセルされました"
+        Exit Sub
+    End If
+
+    WriteLog LOG_LEVEL_INFO, "ImportResults", "選択ファイル: " & filePath
+
+    '--- JSONファイル読み込み ---
+    jsonText = ReadFromFile(CStr(filePath))
+
+    If jsonText = "" Then
+        ShowErrorMessage ERR_FILE_READ_FAILED, "ファイルの読み込みに失敗しました。"
+        Exit Sub
+    End If
+
+    '--- JSON形式チェック ---
+    If Left(Trim(jsonText), 1) <> "[" Then
+        ShowErrorMessage ERR_API_RETURNED_ERROR, "無効なJSONファイルです。配列形式のJSONが必要です。"
+        Exit Sub
+    End If
+
+    '--- Excelへの書き戻し ---
+    WriteResponseToExcel jsonText, config
+
+    WriteLog LOG_LEVEL_INFO, "ImportResults", "===== インポート処理完了 ====="
+
+    '--- 完了メッセージ ---
+    MsgBox "評価結果のインポートが完了しました。" & vbCrLf & vbCrLf & _
+           "結果列を確認してください。", _
+           vbInformation, "インポート完了"
+End Sub
+
+'===============================================================================
 ' セッション初期化
 '===============================================================================
 ' 【機能】
@@ -377,6 +587,11 @@ Private Sub InitializeSession()
     ' セッションIDを生成（日時 + ランダム値で一意性を確保）
     Randomize
     m_SessionId = Format(Now, "yyyymmdd_hhmmss") & "_" & Format(Int(Rnd * 10000), "0000")
+
+    ' Azure AD関連フラグをリセット
+    m_AzureAdNotified = False
+    m_TokenCacheChecked = False
+    m_HasCachedToken = False
 End Sub
 
 '===============================================================================
@@ -466,6 +681,101 @@ Private Sub ShowErrorMessage(errorCode As Long, message As String)
 End Sub
 
 '===============================================================================
+' Azure ADトークンキャッシュ存在確認関数
+'===============================================================================
+' 【機能】
+' PowerShellが使用するトークンキャッシュファイルが存在し、
+' 有効期限内かどうかを確認します。
+'
+' 【戻り値】
+' True: キャッシュが存在し有効、False: キャッシュなしまたは無効
+'
+' 【キャッシュファイルパス】
+' %TEMP%\ic-test-azure-ad-token.json
+'===============================================================================
+Private Function CheckAzureAdTokenCache() As Boolean
+    Dim fso As Object
+    Dim cachePath As String
+    Dim cacheContent As String
+    Dim expiresAt As String
+    Dim expiresDate As Date
+
+    On Error GoTo ErrorHandler
+
+    ' キャッシュファイルパス（PowerShellスクリプトと同じ）
+    cachePath = Environ("TEMP") & "\ic-test-azure-ad-token.json"
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    ' ファイルが存在しない場合
+    If Not fso.FileExists(cachePath) Then
+        WriteLog LOG_LEVEL_DEBUG, "CheckAzureAdTokenCache", "キャッシュファイルなし: " & cachePath
+        CheckAzureAdTokenCache = False
+        Exit Function
+    End If
+
+    ' ファイル内容を読み取り
+    cacheContent = ReadFromFile(cachePath)
+
+    If cacheContent = "" Then
+        WriteLog LOG_LEVEL_DEBUG, "CheckAzureAdTokenCache", "キャッシュファイル空"
+        CheckAzureAdTokenCache = False
+        Exit Function
+    End If
+
+    ' expires_atを抽出（簡易パース）
+    expiresAt = ExtractJsonValue(cacheContent, "expires_at")
+
+    If expiresAt = "" Then
+        WriteLog LOG_LEVEL_DEBUG, "CheckAzureAdTokenCache", "expires_at未設定"
+        CheckAzureAdTokenCache = False
+        Exit Function
+    End If
+
+    ' 有効期限を解析（ISO 8601形式: 2025-01-15T10:30:45Z）
+    ' VBAで簡易パース（日時部分のみ使用）
+    On Error Resume Next
+    ' "2025-01-15T10:30:45.1234567+00:00" -> "2025-01-15 10:30:45"
+    Dim datePart As String
+    datePart = Replace(Left(expiresAt, 19), "T", " ")
+    expiresDate = CDate(datePart)
+
+    If Err.Number <> 0 Then
+        WriteLog LOG_LEVEL_DEBUG, "CheckAzureAdTokenCache", "日時パース失敗: " & expiresAt
+        Err.Clear
+        On Error GoTo ErrorHandler
+        ' パース失敗の場合、refresh_tokenがあればキャッシュ有効とみなす
+        If InStr(1, cacheContent, "refresh_token", vbTextCompare) > 0 Then
+            WriteLog LOG_LEVEL_INFO, "CheckAzureAdTokenCache", "refresh_tokenあり（日時パース失敗、キャッシュ有効とみなす）"
+            CheckAzureAdTokenCache = True
+        Else
+            CheckAzureAdTokenCache = False
+        End If
+        Exit Function
+    End If
+    On Error GoTo ErrorHandler
+
+    ' 有効期限チェック（5分のマージン）
+    If expiresDate > DateAdd("n", 5, Now) Then
+        WriteLog LOG_LEVEL_INFO, "CheckAzureAdTokenCache", "アクセストークン有効 期限: " & expiresDate
+        CheckAzureAdTokenCache = True
+    ElseIf InStr(1, cacheContent, "refresh_token", vbTextCompare) > 0 Then
+        ' アクセストークンは期限切れだがrefresh_tokenがある
+        WriteLog LOG_LEVEL_INFO, "CheckAzureAdTokenCache", "アクセストークン期限切れ、refresh_tokenあり（サイレント更新可能）"
+        CheckAzureAdTokenCache = True
+    Else
+        WriteLog LOG_LEVEL_INFO, "CheckAzureAdTokenCache", "トークン期限切れ、再認証必要"
+        CheckAzureAdTokenCache = False
+    End If
+
+    Exit Function
+
+ErrorHandler:
+    WriteLog LOG_LEVEL_WARNING, "CheckAzureAdTokenCache", "エラー: " & Err.Description
+    CheckAzureAdTokenCache = False
+End Function
+
+'===============================================================================
 ' PowerShellスクリプト呼び出し関数
 '===============================================================================
 ' 【機能】
@@ -492,6 +802,7 @@ Private Function CallPowerShellApi(inputPath As String, outputPath As String, co
     Dim psCommand As String         ' 実行するPowerShellコマンド
     Dim psScriptPath As String      ' PowerShellスクリプトのパス
     Dim exitCode As Long            ' PowerShellの終了コード
+    Dim scriptName As String        ' 使用するスクリプト名
 
     On Error GoTo ErrorHandler
 
@@ -501,9 +812,18 @@ Private Function CallPowerShellApi(inputPath As String, outputPath As String, co
     Set wsh = CreateObject("WScript.Shell")
     Set fso = CreateObject("Scripting.FileSystemObject")
 
+    ' 非同期モードに応じてスクリプトを選択
+    If config.AsyncMode Then
+        scriptName = "CallCloudApiAsync.ps1"
+        WriteLog LOG_LEVEL_INFO, "CallPowerShellApi", "非同期モード: 有効（504タイムアウト対策）"
+    Else
+        scriptName = "CallCloudApi.ps1"
+        WriteLog LOG_LEVEL_INFO, "CallPowerShellApi", "同期モード: 従来方式"
+    End If
+
     ' PowerShellスクリプトのパスを取得
     ' OneDrive環境でもローカルパスに変換
-    psScriptPath = GetLocalPath(ThisWorkbook.Path) & "\CallCloudApi.ps1"
+    psScriptPath = GetLocalPath(ThisWorkbook.Path) & "\" & scriptName
 
     WriteLog LOG_LEVEL_DEBUG, "CallPowerShellApi", "スクリプトパス: " & psScriptPath
 
@@ -513,56 +833,146 @@ Private Function CallPowerShellApi(inputPath As String, outputPath As String, co
         ShowErrorMessage ERR_POWERSHELL_SCRIPT_NOT_FOUND, _
                          "PowerShellスクリプトが見つかりません。" & vbCrLf & _
                          "パス: " & psScriptPath & vbCrLf & vbCrLf & _
-                         "CallCloudApi.ps1がExcelファイルと同じフォルダにあるか確認してください。"
+                         scriptName & "がExcelファイルと同じフォルダにあるか確認してください。"
         CallPowerShellApi = False
         Exit Function
+    End If
+
+    ' Azure AD認証の場合、トークンキャッシュを確認して通知
+    If LCase(config.ApiAuthType) = "azuread" Then
+        ' 初回のみトークンキャッシュを確認
+        If Not m_TokenCacheChecked Then
+            m_HasCachedToken = CheckAzureAdTokenCache()
+            m_TokenCacheChecked = True
+            WriteLog LOG_LEVEL_INFO, "CallPowerShellApi", "トークンキャッシュ確認: " & IIf(m_HasCachedToken, "あり（サイレント認証可能）", "なし（初回認証必要）")
+        End If
+
+        ' キャッシュがない場合のみ認証案内を表示（1回だけ）
+        If Not m_HasCachedToken And Not m_AzureAdNotified Then
+            MsgBox "Azure AD認証を開始します。" & vbCrLf & vbCrLf & _
+                   "PowerShellウィンドウが表示されたら、" & vbCrLf & _
+                   "表示されるURLとコードでブラウザ認証を行ってください。" & vbCrLf & vbCrLf & _
+                   "URL: https://microsoft.com/devicelogin" & vbCrLf & _
+                   "コードはPowerShellウィンドウに表示されます。" & vbCrLf & vbCrLf & _
+                   "※ 認証後はトークンがキャッシュされ、次回以降は自動認証されます。", _
+                   vbInformation, "Azure AD認証（初回のみ）"
+            m_AzureAdNotified = True
+        End If
     End If
 
     ' PowerShellコマンドの組み立て
     ' -ExecutionPolicy Bypass: 実行ポリシーを一時的にバイパス
     ' -NoProfile: プロファイルを読み込まない（高速化）
     ' -File: スクリプトファイルを指定
-    psCommand = "powershell.exe -ExecutionPolicy Bypass -NoProfile -File " & _
-                Chr(34) & psScriptPath & Chr(34) & " " & _
-                "-JsonFilePath " & Chr(34) & inputPath & Chr(34) & " " & _
-                "-Endpoint " & Chr(34) & config.ApiEndpoint & Chr(34) & " " & _
-                "-ApiKey " & Chr(34) & config.ApiKey & Chr(34) & " " & _
-                "-OutputFilePath " & Chr(34) & outputPath & Chr(34) & " " & _
-                "-Provider " & Chr(34) & config.ApiProvider & Chr(34) & " " & _
-                "-AuthHeader " & Chr(34) & config.ApiAuthHeader & Chr(34)
+    If config.AsyncMode Then
+        ' 非同期モード用コマンド（ポーリング間隔を追加）
+        psCommand = "powershell.exe -ExecutionPolicy Bypass -NoProfile -File " & _
+                    Chr(34) & psScriptPath & Chr(34) & " " & _
+                    "-JsonFilePath " & Chr(34) & inputPath & Chr(34) & " " & _
+                    "-Endpoint " & Chr(34) & config.ApiEndpoint & Chr(34) & " " & _
+                    "-ApiKey " & Chr(34) & config.ApiKey & Chr(34) & " " & _
+                    "-OutputFilePath " & Chr(34) & outputPath & Chr(34) & " " & _
+                    "-Provider " & Chr(34) & config.ApiProvider & Chr(34) & " " & _
+                    "-AuthHeader " & Chr(34) & config.ApiAuthHeader & Chr(34) & " " & _
+                    "-PollingIntervalSec " & config.PollingIntervalSec & " " & _
+                    "-AuthType " & Chr(34) & config.ApiAuthType & Chr(34)
 
-    WriteLog LOG_LEVEL_DEBUG, "CallPowerShellApi", "コマンド実行中..."
+        ' Azure AD認証パラメータを追加（authType=azureAdの場合）
+        If LCase(config.ApiAuthType) = "azuread" Then
+            psCommand = psCommand & " " & _
+                        "-TenantId " & Chr(34) & config.AzureAdTenantId & Chr(34) & " " & _
+                        "-ClientId " & Chr(34) & config.AzureAdClientId & Chr(34) & " " & _
+                        "-Scope " & Chr(34) & config.AzureAdScope & Chr(34)
+        End If
+    Else
+        ' 同期モード用コマンド（従来方式）
+        psCommand = "powershell.exe -ExecutionPolicy Bypass -NoProfile -File " & _
+                    Chr(34) & psScriptPath & Chr(34) & " " & _
+                    "-JsonFilePath " & Chr(34) & inputPath & Chr(34) & " " & _
+                    "-Endpoint " & Chr(34) & config.ApiEndpoint & Chr(34) & " " & _
+                    "-ApiKey " & Chr(34) & config.ApiKey & Chr(34) & " " & _
+                    "-OutputFilePath " & Chr(34) & outputPath & Chr(34) & " " & _
+                    "-Provider " & Chr(34) & config.ApiProvider & Chr(34) & " " & _
+                    "-AuthHeader " & Chr(34) & config.ApiAuthHeader & Chr(34) & " " & _
+                    "-AuthType " & Chr(34) & config.ApiAuthType & Chr(34)
 
-    ' PowerShellを同期実行（ウィンドウ非表示）
-    ' wsh.Run の引数:
-    '   第1引数: コマンド
-    '   第2引数: 0 = 非表示
-    '   第3引数: True = 完了まで待機
-    exitCode = wsh.Run(psCommand, 0, True)
-
-    WriteLog LOG_LEVEL_DEBUG, "CallPowerShellApi", "終了コード: " & exitCode
-
-    ' 終了コードの確認
-    If exitCode <> 0 Then
-        WriteLog LOG_LEVEL_ERROR, "CallPowerShellApi", "PowerShellエラー - 終了コード: " & exitCode
-
-        ' エラー内容の取得を試みる
-        If fso.FileExists(outputPath) Then
-            Dim errorContent As String
-            errorContent = ReadFromFile(outputPath)
-            WriteLog LOG_LEVEL_ERROR, "CallPowerShellApi", "エラー内容: " & Left(errorContent, 500)
-            MsgBox "PowerShellエラー (終了コード: " & exitCode & ")" & vbCrLf & vbCrLf & _
-                   Left(errorContent, 300), vbCritical, "PowerShellエラー"
-        Else
-            MsgBox "PowerShellエラー (終了コード: " & exitCode & ")" & vbCrLf & vbCrLf & _
-                   "出力ファイルが作成されませんでした。" & vbCrLf & _
-                   "スクリプト: " & psScriptPath, vbCritical, "PowerShellエラー"
+        ' Azure AD認証パラメータを追加（authType=azureAdの場合）
+        If LCase(config.ApiAuthType) = "azuread" Then
+            psCommand = psCommand & " " & _
+                        "-TenantId " & Chr(34) & config.AzureAdTenantId & Chr(34) & " " & _
+                        "-ClientId " & Chr(34) & config.AzureAdClientId & Chr(34) & " " & _
+                        "-Scope " & Chr(34) & config.AzureAdScope & Chr(34)
         End If
     End If
 
-    CallPowerShellApi = (exitCode = 0)
+    WriteLog LOG_LEVEL_DEBUG, "CallPowerShellApi", "コマンド実行中..."
 
-    WriteLog LOG_LEVEL_DEBUG, "CallPowerShellApi", "API呼び出し完了 - 結果: " & IIf(exitCode = 0, "成功", "失敗")
+    ' PowerShellを同期実行
+    ' wsh.Run の引数:
+    '   第1引数: コマンド
+    '   第2引数: 0 = 非表示, 1 = 通常表示
+    '   第3引数: True = 完了まで待機
+    '
+    ' Azure AD認証の場合、トークンキャッシュの有無でウィンドウ表示を決定
+    ' - キャッシュあり: 非表示（サイレント認証）
+    ' - キャッシュなし: 表示（Device Code入力のため）
+    Dim windowStyle As Integer
+    If LCase(config.ApiAuthType) = "azuread" Then
+        If m_HasCachedToken Then
+            windowStyle = 0  ' 非表示（キャッシュからサイレント認証）
+            WriteLog LOG_LEVEL_INFO, "CallPowerShellApi", "Azure AD認証: トークンキャッシュ使用（ウィンドウ非表示）"
+        Else
+            windowStyle = 1  ' 通常表示（Device Code入力必要）
+            WriteLog LOG_LEVEL_INFO, "CallPowerShellApi", "Azure AD認証: 初回認証（ウィンドウ表示）"
+            ' 初回認証成功後はキャッシュが作成されるので、次回以降は非表示になる
+            m_HasCachedToken = True  ' 楽観的に設定（失敗時は次回再確認される）
+        End If
+    Else
+        windowStyle = 0  ' 非表示
+    End If
+    exitCode = wsh.Run(psCommand, windowStyle, True)
+
+    WriteLog LOG_LEVEL_DEBUG, "CallPowerShellApi", "終了コード: " & exitCode
+
+    ' 出力ファイルの内容で成功/失敗を判定（終了コードは参考情報）
+    ' PowerShellの終了コードはVBAとの組み合わせで信頼できない場合がある
+    Dim outputContent As String
+    Dim isSuccess As Boolean
+    isSuccess = False
+
+    If fso.FileExists(outputPath) Then
+        outputContent = ReadFromFile(outputPath)
+
+        ' 出力ファイルに "error": true が含まれているかチェック
+        If InStr(1, outputContent, """error"":", vbTextCompare) > 0 And _
+           InStr(1, outputContent, "true", vbTextCompare) > 0 Then
+            ' エラーレスポンスの場合
+            WriteLog LOG_LEVEL_ERROR, "CallPowerShellApi", "APIエラーレスポンス検出"
+            WriteLog LOG_LEVEL_ERROR, "CallPowerShellApi", "エラー内容: " & Left(outputContent, 500)
+            MsgBox "APIエラー:" & vbCrLf & vbCrLf & _
+                   Left(outputContent, 300), vbCritical, "APIエラー"
+            isSuccess = False
+        ElseIf Len(outputContent) > 0 And Left(Trim(outputContent), 1) = "[" Then
+            ' 正常なJSON配列レスポンスの場合
+            WriteLog LOG_LEVEL_INFO, "CallPowerShellApi", "正常レスポンス検出（終了コード: " & exitCode & " は無視）"
+            isSuccess = True
+        Else
+            ' 不明なレスポンス
+            WriteLog LOG_LEVEL_WARNING, "CallPowerShellApi", "不明なレスポンス形式: " & Left(outputContent, 100)
+            isSuccess = False
+        End If
+    Else
+        ' 出力ファイルが存在しない
+        WriteLog LOG_LEVEL_ERROR, "CallPowerShellApi", "出力ファイルが作成されませんでした"
+        MsgBox "PowerShellエラー (終了コード: " & exitCode & ")" & vbCrLf & vbCrLf & _
+               "出力ファイルが作成されませんでした。" & vbCrLf & _
+               "スクリプト: " & psScriptPath, vbCritical, "PowerShellエラー"
+        isSuccess = False
+    End If
+
+    CallPowerShellApi = isSuccess
+
+    WriteLog LOG_LEVEL_DEBUG, "CallPowerShellApi", "API呼び出し完了 - 結果: " & IIf(isSuccess, "成功", "失敗")
     Exit Function
 
 ErrorHandler:
@@ -583,7 +993,7 @@ End Function
 ' config: 設定情報（列マッピング等）
 '
 ' 【書き込み対象】
-' - 評価結果（Boolean → 有効/非有効）
+' - 評価結果（Boolean → 有効/不備）
 ' - 判断根拠（複数行テキスト）
 ' - 該当文書からの引用（証跡の直接引用文）
 ' - ファイル名（複数ファイル対応、ハイパーリンク付き）
@@ -636,7 +1046,7 @@ Private Sub WriteResponseToExcel(responseJson As String, config As SettingConfig
                     If boolValue = "true" Then
                         displayValue = config.BooleanDisplayTrue  ' 例: "有効"
                     ElseIf boolValue = "false" Then
-                        displayValue = config.BooleanDisplayFalse ' 例: "非有効"
+                        displayValue = config.BooleanDisplayFalse ' 例: "不備"
                     Else
                         displayValue = boolValue  ' そのまま出力
                     End If
@@ -674,11 +1084,74 @@ Private Sub WriteResponseToExcel(responseJson As String, config As SettingConfig
                 End If
 
                 processedCount = processedCount + 1
+
+                '--- 行高さの自動調整 ---
+                ' 出力したセルの内容に合わせて行高さを最適化
+                OptimizeRowHeight ws, rowNum, config
             End If
         End If
     Next rowNum
 
     WriteLog LOG_LEVEL_DEBUG, "WriteResponseToExcel", "Excel書き戻し完了 - " & processedCount & " 件処理"
+End Sub
+
+'===============================================================================
+' 行高さを最適化する関数
+'===============================================================================
+' 【機能】
+' 出力した行の高さを内容に合わせて自動調整します。
+' 各出力列のセルを確認し、適切な行高さを設定します。
+'
+' 【引数】
+' ws: 対象ワークシート
+' rowNum: 行番号
+' config: 設定情報
+'
+Private Sub OptimizeRowHeight(ws As Worksheet, rowNum As Long, config As SettingConfig)
+    On Error Resume Next
+
+    Dim targetRow As Range
+    Dim maxHeight As Double
+    Dim cellHeight As Double
+    Dim col As String
+    Dim cell As Range
+
+    ' 出力列のリスト
+    Dim outputCols As Variant
+    outputCols = Array( _
+        config.ColEvaluationResult, _
+        config.ColExecutionPlanSummary, _
+        config.ColJudgmentBasis, _
+        config.ColDocumentReference, _
+        config.ColFileName _
+    )
+
+    ' 各出力列の行高さを計算して最大値を取得
+    maxHeight = 15 ' デフォルト最小行高さ
+
+    Dim i As Long
+    For i = LBound(outputCols) To UBound(outputCols)
+        col = outputCols(i)
+        If col <> "" Then
+            Set cell = ws.Range(col & rowNum)
+            If cell.WrapText Then
+                ' 折り返しが有効な場合、内容に基づいて高さを計算
+                cell.EntireRow.AutoFit
+                cellHeight = cell.RowHeight
+                If cellHeight > maxHeight Then
+                    maxHeight = cellHeight
+                End If
+            End If
+        End If
+    Next i
+
+    ' 最大行高さを設定（上限400ポイント）
+    If maxHeight > 400 Then maxHeight = 400
+
+    ' 行全体の高さを設定
+    ws.Rows(rowNum).RowHeight = maxHeight
+
+    On Error GoTo 0
 End Sub
 
 '===============================================================================
@@ -1045,7 +1518,7 @@ End Function
 '   "api": { "provider": "AZURE", "endpoint": "...", ... },
 '   "responseMapping": { "evaluationResult": "F", ... },
 '   "booleanDisplayTrue": "有効",
-'   "booleanDisplayFalse": "非有効"
+'   "booleanDisplayFalse": "不備"
 ' }
 '===============================================================================
 Private Function LoadSettings(ByRef config As SettingConfig) As Boolean
@@ -1101,6 +1574,26 @@ Private Function LoadSettings(ByRef config As SettingConfig) As Boolean
         config.BatchSize = 3  ' デフォルト値
     End If
 
+    ' 非同期モード（デフォルト: True - 504タイムアウト対策）
+    Dim asyncModeStr As String
+    asyncModeStr = LCase(ExtractJsonValue(jsonText, "asyncMode"))
+    If asyncModeStr = "true" Or asyncModeStr = "1" Then
+        config.AsyncMode = True
+    ElseIf asyncModeStr = "false" Or asyncModeStr = "0" Then
+        config.AsyncMode = False
+    Else
+        config.AsyncMode = True  ' デフォルト: 非同期モード有効
+    End If
+
+    ' ポーリング間隔（デフォルト: 5秒）
+    Dim pollingIntervalStr As String
+    pollingIntervalStr = ExtractJsonValue(jsonText, "pollingIntervalSec")
+    If pollingIntervalStr <> "" And IsNumeric(pollingIntervalStr) Then
+        config.PollingIntervalSec = CLng(pollingIntervalStr)
+    Else
+        config.PollingIntervalSec = 5  ' デフォルト値
+    End If
+
     '--- 列マッピングの解析 ---
     config.ColID = ExtractNestedJsonValue(jsonText, "columns", "ID")
     config.ColTestTarget = ExtractNestedJsonValue(jsonText, "columns", "TestTarget")
@@ -1114,11 +1607,35 @@ Private Function LoadSettings(ByRef config As SettingConfig) As Boolean
     config.ApiEndpoint = ExtractNestedJsonValue(jsonText, "api", "endpoint")
     config.ApiKey = ExtractNestedJsonValue(jsonText, "api", "apiKey")
     config.ApiAuthHeader = ExtractNestedJsonValue(jsonText, "api", "authHeader")
+    config.ApiAuthType = ExtractNestedJsonValue(jsonText, "api", "authType")
 
     ' プロバイダーのデフォルト値
     If config.ApiProvider = "" Then
         config.ApiProvider = "AZURE"
     End If
+
+    ' 認証タイプのデフォルト値
+    If config.ApiAuthType = "" Then
+        config.ApiAuthType = "functionsKey"
+    End If
+
+    '--- Azure AD認証設定の解析（authType="azureAd"の場合）---
+    config.AzureAdTenantId = ExtractNestedJsonValue(jsonText, "azureAd", "tenantId")
+    config.AzureAdClientId = ExtractNestedJsonValue(jsonText, "azureAd", "clientId")
+    config.AzureAdScope = ExtractNestedJsonValue(jsonText, "azureAd", "scope")
+
+    WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "認証タイプ: " & config.ApiAuthType
+    If config.ApiAuthType = "azureAd" Then
+        WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "Azure AD TenantId: " & Left(config.AzureAdTenantId, 8) & "..."
+        WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "Azure AD ClientId: " & Left(config.AzureAdClientId, 8) & "..."
+    End If
+
+    ' APIクライアント（POWERSHELL/VBA）
+    config.ApiClient = UCase(ExtractJsonValue(jsonText, "apiClient"))
+    If config.ApiClient = "" Then
+        config.ApiClient = "POWERSHELL"  ' デフォルト: PowerShell
+    End If
+    WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "APIクライアント: " & config.ApiClient
 
     '--- レスポンスマッピングの解析 ---
     config.ColEvaluationResult = ExtractNestedJsonValue(jsonText, "responseMapping", "evaluationResult")
@@ -1137,12 +1654,14 @@ Private Function LoadSettings(ByRef config As SettingConfig) As Boolean
 
     ' デフォルト値の設定
     If config.BooleanDisplayTrue = "" Then config.BooleanDisplayTrue = "有効"
-    If config.BooleanDisplayFalse = "" Then config.BooleanDisplayFalse = "非有効"
+    If config.BooleanDisplayFalse = "" Then config.BooleanDisplayFalse = "不備"
 
     WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "設定読み込み完了"
     WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "  DataStartRow: " & config.DataStartRow
     WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "  BatchSize: " & config.BatchSize
     WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "  Provider: " & config.ApiProvider
+    WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "  AsyncMode: " & config.AsyncMode
+    WriteLog LOG_LEVEL_DEBUG, "LoadSettings", "  PollingIntervalSec: " & config.PollingIntervalSec
 
     LoadSettings = True
     Exit Function
@@ -1878,3 +2397,572 @@ ErrorHandler:
     WriteLog LOG_LEVEL_ERROR, "ClearEvaluationResults", "エラー: " & Err.Description
     MsgBox "クリア中にエラーが発生しました:" & vbCrLf & Err.Description, vbCritical, "エラー"
 End Sub
+
+'===============================================================================
+' API呼び出しラッパー関数
+'===============================================================================
+' 【機能】
+' 設定に基づいてPowerShellまたはVBAネイティブでAPIを呼び出します。
+' config.ApiClientが"VBA"の場合はMSXML2.ServerXMLHTTPを使用、
+' それ以外（"POWERSHELL"等）はPowerShellスクリプトを使用します。
+'
+' 【引数】
+' inputPath: 入力JSONファイルのパス
+' outputPath: 出力JSONファイルのパス
+' config: 設定情報
+'
+' 【戻り値】
+' Boolean: 成功した場合True
+'===============================================================================
+Private Function CallApi(inputPath As String, outputPath As String, config As SettingConfig) As Boolean
+    On Error GoTo ErrorHandler
+
+    WriteLog LOG_LEVEL_DEBUG, "CallApi", "API呼び出し開始 - クライアント: " & config.ApiClient
+
+    Select Case UCase(config.ApiClient)
+        Case "VBA"
+            ' VBAネイティブHTTPクライアントを使用
+            CallApi = CallVbaApi(inputPath, outputPath, config)
+
+        Case "EXPORT"
+            ' EXPORTモード: ファイル出力のみ（API呼び出しなし）
+            ' ProcessForExportから呼び出される想定
+            CallApi = True
+            WriteLog LOG_LEVEL_INFO, "CallApi", "EXPORTモード: API呼び出しはスキップされました"
+
+        Case Else
+            ' PowerShellスクリプトを使用（デフォルト）
+            CallApi = CallPowerShellApi(inputPath, outputPath, config)
+    End Select
+
+    Exit Function
+
+ErrorHandler:
+    WriteLog LOG_LEVEL_ERROR, "CallApi", "エラー: " & Err.Description
+    CallApi = False
+End Function
+
+'===============================================================================
+' VBAネイティブAPI呼び出し関数
+'===============================================================================
+' 【機能】
+' MSXML2.ServerXMLHTTPを使用してAPIを呼び出します。
+' PowerShellが使用できない環境でも動作します。
+'
+' 【対応モード】
+' - 同期モード: /api/evaluate エンドポイントに直接POST
+' - 非同期モード: /api/evaluate/submit → polling → /api/evaluate/results
+'
+' 【引数】
+' inputPath: 入力JSONファイルのパス
+' outputPath: 出力JSONファイルのパス
+' config: 設定情報
+'
+' 【戻り値】
+' Boolean: 成功した場合True
+'===============================================================================
+Private Function CallVbaApi(inputPath As String, outputPath As String, config As SettingConfig) As Boolean
+    Dim http As Object                ' MSXML2.ServerXMLHTTP
+    Dim requestJson As String         ' リクエストJSON
+    Dim responseText As String        ' レスポンステキスト
+    Dim endpoint As String            ' APIエンドポイント
+    Dim jobId As String               ' 非同期ジョブID
+    Dim statusUrl As String           ' ステータス確認URL
+    Dim resultsUrl As String          ' 結果取得URL
+    Dim pollCount As Long             ' ポーリング回数
+    Dim maxPolls As Long              ' 最大ポーリング回数
+    Dim jobStatus As String           ' ジョブステータス
+
+    On Error GoTo ErrorHandler
+
+    WriteLog LOG_LEVEL_INFO, "CallVbaApi", "VBA HTTPクライアントでAPI呼び出し開始"
+
+    ' リクエストJSONを読み込み
+    requestJson = ReadFromFile(inputPath)
+    If requestJson = "" Then
+        WriteLog LOG_LEVEL_ERROR, "CallVbaApi", "入力ファイルが空です: " & inputPath
+        CallVbaApi = False
+        Exit Function
+    End If
+
+    WriteLog LOG_LEVEL_DEBUG, "CallVbaApi", "元のリクエストサイズ: " & Len(requestJson) & " 文字"
+
+    ' EvidenceFilesを追加（フォルダからBase64エンコード）
+    WriteLog LOG_LEVEL_INFO, "CallVbaApi", "証跡ファイルをBase64エンコード中..."
+    requestJson = AddEvidenceFilesToJson(requestJson)
+    WriteLog LOG_LEVEL_DEBUG, "CallVbaApi", "処理後リクエストサイズ: " & Len(requestJson) & " 文字"
+
+    ' HTTPオブジェクト作成
+    Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+
+    If config.AsyncMode Then
+        '=== 非同期モード ===
+        WriteLog LOG_LEVEL_INFO, "CallVbaApi", "非同期モード: 有効"
+
+        ' Step 1: ジョブ投入
+        endpoint = config.ApiEndpoint & "/submit"
+        WriteLog LOG_LEVEL_DEBUG, "CallVbaApi", "ジョブ投入URL: " & endpoint
+
+        http.Open "POST", endpoint, False
+        http.setRequestHeader "Content-Type", "application/json; charset=UTF-8"
+        If config.ApiAuthHeader <> "" And config.ApiKey <> "" Then
+            http.setRequestHeader config.ApiAuthHeader, config.ApiKey
+        End If
+
+        ' タイムアウト設定（30秒）
+        http.setTimeouts 30000, 30000, 30000, 30000
+
+        http.send requestJson
+
+        If http.Status <> 200 And http.Status <> 202 Then
+            WriteLog LOG_LEVEL_ERROR, "CallVbaApi", "ジョブ投入失敗 - Status: " & http.Status
+            WriteLog LOG_LEVEL_ERROR, "CallVbaApi", "Response: " & Left(http.responseText, 500)
+            CallVbaApi = False
+            Exit Function
+        End If
+
+        ' ジョブIDを抽出
+        jobId = ExtractJsonValue(http.responseText, "jobId")
+        If jobId = "" Then
+            jobId = ExtractJsonValue(http.responseText, "job_id")
+        End If
+
+        If jobId = "" Then
+            WriteLog LOG_LEVEL_ERROR, "CallVbaApi", "ジョブIDが取得できません: " & http.responseText
+            CallVbaApi = False
+            Exit Function
+        End If
+
+        WriteLog LOG_LEVEL_INFO, "CallVbaApi", "ジョブ投入完了 - JobID: " & jobId
+
+        ' Step 2: ステータスポーリング
+        statusUrl = config.ApiEndpoint & "/status/" & jobId
+        maxPolls = 120  ' 最大10分（5秒×120回）
+        pollCount = 0
+
+        Do
+            pollCount = pollCount + 1
+            WriteLog LOG_LEVEL_DEBUG, "CallVbaApi", "ポーリング " & pollCount & "/" & maxPolls
+
+            ' ステータス更新を画面に表示
+            Application.StatusBar = "AI評価処理中... (" & pollCount & "/" & maxPolls & ")"
+            DoEvents
+
+            ' 待機
+            Sleep config.PollingIntervalSec * 1000
+
+            ' ステータス確認
+            http.Open "GET", statusUrl, False
+            If config.ApiAuthHeader <> "" And config.ApiKey <> "" Then
+                http.setRequestHeader config.ApiAuthHeader, config.ApiKey
+            End If
+            http.send
+
+            If http.Status <> 200 Then
+                WriteLog LOG_LEVEL_WARNING, "CallVbaApi", "ステータス確認失敗 - Status: " & http.Status
+                ' 続行（一時的なエラーの可能性）
+            Else
+                jobStatus = LCase(ExtractJsonValue(http.responseText, "status"))
+                WriteLog LOG_LEVEL_DEBUG, "CallVbaApi", "ジョブステータス: " & jobStatus
+
+                If jobStatus = "completed" Then
+                    Exit Do
+                ElseIf jobStatus = "error" Or jobStatus = "failed" Then
+                    WriteLog LOG_LEVEL_ERROR, "CallVbaApi", "ジョブ失敗: " & http.responseText
+                    ' エラーレスポンスを出力ファイルに書き込み
+                    Call WriteToFileUtf8(outputPath, http.responseText)
+                    CallVbaApi = False
+                    Application.StatusBar = False
+                    Exit Function
+                End If
+            End If
+
+        Loop While pollCount < maxPolls
+
+        Application.StatusBar = False
+
+        If pollCount >= maxPolls Then
+            WriteLog LOG_LEVEL_ERROR, "CallVbaApi", "ポーリングタイムアウト"
+            CallVbaApi = False
+            Exit Function
+        End If
+
+        ' Step 3: 結果取得
+        resultsUrl = config.ApiEndpoint & "/results/" & jobId
+        WriteLog LOG_LEVEL_DEBUG, "CallVbaApi", "結果取得URL: " & resultsUrl
+
+        http.Open "GET", resultsUrl, False
+        If config.ApiAuthHeader <> "" And config.ApiKey <> "" Then
+            http.setRequestHeader config.ApiAuthHeader, config.ApiKey
+        End If
+        http.send
+
+        If http.Status <> 200 Then
+            WriteLog LOG_LEVEL_ERROR, "CallVbaApi", "結果取得失敗 - Status: " & http.Status
+            CallVbaApi = False
+            Exit Function
+        End If
+
+        responseText = http.responseText
+
+    Else
+        '=== 同期モード ===
+        WriteLog LOG_LEVEL_INFO, "CallVbaApi", "同期モード: 従来方式"
+
+        endpoint = config.ApiEndpoint
+        WriteLog LOG_LEVEL_DEBUG, "CallVbaApi", "エンドポイント: " & endpoint
+
+        http.Open "POST", endpoint, False
+        http.setRequestHeader "Content-Type", "application/json; charset=UTF-8"
+        If config.ApiAuthHeader <> "" And config.ApiKey <> "" Then
+            http.setRequestHeader config.ApiAuthHeader, config.ApiKey
+        End If
+
+        ' タイムアウト設定（10分）
+        http.setTimeouts 60000, 60000, 600000, 600000
+
+        Application.StatusBar = "AI評価処理中..."
+        DoEvents
+
+        http.send requestJson
+
+        Application.StatusBar = False
+
+        If http.Status <> 200 Then
+            WriteLog LOG_LEVEL_ERROR, "CallVbaApi", "API呼び出し失敗 - Status: " & http.Status
+            WriteLog LOG_LEVEL_ERROR, "CallVbaApi", "Response: " & Left(http.responseText, 500)
+            ' エラーレスポンスを出力ファイルに書き込み
+            Call WriteToFileUtf8(outputPath, http.responseText)
+            CallVbaApi = False
+            Exit Function
+        End If
+
+        responseText = http.responseText
+    End If
+
+    ' レスポンスを出力ファイルに保存
+    WriteLog LOG_LEVEL_DEBUG, "CallVbaApi", "レスポンスサイズ: " & Len(responseText) & " 文字"
+    Call WriteToFileUtf8(outputPath, responseText)
+
+    ' レスポンス検証
+    If InStr(1, responseText, """error"":", vbTextCompare) > 0 And _
+       InStr(1, responseText, "true", vbTextCompare) > 0 Then
+        WriteLog LOG_LEVEL_ERROR, "CallVbaApi", "APIエラーレスポンス検出"
+        CallVbaApi = False
+    ElseIf Len(responseText) > 0 And Left(Trim(responseText), 1) = "[" Then
+        WriteLog LOG_LEVEL_INFO, "CallVbaApi", "正常レスポンス検出"
+        CallVbaApi = True
+    Else
+        WriteLog LOG_LEVEL_WARNING, "CallVbaApi", "不明なレスポンス形式"
+        CallVbaApi = False
+    End If
+
+    Set http = Nothing
+    Exit Function
+
+ErrorHandler:
+    Application.StatusBar = False
+    WriteLog LOG_LEVEL_CRITICAL, "CallVbaApi", "予期しないエラー: " & Err.Description & " (番号: " & Err.Number & ")"
+    If Not http Is Nothing Then Set http = Nothing
+    CallVbaApi = False
+End Function
+
+'===============================================================================
+' UTF-8でファイルに書き込む関数
+'===============================================================================
+' 【機能】
+' 文字列をUTF-8エンコーディングでファイルに書き込みます。
+' 日本語を正しく処理するためADODB.Streamを使用します。
+'
+' 【引数】
+' filePath: 出力ファイルのパス
+' content: 書き込む内容
+'===============================================================================
+Private Sub WriteToFileUtf8(filePath As String, content As String)
+    Dim stream As Object
+
+    On Error GoTo ErrorHandler
+
+    Set stream = CreateObject("ADODB.Stream")
+    With stream
+        .Type = 2         ' テキストモード
+        .Charset = "UTF-8"
+        .Open
+        .WriteText content
+        .SaveToFile filePath, 2  ' 2 = 上書き
+        .Close
+    End With
+
+    Set stream = Nothing
+    Exit Sub
+
+ErrorHandler:
+    WriteLog LOG_LEVEL_ERROR, "WriteToFileUtf8", "ファイル書き込みエラー: " & Err.Description
+    If Not stream Is Nothing Then
+        On Error Resume Next
+        stream.Close
+        Set stream = Nothing
+    End If
+End Sub
+
+'===============================================================================
+' ファイルをBase64エンコード
+'===============================================================================
+' 【機能】
+' バイナリファイルをBase64文字列に変換します。
+' ADODB.Streamを使用してファイルを読み込み、XMLDOMを使用してBase64変換します。
+'
+' 【引数】
+' filePath: ファイルパス
+'
+' 【戻り値】
+' String: Base64エンコードされた文字列（エラー時は空文字列）
+'===============================================================================
+Private Function EncodeFileToBase64(filePath As String) As String
+    Dim fso As Object
+    Dim stream As Object
+    Dim xmlDoc As Object
+    Dim xmlNode As Object
+    Dim bytes() As Byte
+
+    On Error GoTo ErrorHandler
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    If Not fso.FileExists(filePath) Then
+        WriteLog LOG_LEVEL_WARNING, "EncodeFileToBase64", "ファイルが見つかりません: " & filePath
+        EncodeFileToBase64 = ""
+        Exit Function
+    End If
+
+    ' バイナリファイルを読み込み
+    Set stream = CreateObject("ADODB.Stream")
+    With stream
+        .Type = 1  ' バイナリモード
+        .Open
+        .LoadFromFile filePath
+        bytes = .Read
+        .Close
+    End With
+
+    ' XMLDOMを使用してBase64変換
+    Set xmlDoc = CreateObject("MSXML2.DOMDocument")
+    Set xmlNode = xmlDoc.createElement("b64")
+    xmlNode.DataType = "bin.base64"
+    xmlNode.nodeTypedValue = bytes
+
+    EncodeFileToBase64 = xmlNode.text
+
+    Set xmlNode = Nothing
+    Set xmlDoc = Nothing
+    Set stream = Nothing
+    Set fso = Nothing
+
+    WriteLog LOG_LEVEL_DEBUG, "EncodeFileToBase64", "エンコード完了: " & filePath & " (" & Len(EncodeFileToBase64) & " 文字)"
+
+    Exit Function
+
+ErrorHandler:
+    WriteLog LOG_LEVEL_ERROR, "EncodeFileToBase64", "エラー: " & Err.Description & " - ファイル: " & filePath
+    EncodeFileToBase64 = ""
+End Function
+
+'===============================================================================
+' フォルダ内のファイルをBase64配列JSONに変換
+'===============================================================================
+' 【機能】
+' 指定フォルダ内の全ファイルをBase64エンコードし、EvidenceFiles形式のJSON配列を生成します。
+'
+' 【引数】
+' folderPath: フォルダパス
+'
+' 【戻り値】
+' String: EvidenceFiles JSON配列（例: [{"fileName":"doc.pdf","mimeType":"application/pdf","extension":".pdf","base64":"..."}]）
+'===============================================================================
+Private Function GetFolderFilesAsBase64Json(folderPath As String) As String
+    Dim fso As Object
+    Dim folder As Object
+    Dim file As Object
+    Dim json As String
+    Dim isFirst As Boolean
+    Dim base64Content As String
+    Dim mimeType As String
+    Dim ext As String
+
+    On Error GoTo ErrorHandler
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    If Not fso.FolderExists(folderPath) Then
+        WriteLog LOG_LEVEL_DEBUG, "GetFolderFilesAsBase64Json", "フォルダが存在しません: " & folderPath
+        GetFolderFilesAsBase64Json = "[]"
+        Exit Function
+    End If
+
+    Set folder = fso.GetFolder(folderPath)
+
+    json = "["
+    isFirst = True
+
+    For Each file In folder.Files
+        ext = LCase(fso.GetExtensionName(file.Name))
+
+        ' 対応ファイル形式のみ処理
+        If ext = "pdf" Or ext = "png" Or ext = "jpg" Or ext = "jpeg" Or ext = "gif" Or ext = "xlsx" Or ext = "docx" Then
+            base64Content = EncodeFileToBase64(file.Path)
+
+            If base64Content <> "" Then
+                If Not isFirst Then
+                    json = json & ","
+                End If
+
+                ' MIMEタイプの決定
+                Select Case ext
+                    Case "pdf"
+                        mimeType = "application/pdf"
+                    Case "png"
+                        mimeType = "image/png"
+                    Case "jpg", "jpeg"
+                        mimeType = "image/jpeg"
+                    Case "gif"
+                        mimeType = "image/gif"
+                    Case "xlsx"
+                        mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    Case "docx"
+                        mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    Case Else
+                        mimeType = "application/octet-stream"
+                End Select
+
+                json = json & "{" & _
+                       """fileName"":""" & EscapeJsonString(file.Name) & """," & _
+                       """mimeType"":""" & mimeType & """," & _
+                       """extension"":""." & ext & """," & _
+                       """base64"":""" & base64Content & """" & _
+                       "}"
+
+                isFirst = False
+
+                WriteLog LOG_LEVEL_DEBUG, "GetFolderFilesAsBase64Json", "ファイル追加: " & file.Name
+            End If
+        End If
+    Next file
+
+    json = json & "]"
+    GetFolderFilesAsBase64Json = json
+
+    WriteLog LOG_LEVEL_DEBUG, "GetFolderFilesAsBase64Json", "JSON生成完了: " & Len(json) & " 文字"
+
+    Exit Function
+
+ErrorHandler:
+    WriteLog LOG_LEVEL_ERROR, "GetFolderFilesAsBase64Json", "エラー: " & Err.Description
+    GetFolderFilesAsBase64Json = "[]"
+End Function
+
+'===============================================================================
+' VBA用JSON処理: EvidenceFilesを追加
+'===============================================================================
+' 【機能】
+' JSON文字列内の各アイテムにEvidenceFiles配列を追加します。
+' EvidenceLinkがフォルダパスの場合、フォルダ内のファイルをBase64エンコードして追加。
+'
+' 【引数】
+' jsonText: 元のJSON文字列
+'
+' 【戻り値】
+' String: EvidenceFilesが追加されたJSON文字列
+'===============================================================================
+Private Function AddEvidenceFilesToJson(jsonText As String) As String
+    Dim fso As Object
+    Dim result As String
+    Dim itemStart As Long
+    Dim itemEnd As Long
+    Dim evidenceLinkStart As Long
+    Dim evidenceLinkEnd As Long
+    Dim evidenceLink As String
+    Dim evidenceFilesJson As String
+    Dim insertPos As Long
+
+    On Error GoTo ErrorHandler
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    result = jsonText
+    itemStart = 1
+
+    ' 各アイテムを処理
+    Do
+        ' 次のアイテム（{）を探す
+        itemStart = InStr(itemStart, result, "{")
+        If itemStart = 0 Then Exit Do
+
+        itemEnd = FindMatchingBrace(result, itemStart)
+        If itemEnd = 0 Then Exit Do
+
+        ' EvidenceLinkを抽出
+        evidenceLink = ExtractJsonValueFromSubstring(result, itemStart, itemEnd, "EvidenceLink")
+
+        If evidenceLink <> "" Then
+            ' パスをローカルパスに変換
+            evidenceLink = GetLocalPath(evidenceLink)
+
+            ' フォルダが存在するか確認
+            If fso.FolderExists(evidenceLink) Then
+                WriteLog LOG_LEVEL_DEBUG, "AddEvidenceFilesToJson", "フォルダ処理: " & evidenceLink
+
+                ' フォルダ内のファイルをBase64 JSONに変換
+                evidenceFilesJson = GetFolderFilesAsBase64Json(evidenceLink)
+
+                ' EvidenceFilesがない場合は既存のものを使用
+                If evidenceFilesJson <> "[]" Then
+                    ' アイテムの閉じ括弧の前にEvidenceFilesを挿入
+                    ' まず、EvidenceLinkの行の終わりを見つける
+                    insertPos = InStrRev(result, """EvidenceLink""", itemEnd)
+                    If insertPos > itemStart Then
+                        ' EvidenceLink行の末尾（改行前）を見つける
+                        Dim lineEnd As Long
+                        lineEnd = InStr(insertPos, result, vbCrLf)
+                        If lineEnd = 0 Then lineEnd = InStr(insertPos, result, vbLf)
+                        If lineEnd = 0 Then lineEnd = itemEnd
+
+                        ' 改行の前にカンマとEvidenceFilesを挿入
+                        Dim insertText As String
+                        insertText = "," & vbCrLf & "        ""EvidenceFiles"": " & evidenceFilesJson
+
+                        ' 挿入位置を調整（"で終わる行の後）
+                        Dim quotePos As Long
+                        quotePos = InStr(insertPos + Len("""EvidenceLink"": """), result, """")
+                        If quotePos > 0 And quotePos < lineEnd Then
+                            result = Left(result, quotePos) & insertText & Mid(result, quotePos + 1)
+                            ' itemEndを更新
+                            itemEnd = itemEnd + Len(insertText)
+                        End If
+                    End If
+                End If
+            Else
+                WriteLog LOG_LEVEL_DEBUG, "AddEvidenceFilesToJson", "フォルダ無し: " & evidenceLink
+            End If
+        End If
+
+        itemStart = itemEnd + 1
+    Loop
+
+    AddEvidenceFilesToJson = result
+
+    Set fso = Nothing
+    Exit Function
+
+ErrorHandler:
+    WriteLog LOG_LEVEL_ERROR, "AddEvidenceFilesToJson", "エラー: " & Err.Description
+    AddEvidenceFilesToJson = jsonText  ' エラー時は元のJSONを返す
+End Function
+
+'===============================================================================
+' 部分文字列からJSON値を抽出
+'===============================================================================
+Private Function ExtractJsonValueFromSubstring(jsonText As String, startPos As Long, endPos As Long, key As String) As String
+    Dim subJson As String
+    subJson = Mid(jsonText, startPos, endPos - startPos + 1)
+    ExtractJsonValueFromSubstring = ExtractJsonValue(subJson, key)
+End Function

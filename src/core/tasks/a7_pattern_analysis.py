@@ -55,84 +55,14 @@ from langchain_core.output_parsers import JsonOutputParser
 from .base_task import BaseAuditTask, TaskType, TaskResult, AuditContext
 from ..document_processor import DocumentProcessor
 
+# プロンプトをprompts.pyからインポート
+from ..prompts import A7_PATTERN_ANALYSIS_PROMPT
+
 # =============================================================================
 # ログ設定
 # =============================================================================
 
 logger = logging.getLogger(__name__)
-
-# =============================================================================
-# プロンプトテンプレート
-# =============================================================================
-
-PATTERN_ANALYSIS_PROMPT = """あなたは内部統制監査の専門家です。
-複数期間のデータから継続性とパターンを分析し、抜け漏れを検出してください。
-
-【重要な指示】
-1. 「四半期ごと」「月次」などの継続性要件を特定
-2. 複数期間のデータから実施パターンを分析
-3. Q1からQ4、または1月から12月までの記録を網羅的にチェック
-4. 特定の期間の記録欠落（抜け漏れ）を検出
-5. 異常なパターン（突然の変化、不規則な間隔）を識別
-
-【統制記述】
-{control_description}
-
-【テスト手続き】
-{test_procedure}
-
-【期間データ】
-{period_data}
-
-【出力形式】
-以下のJSON形式で回答してください：
-{{
-    "continuity_requirement": {{
-        "frequency": "四半期/月次/年次/週次/随時",
-        "expected_periods": ["期待される期間のリスト"],
-        "source": "要件の根拠"
-    }},
-    "period_analysis": [
-        {{
-            "period": "期間名（Q1/1月/2024年度等）",
-            "record_exists": true/false,
-            "record_date": "記録日（あれば）",
-            "key_metrics": {{"指標名": 値}},
-            "anomalies": ["異常事項"]
-        }}
-    ],
-    "gap_detection": {{
-        "missing_periods": ["欠落している期間"],
-        "coverage_rate": 0.0-1.0,
-        "gap_severity": "重大/中程度/軽微/なし"
-    }},
-    "pattern_analysis": {{
-        "trend": "増加/減少/横ばい/不規則",
-        "seasonality": "季節性の有無と説明",
-        "outliers": [
-            {{
-                "period": "期間",
-                "metric": "指標",
-                "value": 値,
-                "expected_range": "期待される範囲",
-                "deviation": "偏差"
-            }}
-        ]
-    }},
-    "compliance_assessment": {{
-        "continuity_maintained": true/false,
-        "all_periods_documented": true/false,
-        "pattern_consistent": true/false,
-        "issues": ["発見された問題"]
-    }},
-    "confidence": 0.0-1.0,
-    "reasoning": {{
-        "verification_summary": "どの期間のデータを検証し、何が確認できたか",
-        "evidence_details": "具体的な記録内容（日付、実施者、内容等を引用）",
-        "conclusion": "継続性に関する結論とその根拠"
-    }}
-}}
-"""
 
 
 # =============================================================================
@@ -184,7 +114,7 @@ class PatternAnalysisTask(BaseAuditTask):
             llm: LangChain ChatModel
         """
         super().__init__(llm)
-        self.prompt = ChatPromptTemplate.from_template(PATTERN_ANALYSIS_PROMPT)
+        self.prompt = ChatPromptTemplate.from_template(A7_PATTERN_ANALYSIS_PROMPT)
         self.parser = JsonOutputParser()
 
         logger.debug("[A7] PatternAnalysisTask初期化完了")

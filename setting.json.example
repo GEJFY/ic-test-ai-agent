@@ -1,5 +1,31 @@
 {
-    "_comment": "=== このファイルは設定のサンプル・ガイドです。実際の設定はsetting.jsonに記載してください ===",
+    "_readme": [
+        "=== 設定ファイル説明（この配列はプログラムに無視されます）===",
+        "",
+        "【apiClient設定】",
+        "  POWERSHELL = PowerShellスクリプト経由（デフォルト、推奨）",
+        "  VBA        = VBAネイティブHTTP（PowerShell禁止環境用）",
+        "  EXPORT     = ファイルエクスポートのみ（PowerShell+VBA両方禁止環境用）",
+        "",
+        "【EXPORTモードの使い方】",
+        "  1. ProcessForExportマクロを実行 → JSONファイルがエクスポートされる",
+        "  2. web/index.html をブラウザで開き、JSONをアップロード",
+        "  3. 評価完了後、結果JSONをダウンロード",
+        "  4. ImportResultsマクロを実行 → 結果をExcelにインポート",
+        "",
+        "asyncMode: true=非同期モード（推奨、504タイムアウト対策）, false=同期モード",
+        "batchSize: 一度に処理する項目数（5-20推奨、非同期モードなら大きくても可）",
+        "pollingIntervalSec: 非同期モード時のポーリング間隔（秒）。5-10推奨",
+        "sheetName: 対象シート名。空欄=アクティブシート",
+        "dataStartRow: データ開始行（ヘッダー行の次）",
+        "columns: Excel列マッピング。A,B,C...で指定",
+        "api.provider: AZURE, GCP, AWS のいずれか",
+        "api.endpoint: APIのベースURL（/evaluateまで）",
+        "api.authType: 認証方式。azureAd=Azure AD認証（推奨）, functionsKey=Functions Key認証",
+        "azureAd: Azure AD認証設定（authType: azureAdの場合に必要）",
+        "responseMapping: API応答を書き込むExcel列",
+        "booleanDisplayTrue/False: 評価結果の表示文字列"
+    ],
 
     "_dataStartRow": "データの開始行（ヘッダー行の次）",
     "dataStartRow": 2,
@@ -7,57 +33,56 @@
     "_sheetName": "対象シート名（空の場合はアクティブシートを使用）",
     "sheetName": "",
 
+    "_batchSize": "1回のAPI呼び出しで処理する件数（5-20推奨、非同期モードなら大きくても可）",
+    "batchSize": 10,
+
+    "_asyncMode": "非同期モード（推奨）。trueで504タイムアウト回避",
+    "asyncMode": true,
+
+    "_pollingIntervalSec": "非同期モード時のポーリング間隔（秒）",
+    "pollingIntervalSec": 5,
+
+    "_apiClient": "API呼び出し方式。POWERSHELL（推奨）またはVBA",
+    "apiClient": "POWERSHELL",
+
     "_columns": "Excel入力列の定義",
     "columns": {
         "ID": "A",
-        "ControlDescription": "C",
-        "TestProcedure": "D",
-        "EvidenceLink": "E"
+        "TestTarget": "B",
+        "Category": "C",
+        "ControlDescription": "D",
+        "TestProcedure": "E",
+        "EvidenceLink": "F"
     },
 
     "_api": "=== APIプロバイダー設定 ===",
     "_api_provider": "AZURE / GCP / AWS のいずれかを指定",
-    "_api_authHeader": "認証ヘッダー名（省略時はプロバイダーのデフォルト値を使用）",
+    "_api_authType": "認証方式: azureAd（本番環境推奨）または functionsKey（開発環境用）",
     "api": {
         "provider": "AZURE",
-        "endpoint": "https://your-function-app.azurewebsites.net/api/YourFunction",
-        "apiKey": "your-api-key-here",
-        "authHeader": ""
+        "endpoint": "https://your-function-app.azurewebsites.net/api/evaluate",
+        "authType": "azureAd"
     },
 
-    "_api_examples": "=== プロバイダー別の設定例 ===",
-
-    "_azure_example": {
-        "_description": "Azure Functions の設定例",
-        "provider": "AZURE",
-        "endpoint": "https://your-app.azurewebsites.net/api/FunctionName",
-        "apiKey": "your-function-key",
-        "authHeader": "x-functions-key"
-    },
-
-    "_gcp_example": {
-        "_description": "Google Cloud Functions の設定例",
-        "provider": "GCP",
-        "endpoint": "https://region-project.cloudfunctions.net/function-name",
-        "apiKey": "your-bearer-token",
-        "authHeader": "Authorization"
-    },
-
-    "_aws_example": {
-        "_description": "AWS Lambda (API Gateway) の設定例",
-        "provider": "AWS",
-        "endpoint": "https://xxxxx.execute-api.ap-northeast-1.amazonaws.com/prod/resource",
-        "apiKey": "your-api-key",
-        "authHeader": "x-api-key"
+    "_azureAd": "=== Azure AD認証設定（authType: azureAdの場合に必要）===",
+    "_azureAd_note": "Azure ADグループによるアクセス制限を行う場合に設定（本番環境推奨）",
+    "_azureAd_tenantId": "会社のAzure ADテナントID（Azure Portal → Microsoft Entra ID → 概要で確認）",
+    "_azureAd_clientId": "App RegistrationのクライアントID（Azure Portal → アプリの登録 → 概要で確認）",
+    "_azureAd_scope": "APIスコープ。user_impersonation + openid + offline_access（トークンキャッシュに必要）",
+    "azureAd": {
+        "tenantId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        "clientId": "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy",
+        "scope": "api://yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy/user_impersonation openid offline_access"
     },
 
     "_responseMapping": "=== APIレスポンスのExcel出力列マッピング ===",
     "_responseMapping_note": "APIから返されるJSONキー名と出力先のExcel列を対応付け",
     "responseMapping": {
-        "evaluationResult": "F",
-        "judgmentBasis": "G",
-        "documentReference": "H",
-        "fileName": "I"
+        "evaluationResult": "G",
+        "executionPlanSummary": "H",
+        "judgmentBasis": "I",
+        "documentReference": "J",
+        "evidenceFileNames": "K"
     },
 
     "_booleanDisplay": "=== Boolean値の表示設定 ===",
@@ -65,11 +90,66 @@
     "booleanDisplayTrue": "有効",
     "booleanDisplayFalse": "非有効",
 
+    "_api_examples": "=== プロバイダー別の設定例 ===",
+
+    "_azure_ad_example": {
+        "_description": "Azure Functions の設定例（Azure AD認証 - 本番環境推奨）",
+        "_note1": "Azure ADグループで許可されたユーザーのみアクセス可能",
+        "_note2": "Functions Keyは不要（AuthLevel.ANONYMOUS + Azure ADプラットフォーム認証）",
+        "_note3": "トークンキャッシュにより2回目以降はブラウザ認証不要",
+        "api": {
+            "provider": "AZURE",
+            "authType": "azureAd",
+            "endpoint": "https://your-app.azurewebsites.net/api/evaluate"
+        },
+        "azureAd": {
+            "tenantId": "your-tenant-id",
+            "clientId": "your-client-id",
+            "scope": "api://your-client-id/user_impersonation openid offline_access"
+        }
+    },
+
+    "_azure_key_example": {
+        "_description": "Azure Functions の設定例（Functions Key認証 - 開発環境用）",
+        "_note": "セキュリティ上、本番環境では非推奨",
+        "api": {
+            "provider": "AZURE",
+            "authType": "functionsKey",
+            "endpoint": "https://your-app.azurewebsites.net/api/evaluate",
+            "apiKey": "your-function-key",
+            "authHeader": "x-functions-key"
+        }
+    },
+
+    "_gcp_example": {
+        "_description": "Google Cloud Functions の設定例",
+        "api": {
+            "provider": "GCP",
+            "authType": "functionsKey",
+            "endpoint": "https://region-project.cloudfunctions.net/function-name",
+            "apiKey": "your-bearer-token",
+            "authHeader": "Authorization"
+        }
+    },
+
+    "_aws_example": {
+        "_description": "AWS Lambda (API Gateway) の設定例",
+        "api": {
+            "provider": "AWS",
+            "authType": "functionsKey",
+            "endpoint": "https://xxxxx.execute-api.ap-northeast-1.amazonaws.com/prod/resource",
+            "apiKey": "your-api-key",
+            "authHeader": "x-api-key"
+        }
+    },
+
     "_expected_request": "=== APIに送信されるJSON形式 ===",
     "_request_note": "EvidenceLinkフォルダ内のファイルは自動的にBase64変換されてEvidenceFilesに追加される",
     "_request_example": [
         {
             "ID": "IC-001",
+            "TestTarget": "購買プロセス",
+            "Category": "業務統制",
             "ControlDescription": "アクセス権限の承認プロセス",
             "TestProcedure": "承認記録を確認する",
             "EvidenceLink": "C:\\Evidence\\IC-001",
@@ -124,9 +204,10 @@
         {
             "ID": "IC-001",
             "evaluationResult": true,
+            "executionPlanSummary": "[A5:意味推論] 承認プロセスの有効性を評価",
             "judgmentBasis": "承認記録が適切に保存されている",
             "documentReference": "内部統制規程 第3条",
-            "fileName": "approval_record.pdf"
+            "evidenceFileNames": "approval_record.pdf"
         }
     ]
 }

@@ -83,6 +83,7 @@ result = await orchestrator.evaluate(context)
 """
 import asyncio
 import logging
+import os
 from typing import TypedDict, List, Dict, Any, Optional, Literal
 from dataclasses import dataclass, field
 from langchain_core.prompts import ChatPromptTemplate
@@ -102,6 +103,14 @@ from .tasks import (
     PatternAnalysisTask,
     SoDDetectionTask,
 )
+from .prompts import (
+    PLANNER_PROMPT,
+    PLAN_REVIEW_PROMPT,
+    JUDGMENT_PROMPT,
+    JUDGMENT_REVIEW_PROMPT,
+    PLAN_REFINE_PROMPT,
+    JUDGMENT_REFINE_PROMPT,
+)
 
 # =============================================================================
 # ログ設定
@@ -112,454 +121,17 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # プロンプトテンプレート
 # =============================================================================
-
-# テスト計画作成用プロンプト（強化版）
-ENHANCED_PLANNER_PROMPT = """あなたは内部統制監査の専門家AIプランナーです。
-与えられた統制記述とテスト手続きを分析し、最適な評価タスクの実行計画を立案してください。
-
-【最重要原則】
-★ 内部統制テストは「必要最小限のタスク」で効率的に実施します。
-★ 原則として1〜2タスクで計画してください。3つ以上は過剰です。
-★ 「この証跡で何を確認すれば統制の有効性を判断できるか」だけを考えてください。
-
-【タスク選択の判断基準】
-タスクを選ぶ際は、以下の質問に答えてください：
-
-1. 「何を確認するか」 → 確認内容でタスクが決まる
-   - 記載内容・出席者の確認 → A1（意味検索）
-   - 印影・署名の確認 → A2（画像認識）
-   - 数値の突合・計算検証 → A3/A4（データ抽出/段階的推論）
-   - 規程との整合性 → A5（意味推論）
-   - 複数文書間の整合性 → A6（複数文書統合）
-   - 複数期間の継続実施 → A7（パターン分析）
-   - 権限の競合・分離 → A8（SoD検出）
-
-2. 「実施頻度は何か」 → 頻度でA7の要否が決まる
-   - 複数回/継続的（月次、四半期、毎週等）→ A7が候補
-   - 単発/年1回/都度 → A7は不適切、A1またはA5を使用
-
-3. 「承認の形態は何か」 → 形態でA2の要否が決まる
-   - 押印・署名による承認 → A2
-   - 会議出席による承認（議事録） → A1（出席=承認）
-   - システム承認・ワークフロー → A1またはA3
-
-【利用可能なタスクタイプ】
-A1: 意味検索 - 証跡内の記載内容を意味的に検索・確認（最も汎用的）
-A2: 画像認識 - 印影・署名・日付を画像から抽出
-A3: データ抽出 - 表から数値を抽出し突合
-A4: 段階的推論 - 複雑な計算をステップごとに検証
-A5: 意味推論 - 抽象的な規程要求と実施記録の整合性判定
-A6: 複数文書統合 - 複数の証跡を統合してプロセス全体を確認
-A7: パターン分析 - 複数期間の継続実施を時系列で確認
-A8: SoD検出 - 職務分掌違反・権限競合を検出
-
-【A7（パターン分析）の使用条件】
-A7は「複数期間にわたる継続的な実施」を確認するタスクです。
-使用条件：以下のすべてを満たす場合のみ
-  ✓ 統制が「月次」「四半期」「毎週」など複数回の実施を要求している
-  ✓ 複数期間分の証跡が提供されている
-  ✓ 「継続的に実施されているか」の確認が目的
-
-使用しない条件：以下のいずれかに該当する場合
-  ✗ 実施頻度が「年1回」「年度」「都度」など単発
-  ✗ 単一時点の実施記録の確認
-  ✗ リストやデータの内容確認（→ A1またはA3を使用）
-
-【統制記述】
-{control_description}
-
-【テスト手続き】
-{test_procedure}
-
-【エビデンスファイル情報】
-{evidence_info}
-
-【出力形式】
-以下のJSON形式で実行計画を出力してください：
-{{
-    "analysis": {{
-        "evidence_type": "証跡の種類",
-        "confirmation_target": "確認対象（記載内容/印影/数値/整合性等）",
-        "frequency": "実施頻度（単発/月次/四半期等）",
-        "approval_type": "承認形態（押印/会議出席/システム/なし）"
-    }},
-    "execution_plan": [
-        {{
-            "step": 1,
-            "task_type": "A1-A8のいずれか",
-            "purpose": "このタスクを実行する目的",
-            "test_description": "【必須】具体的なテスト内容を文章で記述",
-            "check_items": ["確認する項目"]
-        }}
-    ],
-    "reasoning": "この計画を立案した理由（なぜこのタスクを選んだか）"
-}}
-
-★★★【test_descriptionの記載ルール】★★★
-test_descriptionには、「何を」「どのように」テストするかを具体的な文章で記載してください。
-
-【良い例】
-- 「研修実施報告書を閲覧し、研修日時・対象者・実施方法が記載されていることを確認する。」
-- 「リスク評価結果一覧より、各リスク項目の発生可能性・影響度の評価が実施されていることを確認する。」
-- 「取締役会議事録を閲覧し、リスク評価結果が報告・審議されたことを確認する。」
-- 「組織図を閲覧し、職務権限規程に定める権限と実際の組織体制が整合していることを確認する。」
-
-【悪い例（禁止）】
-- 「A3: 構造化データ抽出」（タスクタイプ名だけ）
-- 「データを確認する」（抽象的すぎる）
-- 「証跡を検証」（何をどう検証するか不明）
-"""
-
-# テスト計画レビュー用プロンプト（セルフリフレクション）
-# 監査マネージャー視点：リスクベースでテスト計画の妥当性を評価
-PLAN_REVIEW_PROMPT = """あなたは内部統制監査の監査マネージャー（経験15年以上）です。
-担当者が作成したテスト計画をレビューし、監査品質の観点から承認可否を判断してください。
-
-【あなたの役割】
-監査マネージャーとして、以下を確認します：
-1. テスト計画が統制の目的・リスクに対応しているか
-2. 証跡の選定が適切か（統制の有効性を判断するのに十分か）
-3. テスト手続きの要求事項を満たしているか
-
-【レビューの視点】
-
-★ 統制目的の理解
-- この統制は何のリスクを軽減するためのものか？
-- テスト計画はそのリスク軽減を検証できる内容か？
-
-★ 証跡と確認事項の整合性
-- 提供された証跡で、テスト手続きの確認事項をカバーできるか？
-- 確認すべき項目に漏れはないか？
-
-★ タスク選択の妥当性
-- 選択されたタスクタイプは確認対象に適切か？
-- 過剰なタスク（同じことを重複確認）はないか？
-
-【タスク選択の判断基準】
-| 確認対象 | 適切なタスク | 不適切なタスク |
-|---------|-------------|---------------|
-| 記載内容・出席者 | A1（意味検索） | A7（継続性不要なら） |
-| 印影・署名 | A2（画像認識） | A1（画像読めない） |
-| 数値の突合 | A3/A4 | A1（計算必要なら） |
-| 規程との整合性 | A5（意味推論） | A3（定性的なら） |
-| 複数文書の整合 | A6 | 単独タスクの重複 |
-| 継続的実施 | A7（月次等） | A7（年1回なら不要） |
-| 権限分掌 | A8 | A1（SoD判定必要なら） |
-
-【統制記述】
-{control_description}
-
-【テスト手続き】
-{test_procedure}
-
-【エビデンスファイル】
-{evidence_info}
-
-【レビュー対象の計画】
-{execution_plan}
-
-【レビュー判断基準】
-
-「承認」とする条件：
-✓ テスト手続きの確認事項がすべてカバーされている
-✓ 選択されたタスクが確認対象に適切である
-✓ test_descriptionが具体的で、何を確認するか明確である
-
-「要修正」とする条件：
-✗ テスト手続きの確認事項に漏れがある
-✗ タスク選択が確認対象と不整合（例：数値確認にA1を使用）
-✗ test_descriptionが抽象的（「確認する」「検証する」のみ）
-✗ 同じ確認を複数タスクで重複している
-
-【出力形式】
-{{
-    "review_result": "承認" または "要修正",
-    "control_objective_understood": true/false,
-    "coverage_score": 1-10,
-    "efficiency_score": 1-10,
-    "issues": [
-        {{
-            "type": "網羅性不足/タスク不整合/記述不明確/重複",
-            "description": "問題の具体的内容",
-            "suggestion": "改善提案（具体的に）"
-        }}
-    ],
-    "missing_checks": ["テスト手続きでカバーされていない確認事項"],
-    "redundant_tasks": ["削除すべきタスク（理由付き）"],
-    "reasoning": "監査マネージャーとしてのレビュー所見"
-}}
-"""
-
-# 最終判断用プロンプト（強化版・専門家視点）
-ENHANCED_JUDGMENT_PROMPT = """あなたは内部統制監査の実務経験20年以上の専門家です。
-金融庁検査官が読んでも問題のない、監査調書品質の評価結果を作成してください。
-
-【最重要原則】証跡が存在すれば「有効」と判断する
-内部統制テストの目的は「統制が機能しているか」の確認です。
-証跡（議事録、報告書、リスト等）が提供され、内容が確認できれば、基本的に有効と判断します。
-
-【有効と判断する条件】（以下のいずれかを満たせば「有効」）
-- 議事録に該当事項の記載があり、出席者が確認できる
-- 報告書・申請書に必要事項が記載されている
-- リスト・明細に期待されるデータが存在する
-- 軽微な例外があっても、フォローアップが確認できる
-
-【不備と判断する条件】（以下のすべてを満たす場合のみ「不備」）
-- 証跡が全く存在しない、または重大な欠落がある
-- 統制の目的が達成されていないことが明確
-- 補完統制やフォローアップも確認できない
-
-【絶対に避けるべき判断パターン】
-× 「追加証跡が必要」「フォローアップを前提に」→ 提供された証跡で判断を完結させること
-× 「証跡が読み取れない」→ ファイル形式の問題であり統制の問題ではない
-× 「完全に確認できなかった」→ 確認できた範囲で明確に判断する
-× 「未確定」「保留」→ 必ず「有効」か「不備」のいずれかを結論付ける
-
-【統制記述】
-{control_description}
-
-【テスト手続き】
-{test_procedure}
-
-【エビデンスファイル】
-{evidence_files}
-
-【テスト計画】
-{execution_plan}
-
-【各タスクの実行結果】
-{task_results}
-
-【出力形式】
-以下のJSON形式で出力してください：
-
-{{
-    "evaluation_result": true/false,
-    "judgment_basis": "判断根拠（詳細な文章形式、300〜500文字程度）",
-    "document_quotes": [
-        {{
-            "file_name": "証跡ファイル名（拡張子含む）",
-            "quotes": ["前後の文脈を含む引用文1", "前後の文脈を含む引用文2"],
-            "page_or_location": "ページ番号やセクション名"
-        }}
-    ],
-    "confidence": 0.0-1.0,
-    "key_findings": ["主要な発見事項"],
-    "control_effectiveness": {{
-        "design": "整備状況の評価（有効/要改善）",
-        "operation": "運用状況の評価（有効/要改善）"
-    }}
-}}
-
-★★★【judgment_basis：経験豊富な専門家による監査調書】★★★
-
-経験20年以上の内部統制監査専門家として、簡潔かつ的確な判断根拠を記載してください。
-
-【書き方のルール】
-1. 確認した事実を直接述べる（前置き不要）
-2. 具体的な数値・日付・名称を含める
-3. 300〜500文字程度で簡潔にまとめる
-4. 結論を明確に述べる
-
-【禁止する書き出しパターン - 以下は絶対に使わないこと】
-× 「テスト手続きでは〜」「テスト手続きに基づき〜」
-× 「当該統制の有効性を評価するため〜」
-× 「内部統制テストの結果〜」
-× 「評価の結果〜」「検証の結果〜」
-× 「以下の通り確認した〜」
-× 「本件について〜」「本統制について〜」
-
-【良い書き出しパターン - 直接事実から始める】
-○ 「研修実施報告書および受講者リストを閲覧した。」
-○ 「取締役会議事録を閲覧し、〜を確認した。」
-○ 「リスク評価結果一覧より、〜が実施されていることを確認した。」
-○ 「〇〇年〇月〇日付の承認書により、〜を確認した。」
-
-【良い判断根拠の例】
-「研修実施報告書および受講者リストを閲覧した。報告書より、2025年11月18日にeラーニング形式で研修が実施され、理解度テスト（10問、合格基準80%）が併せて実施されていることを確認した。受講者リストより、全対象者60名のうち受講済53名、期限後受講4名、未受講3名であること、未受講者に対しては12月2日および9日に督促が実施されていることを確認した。期限後受講者4名は12月6日までに受講完了。整備面として、年1回の研修実施と受講モニタリング手続きが定められており、人事総務部にて管理されている。運用面として、研修は計画どおり実施され、未受講者への督促も適時に行われている。以上より、本統制は有効に整備・運用されていると判断する。」
-
-【悪い判断根拠の例 - こう書いてはいけない】
-「テスト手続きでは、研修の実施状況を確認することとしており、当該統制の有効性を評価するため、研修実施報告書および受講者リストを閲覧した。」← 前置きが冗長
-
-★★★【document_quotes：原文をそのまま幅広に引用】★★★
-
-【引用の目的】
-レビュアーが元の証跡ファイルを開かずに判断の妥当性を検証できるよう、
-根拠となる記載を前後の文脈を含めて十分な量で引用します。
-
-【引用のルール】
-1. **原文をそのままコピー＆ペーストする**
-   - 証跡ファイルに記載された文言を一字一句変えずにそのまま転記
-   - 自分の言葉での言い換え・要約・省略は【絶対禁止】
-   - 誤字脱字があってもそのまま引用する
-
-2. **引用の長さ：100〜400文字程度**
-   - 根拠となる記載だけでなく、前後の文脈も含めて幅広に引用
-   - セクション見出し、項目名、前後の文も含める
-   - 短い引用（50文字未満）は不可
-   - 表の場合はヘッダー行と複数の該当行を含める
-
-3. **引用形式：括弧なしでそのまま記載**
-   - 「」や『』で囲まない
-   - 原文をそのまま記載する
-
-4. **各証跡ファイルから2〜3箇所を引用する**
-   - 判断根拠を裏付けるすべての箇所を引用する
-
-【悪い引用の例 - このような引用は禁止】
-× 「研修が実施されていることを確認した」← 要約している
-× 「受講者名簿に全員の受講記録があった」← 言い換えている
-× 「対象：全役職員」← 短すぎる（文脈がない）
-
-【良い引用の例 - 原文をそのまま幅広に】
-ファイル: CLC-01_コンプライアンス研修実施報告書_2025年度.pdf
-引用箇所: 1ページ「1. 実施概要」セクション
-引用文: 1. 実施概要 対象：全役職員（役員・嘱託・派遣を含む） 実施日：2025/11/18（eラーニング配信開始） 実施方法：LMS（社内学習管理システム）にて受講、理解度テスト（10問）を実施 受講期限：2025/11/30、期限後受講は2025/12/10まで認める（特段の事情がある場合）
-
-ファイル: CLC-01_コンプライアンス研修実施報告書_2025年度.pdf
-引用箇所: 2ページ「3. 受講状況」セクション
-引用文: 3. 受講状況 本研修の受講状況は以下の通りである。受講済：53名（88.3%）、期限後受講：4名（6.7%）、未受講：3名（5.0%）、合計：60名 期限後受講者については、業務都合により期限内の受講が困難であったが、いずれも2025/12/06までに受講を完了している。未受講者3名については、2025/12/02および12/09に督促を実施済みであり、追加研修（12/09予定）にて対応予定。
-
-【引用文の品質チェック】
-□ 引用文は100文字以上あるか？（前後の文脈を含めているか）
-□ 「」や『』で囲んでいないか？（原文そのまま記載しているか）
-□ 自分の言葉で言い換えていないか？
-□ 判断根拠の各主張に対応する引用があるか？
-"""
-
-# 最終判断レビュー用プロンプト（セルフリフレクション）
-# 品質管理パートナー視点：監査調書品質の確保（過度な修正要求を避ける）
-JUDGMENT_REVIEW_PROMPT = """あなたは監査法人の品質管理パートナー（内部統制監査経験25年）です。
-作成された監査判断をレビューし、重大な問題がある場合のみ修正を指示してください。
-
-【重要な前提】
-★ 判断根拠が概ね妥当であれば「承認」としてください
-★ 軽微な改善点は「承認」としつつ、reasoningに改善提案を記載してください
-★ 「要修正」は、判断に重大な誤りがある場合のみ使用してください
-
-【あなたの役割】
-品質管理パートナーとして、以下の観点で最終チェックを行います：
-1. 評価結果（有効/不備）と判断根拠の整合性
-2. 判断根拠に重大な論理的誤りがないか
-3. 禁止フレーズが含まれていないか
-
-【統制記述】
-{control_description}
-
-【テスト手続き】
-{test_procedure}
-
-【テスト計画】
-{execution_plan}
-
-【タスク実行結果】
-{task_results}
-
-【レビュー対象の判断】
-評価結果: {evaluation_result}
-判断根拠: {judgment_basis}
-引用文: {document_quotes}
-信頼度: {confidence}
-
-【品質チェックリスト】
-
-□ 1. 証跡に基づく事実の記載
-   - 判断根拠に具体的な事実（日付、数値、名前）が含まれているか
-   - その事実は提供された証跡に実際に記載されているか
-   - 証跡に存在しない情報を推測で記載していないか
-
-□ 2. 論理的な判断プロセス
-   - 「何を確認し」→「何が確認でき」→「よって有効/不備」の流れがあるか
-   - 確認事項と結論の間に論理の飛躍がないか
-
-□ 3. 証跡との紐付け（引用の品質チェック）★重要★
-   - document_quotesは証跡の原文をそのまま引用しているか（要約・言い換えは不可）
-   - 引用が要約形式（例:「研修が実施されていることを確認」）になっていないか → 原文転記を要求
-   - 引用箇所（ページ、セクション、行）が特定されているか
-   - 各引用は50文字以上の十分な長さがあるか
-   - 判断根拠の各主張に対応する引用があるか
-
-□ 4. 結論の明確性
-   - 「有効」または「不備」が明確に結論付けられているか
-   - 「追加証跡が必要」「今後の確認を要する」等の曖昧な表現がないか
-   - 条件付きの結論（「〜を前提として有効」）になっていないか
-
-【要修正とすべきパターン】
-
-1. **証跡に基づかない記載**
-   - 「〜と推測される」「〜と思われる」→ 証跡に基づく事実のみ記載
-   - 証跡に存在しない数値や日付 → 証跡から確認できる情報のみ記載
-
-2. **曖昧な結論**
-   - 「追加証跡が必要」→ 提供された証跡で結論を出す
-   - 「フォローアップを前提に有効」→ 無条件で「有効」または「不備」
-
-3. **証跡との紐付け不足**★引用品質は重要★
-   - 要約形式の引用（例:「研修が実施されていた」「適切に運用されている」）→ 原文をそのまま引用
-   - 短すぎる引用（50文字未満）→ 前後の文脈を含めて引用
-   - 引用箇所の特定なし → ページ番号やセクション名を明記
-   - 引用文が1〜2個しかない → 各証跡から3〜5個の引用を要求
-
-4. **過度に保守的な判断**
-   - 軽微な例外を理由に「不備」→ 例外対応が確認できれば「有効」
-   - 証跡が存在するのに「確認できなかった」→ 確認できた事実を記載
-
-【承認/要修正の判断基準】
-
-★★★「承認」とすべき場合 ★★★
-以下のすべてに該当すれば「承認」としてください：
-- 証跡から確認できた事実に基づいて結論が導かれている
-- 判断根拠に具体的な日付、数値、名称が含まれている
-- 結論（有効/不備）が明確に述べられている
-- 評価結果と判断根拠の内容が一致している
-
-★★★「要修正」とすべき場合 ★★★
-以下のいずれかに該当する場合は「要修正」としてください：
-
-【パターン1】禁止フレーズが含まれている
-- 「追加証跡が必要」「追加の証跡を要する」「追加検証が必要」
-- 「フォローアップを前提に」「フォローアップ計画の明確化が必要」
-- 「結論を更新する」「再評価する」
-- 「限定的有効性」「条件付き有効」
-
-【パターン2】評価結果と判断根拠が矛盾している（★最重要★）
-評価結果が「有効」なのに、判断根拠に以下の否定的表現がある場合は必ず「要修正」：
-- 「不備がある」「不備が認められる」「不備と判断」
-- 「不十分である」「十分でない」「欠如している」
-- 「問題がある」「課題がある」「懸念がある」
-- 「統制が機能していない」「機能不全」
-- 「有効性に疑義」「有効とは言えない」「有効と断定できず」
-- 「確認できなかった」「確認できていない」（証跡が存在する場合）
-
-評価結果が「不備」なのに、判断根拠に以下の肯定的表現がある場合は必ず「要修正」：
-- 「有効に整備・運用されている」「有効と判断する」
-- 「適切に実施されている」「問題なく運用されている」
-- 「統制は機能している」
-
-【矛盾検出時の修正指示】
-矛盾を検出した場合は、revised_judgment_basisに以下を含めて修正案を提示：
-1. 矛盾する表現を削除または修正
-2. 評価結果と整合する結論文を追記
-3. 証跡から確認できた事実に基づく記述に修正
-
-【出力形式】
-{{
-    "review_result": "承認" または "要修正",
-    "coverage_score": 1-10,
-    "efficiency_score": 1-10,
-    "original_judgment_appropriate": true/false,
-    "suggested_evaluation_result": true/false,
-    "issues": [
-        {{
-            "type": "禁止フレーズ/評価結果矛盾/その他",
-            "description": "問題の具体的内容",
-            "correction": "修正案"
-        }}
-    ],
-    "revised_judgment_basis": "要修正の場合のみ記載：禁止フレーズを除去した判断根拠",
-    "reasoning": "レビュー所見"
-}}
-"""
+# プロンプトは src/core/prompts.py で一元管理されています。
+# 詳細は prompts.py を参照してください。
+#
+# インポート済み:
+# - PLANNER_PROMPT: テスト計画作成用
+# - PLAN_REVIEW_PROMPT: 計画レビュー用
+# - JUDGMENT_PROMPT: 最終判断作成用
+# - JUDGMENT_REVIEW_PROMPT: 判断レビュー用
+# - PLAN_REFINE_PROMPT: 計画修正用
+# - JUDGMENT_REFINE_PROMPT: 判断修正用
+# =============================================================================
 
 
 # =============================================================================
@@ -666,101 +238,92 @@ class AuditResult:
 
         return response
 
+    # タスクタイプの説明マップ
+    TASK_TYPE_DESCRIPTIONS = {
+        "A1": "意味検索",
+        "A2": "画像認識",
+        "A3": "データ抽出",
+        "A4": "段階的推論",
+        "A5": "意味的推論",
+        "A6": "複数文書統合",
+        "A7": "パターン分析",
+        "A8": "職務分離検出",
+    }
+
+    def _get_task_type_label(self, task_type: str) -> str:
+        """タスクタイプのラベルを取得（例: A5 → 【A5:意味的推論】）"""
+        if not task_type:
+            return ""
+        desc = self.TASK_TYPE_DESCRIPTIONS.get(task_type, "")
+        if desc:
+            return f"【{task_type}:{desc}】"
+        return f"【{task_type}】"
+
     def _format_execution_plan_summary(self) -> str:
         """
         実行計画のサマリーを生成（監査調書として適切な文章形式で記述）
 
-        監査専門家が作成したような、具体的なテスト内容を文章形式で出力します。
-        箇条書きや記号は使用せず、段落形式で記述します。
+        レビュー後の計画に基づき、タスク番号・タスク名とテスト方法を明記した計画を出力します。
+        これは「計画」であるため、結果判断は含めません。
         """
-        if not self.task_results:
-            return "（タスク未実行）"
+        if not self.execution_plan or not self.execution_plan.steps:
+            # タスク結果からタスクタイプを取得してフォールバック
+            if self.task_results:
+                parts = []
+                for i, tr in enumerate(self.task_results, 1):
+                    task_type = tr.task_type.value
+                    task_name = tr.task_name
+                    label = self._get_task_type_label(task_type)
+                    parts.append(f"{label}\n{task_name}を実施する。")
+                return "\n\n".join(parts)
+            return "（計画未作成）"
 
-        # 実行計画のstepsからtest_descriptionとcheck_itemsを取得
-        step_descriptions = []
-        if self.execution_plan and self.execution_plan.steps:
-            for step in self.execution_plan.steps:
-                if isinstance(step, dict):
-                    test_desc = step.get("test_description", "") or step.get("purpose", "")
-                    check_items = step.get("check_items", [])
-                    if test_desc:
-                        # 確認項目を文章に組み込む
-                        if check_items and isinstance(check_items, list) and len(check_items) > 0:
-                            items_text = "、".join(check_items[:3])
-                            if not test_desc.endswith("。"):
-                                test_desc += "。"
-                            test_desc = f"{test_desc}具体的には、{items_text}を確認した"
-                        step_descriptions.append(test_desc)
+        # 実行計画のstepsからタスク番号・目的・テスト内容を取得
+        parts = []
+        for step in self.execution_plan.steps:
+            if not isinstance(step, dict):
+                continue
 
-        # タスク結果からも情報を補完
-        if not step_descriptions:
-            for tr in self.task_results:
-                if hasattr(tr, 'reasoning'):
-                    reasoning = tr.reasoning
-                else:
-                    reasoning = tr.get("reasoning", "")
+            step_num = step.get("step", len(parts) + 1)
+            task_type = step.get("task_type", "")
+            purpose = step.get("purpose", "")
+            test_desc = step.get("test_description", "")
+            check_items = step.get("check_items", [])
 
-                if reasoning:
-                    # reasoningから結論部分を抽出
-                    # 「結論:」「/ 結論:」の後の文を優先
-                    conclusion_text = ""
-                    if "/ 結論:" in reasoning:
-                        conclusion_text = reasoning.split("/ 結論:")[-1].strip()
-                    elif "結論:" in reasoning:
-                        conclusion_text = reasoning.split("結論:")[-1].strip()
-
-                    if conclusion_text:
-                        # 最初の文だけ取得
-                        if "。" in conclusion_text:
-                            conclusion_text = conclusion_text.split("。")[0] + "。"
-                        step_descriptions.append(conclusion_text)
-                    elif reasoning:
-                        # 証跡部分を抽出
-                        if "/ 証跡:" in reasoning:
-                            evidence_part = reasoning.split("/ 証跡:")[1].split("/")[0].strip()
-                            if evidence_part and evidence_part != "N/A":
-                                step_descriptions.append(evidence_part)
-
-        # 結果をまとめて文章形式で出力
-        if step_descriptions:
-            # 複数のテスト説明を自然な文章として結合
-            combined = ""
-            for i, desc in enumerate(step_descriptions):
-                if i == 0:
-                    combined = desc
-                else:
-                    # 接続詞を付けて結合
-                    if not combined.endswith("。"):
-                        combined += "。"
-                    combined += f"また、{desc}"
-
-            # 文末を整える
-            if combined and not combined.endswith("。"):
-                combined += "。"
-
-            # テスト結果の成否を追加
-            success_count = sum(1 for tr in self.task_results
-                                if (tr.success if hasattr(tr, 'success') else tr.get("success", False)))
-            total_count = len(self.task_results)
-
-            if success_count == total_count:
-                result_suffix = "上記テストの結果、統制は有効と判断された。"
-            elif success_count == 0:
-                result_suffix = "上記テストの結果、証跡不足により統制の有効性を確認できなかった。"
+            # タスク番号とタスク名を含むヘッダー
+            if task_type:
+                header = self._get_task_type_label(task_type)
             else:
-                result_suffix = f"上記テストの結果、{total_count}件中{success_count}件が有効と判断された。"
+                header = f"【ステップ{step_num}】"
 
-            return f"{combined}\n\n{result_suffix}"
+            # テスト方法の説明を構築
+            description_parts = []
+
+            # 目的がある場合は追加
+            if purpose:
+                description_parts.append(purpose)
+
+            # テスト説明を追加
+            if test_desc:
+                description_parts.append(test_desc)
+
+            # 確認項目を文章に組み込む
+            if check_items and isinstance(check_items, list) and len(check_items) > 0:
+                items_text = "、".join(check_items[:5])  # 最大5項目まで表示
+                description_parts.append(f"具体的には、{items_text}を確認する")
+
+            # 説明を結合
+            if description_parts:
+                full_desc = "。".join(d.rstrip("。") for d in description_parts if d) + "。"
+                parts.append(f"{header}\n{full_desc}")
+            elif task_type:
+                # 最低限タスクタイプだけは記載
+                parts.append(f"{header}\n当該タスクにより証跡を確認する。")
+
+        if parts:
+            return "\n\n".join(parts)
         else:
-            # フォールバック：シンプルな結果サマリー
-            success_count = sum(1 for tr in self.task_results
-                                if (tr.success if hasattr(tr, 'success') else tr.get("success", False)))
-            total_count = len(self.task_results)
-
-            if total_count == 0:
-                return "テストは実施されなかった。"
-
-            return f"計{total_count}件のテストを実施し、{success_count}件が有効と判断された。"
+            return "（計画詳細なし）"
 
 
 # =============================================================================
@@ -774,12 +337,12 @@ class GraphAuditOrchestrator:
     セルフリフレクションパターンを実装し、
     計画作成→レビュー→実行→判断→レビューの
     品質向上サイクルを実現します。
-    """
 
-    # 最大修正回数（無限ループ防止）
-    # セルフリフレクションによる品質向上のため1回の修正を許可
-    MAX_PLAN_REVISIONS = 1
-    MAX_JUDGMENT_REVISIONS = 1
+    【環境変数による設定】
+    - MAX_PLAN_REVISIONS: 計画レビューの最大修正回数（デフォルト: 1, 0でスキップ）
+    - MAX_JUDGMENT_REVISIONS: 判断レビューの最大修正回数（デフォルト: 1, 0でスキップ）
+    - SKIP_PLAN_CREATION: 計画作成を省略するか（デフォルト: false）
+    """
 
     def __init__(self, llm=None, vision_llm=None):
         """
@@ -792,7 +355,13 @@ class GraphAuditOrchestrator:
         self.llm = llm
         self.vision_llm = vision_llm or llm
 
+        # 環境変数から設定を読み込み
+        self._load_config()
+
         logger.info("[GraphOrchestrator] 初期化開始")
+        logger.info(f"[GraphOrchestrator] 設定: MAX_PLAN_REVISIONS={self.MAX_PLAN_REVISIONS}, "
+                    f"MAX_JUDGMENT_REVISIONS={self.MAX_JUDGMENT_REVISIONS}, "
+                    f"SKIP_PLAN_CREATION={self.SKIP_PLAN_CREATION}")
 
         # タスクハンドラーを初期化
         self.tasks: Dict[TaskType, BaseAuditTask] = {
@@ -814,6 +383,30 @@ class GraphAuditOrchestrator:
 
         logger.info("[GraphOrchestrator] 初期化完了")
 
+    def _load_config(self):
+        """
+        環境変数から設定を読み込む
+
+        【設定項目】
+        - MAX_PLAN_REVISIONS: 計画レビューの最大修正回数（0でレビュースキップ）
+        - MAX_JUDGMENT_REVISIONS: 判断レビューの最大修正回数（0でレビュースキップ）
+        - SKIP_PLAN_CREATION: 計画作成を省略（true/false）
+        """
+        # 計画レビューの最大修正回数（デフォルト: 1）
+        try:
+            self.MAX_PLAN_REVISIONS = int(os.environ.get("MAX_PLAN_REVISIONS", "1"))
+        except ValueError:
+            self.MAX_PLAN_REVISIONS = 1
+
+        # 判断レビューの最大修正回数（デフォルト: 1）
+        try:
+            self.MAX_JUDGMENT_REVISIONS = int(os.environ.get("MAX_JUDGMENT_REVISIONS", "1"))
+        except ValueError:
+            self.MAX_JUDGMENT_REVISIONS = 1
+
+        # 計画作成を省略するか（デフォルト: false）
+        self.SKIP_PLAN_CREATION = os.environ.get("SKIP_PLAN_CREATION", "false").lower() == "true"
+
     # =========================================================================
     # LangGraph構築
     # =========================================================================
@@ -822,60 +415,103 @@ class GraphAuditOrchestrator:
         """
         LangGraphを構築
 
-        セルフリフレクション付きフロー:
+        設定に応じてフローを動的に構築:
+        - SKIP_PLAN_CREATION=true: 計画作成をスキップ
+        - MAX_PLAN_REVISIONS=0: 計画レビューをスキップ
+        - MAX_JUDGMENT_REVISIONS=0: 判断レビューをスキップ
+
+        【フルモード】(デフォルト)
         create_plan → review_plan → (refine_plan →) execute_tasks
         → aggregate_results → review_judgment → (refine_judgment →) output
 
-        並列API呼び出しにより各項目が独立したAzure Functionsインスタンスで
-        処理されるため、5分のタイムアウト制限を有効活用できます。
+        【高速モード】(SKIP_PLAN_CREATION=true, MAX_*_REVISIONS=0)
+        execute_tasks → aggregate_results → output
         """
         # StateGraphを作成
         workflow = StateGraph(AuditGraphState)
 
-        # ノードを追加
-        workflow.add_node("create_plan", self._node_create_plan)
-        workflow.add_node("review_plan", self._node_review_plan)
-        workflow.add_node("refine_plan", self._node_refine_plan)
+        # ノードを追加（使用するノードのみ）
+        if not self.SKIP_PLAN_CREATION:
+            workflow.add_node("create_plan", self._node_create_plan)
+            if self.MAX_PLAN_REVISIONS > 0:
+                workflow.add_node("review_plan", self._node_review_plan)
+                workflow.add_node("refine_plan", self._node_refine_plan)
+
         workflow.add_node("execute_tasks", self._node_execute_tasks)
         workflow.add_node("aggregate_results", self._node_aggregate_results)
-        workflow.add_node("review_judgment", self._node_review_judgment)
-        workflow.add_node("refine_judgment", self._node_refine_judgment)
+
+        if self.MAX_JUDGMENT_REVISIONS > 0:
+            workflow.add_node("review_judgment", self._node_review_judgment)
+            workflow.add_node("refine_judgment", self._node_refine_judgment)
+
         workflow.add_node("output", self._node_output)
 
-        # エントリーポイント
-        workflow.set_entry_point("create_plan")
+        # フローを構築
+        if self.SKIP_PLAN_CREATION:
+            # 計画作成スキップ: execute_tasks から開始
+            logger.info("[GraphOrchestrator] 高速モード: 計画作成をスキップ")
+            workflow.set_entry_point("execute_tasks")
+        else:
+            # 通常: create_plan から開始
+            workflow.set_entry_point("create_plan")
 
-        # 計画作成 → 計画レビュー
-        workflow.add_edge("create_plan", "review_plan")
+            if self.MAX_PLAN_REVISIONS > 0:
+                # 計画レビューあり
+                workflow.add_edge("create_plan", "review_plan")
+            else:
+                # 計画レビューなし: 直接 execute_tasks へ
+                logger.info("[GraphOrchestrator] 高速モード: 計画レビューをスキップ")
+                workflow.add_edge("create_plan", "execute_tasks")
 
-        # 計画レビュー後の条件分岐
-        workflow.add_conditional_edges(
-            "review_plan",
-            self._should_refine_plan,
-            {
-                "refine": "refine_plan",
-                "execute": "execute_tasks"
-            }
-        )
+        # 計画レビュー後の条件分岐（レビューが有効な場合のみ）
+        if self.MAX_PLAN_REVISIONS > 0 and not self.SKIP_PLAN_CREATION:
+            workflow.add_conditional_edges(
+                "review_plan",
+                self._should_refine_plan,
+                {
+                    "refine": "refine_plan",
+                    "execute": "execute_tasks"
+                }
+            )
+            workflow.add_edge("refine_plan", "review_plan")
 
-        workflow.add_edge("refine_plan", "review_plan")
+        # タスク実行 → 結果集約
         workflow.add_edge("execute_tasks", "aggregate_results")
-        workflow.add_edge("aggregate_results", "review_judgment")
 
-        # 判断レビュー後の条件分岐
-        workflow.add_conditional_edges(
-            "review_judgment",
-            self._should_refine_judgment,
-            {
-                "refine": "refine_judgment",
-                "output": "output"
-            }
-        )
+        # 判断レビューの設定に応じた分岐
+        if self.MAX_JUDGMENT_REVISIONS > 0:
+            # 判断レビューあり
+            workflow.add_edge("aggregate_results", "review_judgment")
 
-        workflow.add_edge("refine_judgment", "review_judgment")
+            workflow.add_conditional_edges(
+                "review_judgment",
+                self._should_refine_judgment,
+                {
+                    "refine": "refine_judgment",
+                    "output": "output"
+                }
+            )
+            workflow.add_edge("refine_judgment", "review_judgment")
+        else:
+            # 判断レビューなし: 直接 output へ
+            logger.info("[GraphOrchestrator] 高速モード: 判断レビューをスキップ")
+            workflow.add_edge("aggregate_results", "output")
+
         workflow.add_edge("output", END)
 
-        logger.info("[GraphOrchestrator] セルフリフレクションフロー構築完了")
+        # モード情報をログ出力
+        mode_desc = []
+        if self.SKIP_PLAN_CREATION:
+            mode_desc.append("計画作成スキップ")
+        if self.MAX_PLAN_REVISIONS == 0:
+            mode_desc.append("計画レビュースキップ")
+        if self.MAX_JUDGMENT_REVISIONS == 0:
+            mode_desc.append("判断レビュースキップ")
+
+        if mode_desc:
+            logger.info(f"[GraphOrchestrator] 高速モード有効: {', '.join(mode_desc)}")
+        else:
+            logger.info("[GraphOrchestrator] フルモード: セルフリフレクション有効")
 
         # グラフをコンパイル
         return workflow.compile()
@@ -949,13 +585,14 @@ class GraphAuditOrchestrator:
             evidence_info = self._summarize_evidence(context.get("evidence_files", []))
 
             # LLMで計画を生成
-            prompt = ChatPromptTemplate.from_template(ENHANCED_PLANNER_PROMPT)
+            prompt = ChatPromptTemplate.from_template(PLANNER_PROMPT)
             chain = prompt | self.llm | self.parser
 
             result = await chain.ainvoke({
                 "control_description": context.get("control_description", ""),
                 "test_procedure": context.get("test_procedure", ""),
                 "evidence_info": evidence_info,
+                "user_feedback_section": "",  # 将来のユーザーフィードバック対応用
             })
 
             logger.info(f"[ノード] create_plan: 計画作成完了 - {len(result.get('execution_plan', []))}ステップ")
@@ -1000,6 +637,7 @@ class GraphAuditOrchestrator:
                 "test_procedure": context.get("test_procedure", ""),
                 "evidence_info": evidence_info,
                 "execution_plan": str(execution_plan),
+                "user_feedback_section": "",  # 将来のユーザーフィードバック対応用
             })
 
             logger.info(f"[ノード] review_plan: レビュー結果 - {result.get('review_result')}")
@@ -1117,6 +755,19 @@ class GraphAuditOrchestrator:
         else:
             steps = []
 
+        # 計画作成スキップモードの場合、デフォルト計画を生成
+        if not steps and self.SKIP_PLAN_CREATION:
+            logger.info("[ノード] execute_tasks: 計画作成スキップモード - デフォルト計画を使用")
+            default_plan = self._create_default_plan(context_dict)
+            steps = default_plan.steps
+            # 状態にも保存（後続のノードで参照される場合のため）
+            execution_plan = {
+                "analysis": default_plan.analysis,
+                "execution_plan": steps,
+                "dependencies": default_plan.dependencies,
+                "reasoning": "高速モード: デフォルト計画を使用"
+            }
+
         logger.info(f"[ノード] execute_tasks: {len(steps)}ステップを実行予定")
 
         # AuditContextを再構築
@@ -1220,7 +871,7 @@ class GraphAuditOrchestrator:
             evidence_files_text = self._summarize_evidence(context.get("evidence_files", []))
 
             # LLMで最終判断を生成
-            prompt = ChatPromptTemplate.from_template(ENHANCED_JUDGMENT_PROMPT)
+            prompt = ChatPromptTemplate.from_template(JUDGMENT_PROMPT)
             chain = prompt | self.llm | self.parser
 
             result = await chain.ainvoke({
@@ -1229,6 +880,7 @@ class GraphAuditOrchestrator:
                 "evidence_files": evidence_files_text,
                 "execution_plan": str(execution_plan.get("execution_plan", [])),
                 "task_results": task_results_text,
+                "user_feedback_section": "",  # 将来のユーザーフィードバック対応用
             })
 
             logger.info(f"[ノード] aggregate_results: 判断生成完了 - "
@@ -1286,6 +938,7 @@ class GraphAuditOrchestrator:
                 "judgment_basis": judgment.get("judgment_basis", ""),
                 "document_quotes": str(judgment.get("document_quotes", [])),
                 "confidence": judgment.get("confidence", 0.0),
+                "user_feedback_section": "",  # 将来のユーザーフィードバック対応用
             })
 
             review_result = result.get("review_result", "承認")
@@ -1322,9 +975,24 @@ class GraphAuditOrchestrator:
         revision_count = state.get("judgment_revision_count", 0)
 
         # レビューで revised_judgment_basis が提供されている場合はそれを使用
-        if judgment_review.get("revised_judgment_basis"):
-            judgment["judgment_basis"] = judgment_review["revised_judgment_basis"]
+        # ただしプレースホルダーパターンは除外
+        revised_basis = judgment_review.get("revised_judgment_basis", "")
+        placeholder_patterns = [
+            "要修正の場合のみ記載",
+            "禁止フレーズを除去した",
+            "承認の場合は空文字列",
+            "ここに記載",
+            "引用文を原文のまま厳密に転記",
+            "例示表現を排し",
+            "ファイル名・頁・行番号を特定",
+        ]
+        is_placeholder = any(p in revised_basis for p in placeholder_patterns) if revised_basis else True
+
+        if revised_basis and not is_placeholder:
+            judgment["judgment_basis"] = revised_basis
             logger.info("[ノード] refine_judgment: レビューの修正案を適用")
+        elif is_placeholder and revised_basis:
+            logger.warning(f"[ノード] refine_judgment: プレースホルダーパターン検出 - 無視: {revised_basis[:50]}...")
 
         if judgment_review.get("suggested_evaluation_result") is not None:
             judgment["evaluation_result"] = judgment_review["suggested_evaluation_result"]
@@ -1341,48 +1009,52 @@ class GraphAuditOrchestrator:
                 task_results_text = self._format_task_results(task_results)
                 evidence_files_text = self._summarize_evidence(context.get("evidence_files", []))
 
-                refine_prompt = f"""あなたは内部統制監査の実務経験20年以上の専門家です。
-以下のレビューフィードバックを反映して、監査判断を修正してください。
+                # 元のdocument_quotesを保持（refine後に空なら復元用）
+                original_quotes = judgment.get("document_quotes", [])
 
-【統制記述】
-{context.get("control_description", "")}
+                refine_prompt = f"""★★★ 絶対厳守：JSON以外の文字を一切出力しないでください ★★★
 
-【テスト手続き】
-{context.get("test_procedure", "")}
+以下の出力は全て禁止です（出力すると不合格）：
+× 「修正案として」「以下の修正方針」「修正後の判断根拠」
+× 「以下のJSONを出力します」「JSONは以下の通り」
+× 説明文、前置き、後書き、コメント
+× ```json ``` のようなコードブロック記法
 
-【エビデンスファイル】
-{evidence_files_text}
+最初の文字は必ず {{ で始め、最後の文字は }} で終わること。
 
-【タスク実行結果】
-{task_results_text}
+【3つの原則】
 
-【現在の判断】
-評価結果: {"有効" if judgment.get("evaluation_result") else "不備"}
-判断根拠: {judgment.get("judgment_basis", "")}
+■ 原則1: 判断根拠は「監査調書」として完結する
+- 確認した証跡名、確認した事実（日付・数値・名称）、結論を含める
+- 他の資料を参照しなくても内容が理解できる独立した文章にする
+- 末尾は必ず「よって本統制は有効である」または「よって本統制には不備がある」で締める
 
-【レビューフィードバック】
-問題点:
+■ 原則2: 引用は「証跡の複製」である
+- 引用文＝証跡ファイルに存在する文字列のコピー
+- あなたの言葉、解釈、要約、説明は一切含めない
+
+■ 原則3: 結論は「確定的」である
+- 「有効」または「不備」を明確に述べる
+- 条件付き、暫定的、追加確認を要する表現は禁止
+
+【修正すべき問題点】
 {issues_text}
 
-【修正指示】
-上記のフィードバックを反映し、以下の点を改善した判断を出力してください：
-1. 判断根拠は300〜500文字で具体的に記述
-2. 証跡から確認できた事実（日付、数値、名前等）を明記
-3. 「追加証跡が必要」「フォローアップを前提に」等の曖昧な表現は禁止
-4. document_quotes は証跡から一字一句そのまま引用（要約禁止）
+【証跡から確認できた事実】
+{task_results_text}
 
-【出力形式】
+★★★ 出力は以下のJSONのみ（説明文なし）★★★
 {{
-    "evaluation_result": true/false,
-    "judgment_basis": "修正後の判断根拠（300〜500文字）",
+    "evaluation_result": true,
+    "judgment_basis": "証跡名を閲覧した。具体的事実を確認した。整備状況として〜。運用状況として〜。よって本統制は有効である。",
     "document_quotes": [
         {{
-            "file_name": "証跡ファイル名",
-            "quotes": ["一字一句そのままの引用1", "一字一句そのままの引用2"],
-            "page_or_location": "ページ番号やセクション名"
+            "file_name": "ファイル名.xlsx",
+            "quotes": ["証跡から直接コピーした原文"],
+            "page_or_location": "シート名"
         }}
     ],
-    "confidence": 0.0-1.0
+    "confidence": 0.85
 }}
 """
                 prompt = ChatPromptTemplate.from_template(refine_prompt)
@@ -1392,11 +1064,19 @@ class GraphAuditOrchestrator:
 
                 # 修正された判断で更新
                 if result.get("judgment_basis"):
-                    judgment["judgment_basis"] = result["judgment_basis"]
+                    # judgment_basisから「修正案」等のプレフィックスを除去
+                    clean_basis = self._clean_judgment_basis_prefix(result["judgment_basis"])
+                    judgment["judgment_basis"] = clean_basis
                 if result.get("evaluation_result") is not None:
                     judgment["evaluation_result"] = result["evaluation_result"]
-                if result.get("document_quotes"):
-                    judgment["document_quotes"] = result["document_quotes"]
+                # document_quotesの更新（空の場合は元の引用を保持）
+                new_quotes = result.get("document_quotes", [])
+                if new_quotes and len(new_quotes) > 0:
+                    judgment["document_quotes"] = new_quotes
+                elif original_quotes:
+                    # 新しい引用が空なら元の引用を保持
+                    logger.info("[ノード] refine_judgment: 新規引用が空のため元の引用を保持")
+                    judgment["document_quotes"] = original_quotes
                 if result.get("confidence"):
                     judgment["confidence"] = result["confidence"]
 
@@ -1681,10 +1361,12 @@ class GraphAuditOrchestrator:
 
     def _format_document_quotes(self, document_quotes: List[Dict]) -> str:
         """
-        証跡からの引用文をフォーマット
+        証跡からの引用文をフォーマット（原則ベースの品質チェック付き）
 
-        原文をそのまま記載する形式で出力します。
-        括弧（「」）は使用せず、前後の文脈を含む幅広い引用を維持します。
+        原則: 引用文は「証跡の複製」であり、評価者の解釈を含まない
+
+        形式: [ファイル名] 引用箇所：
+        原文（証跡からそのままコピーした文字列）
         """
         if not document_quotes:
             return "（引用なし）"
@@ -1701,23 +1383,79 @@ class GraphAuditOrchestrator:
                     quotes = [single_quote]
 
             if quotes:
-                # ファイル名と位置情報をヘッダーとして追加
-                header = f"【{file_name}】" if file_name else ""
-                if location:
-                    header += f" ({location})"
-
-                if header:
-                    parts.append(header)
-
-                # 引用文は括弧なしでそのまま記載
                 for q in quotes:
                     if q:
-                        # 「」や『』で囲まず、原文そのまま記載
-                        parts.append(q)
+                        # 引用文の品質チェック（原則ベース）
+                        clean_quote = self._clean_quote_text(q)
 
-                parts.append("")  # 空行で区切り
+                        # 形式: [ファイル名] 引用箇所：原文
+                        source_info = ""
+                        if file_name:
+                            source_info = f"[{file_name}]"
+                        if location:
+                            source_info += f" {location}："
+                        elif file_name:
+                            source_info += "："
 
-        return "\n".join(parts).strip()
+                        if source_info:
+                            parts.append(f"{source_info}\n{clean_quote}")
+                        else:
+                            parts.append(clean_quote)
+
+        # 各引用を空行で区切る
+        return "\n\n".join(parts)
+
+    def _clean_quote_text(self, quote: str) -> str:
+        """
+        引用文の品質チェックとクリーニング（原則ベース）
+
+        原則: 引用は証跡の複製であり、評価者の視点・解釈を含まない
+
+        検出パターン:
+        - 「〜であること」「〜が確認できる」等の評価者視点の表現
+        - 「例：」「抜粋：」等の前置き
+        - 重複した内容
+        """
+        if not quote:
+            return quote
+
+        result = quote.strip()
+
+        # 評価者視点の表現を検出してログ出力（除去はしない、警告のみ）
+        # 原則: 内容を勝手に改変しない。ただし問題があることは記録する
+        evaluator_patterns = [
+            "であること",
+            "が確認できる",
+            "が示されている",
+            "が指摘されている",
+            "と記載されている",
+            "を確認した",
+            "が存在する",
+            "であることがわかる",
+        ]
+
+        for pattern in evaluator_patterns:
+            if pattern in result:
+                logger.warning(f"[引用品質] 評価者視点の表現を検出: '{pattern}' in '{result[:50]}...'")
+
+        # 重複する内容の検出（同じ文が2回出現）
+        sentences = result.split("。")
+        seen = set()
+        unique_sentences = []
+        for s in sentences:
+            s_clean = s.strip()
+            if s_clean and s_clean not in seen:
+                seen.add(s_clean)
+                unique_sentences.append(s_clean)
+            elif s_clean in seen:
+                logger.info(f"[引用品質] 重複文を除去: '{s_clean[:30]}...'")
+
+        if len(unique_sentences) < len([s for s in sentences if s.strip()]):
+            result = "。".join(unique_sentences)
+            if result and not result.endswith("。"):
+                result += "。"
+
+        return result
 
     def _simple_aggregate(self, task_results: List[Dict]) -> Dict:
         """単純集計による結果統合"""
@@ -1835,94 +1573,170 @@ class GraphAuditOrchestrator:
 
         return issues
 
+    def _clean_judgment_basis_prefix(self, text: str) -> str:
+        """
+        判断根拠から「修正案」等のプレフィックスを除去（refine時に使用）
+
+        LLMが「修正案として〜」「以下のJSONを〜」等の前置きを出力した場合、
+        それを除去して本文のみを返す。
+        """
+        if not text:
+            return text
+
+        import re
+
+        result = text.strip()
+
+        # よくあるパターンを除去
+        removal_patterns = [
+            r'^修正案[：:]\s*',
+            r'^【修正案】\s*',
+            r'^修正案として[、,]?\s*',
+            r'^以下の修正方針に沿って[、,]?[^。]*。\s*',
+            r'^以下のJSONを出力[^。]*。\s*',
+            r'^JSONは以下の通り[^。]*。\s*',
+            r'^修正後の判断根拠[：:]\s*',
+            r'^\d+[\)）]\s*',  # 番号付きリスト
+        ]
+
+        for pattern in removal_patterns:
+            result = re.sub(pattern, '', result, flags=re.MULTILINE)
+
+        # 先頭の空白・改行を除去
+        result = result.lstrip()
+
+        if result != text:
+            logger.info(f"[refine_judgment] プレフィックス除去: '{text[:30]}...' → '{result[:30]}...'")
+
+        return result
+
     def _postprocess_judgment_basis(self, judgment_basis: str, evaluation_result: bool) -> str:
         """
-        判断根拠の後処理
-        禁止フレーズを検出し、適切な表現に置換する
+        判断根拠の後処理（原則ベース）
+
+        3つの原則に基づいて判断根拠を検証・修正:
+        1. 監査調書として完結している（事実と結論を含む）
+        2. 確定的な結論を述べている（曖昧表現がない）
+        3. メタ的な説明を含まない（方針説明ではなく本文のみ）
         """
         if not judgment_basis:
             return judgment_basis
 
-        # 禁止フレーズと置換パターン（出力結果から検出されたパターンを網羅）
-        forbidden_patterns = [
-            # 「追加証跡が必要」系（長いパターンを先に）
-            ("追加の直接証跡（本文確認が可能な議事録、承認決議文、承認サイン等）が必要", "提供された証跡の範囲で確認した"),
-            ("追加の直接証跡が必要", "提供された証跡の範囲で確認した"),
-            ("追加証跡が必要", "提供された証跡の範囲で確認した"),
-            ("追加証跡を要する", "提供された証跡の範囲で確認した"),
-            ("追加の証跡が必要", "提供された証跡の範囲で確認した"),
-            ("追加の独立証跡", "提供された証跡"),
-            ("追加検証が必要", "確認した範囲で"),
-            ("追加で確認する必要がある", "確認した範囲で"),
-            ("運用証跡が不足している点を補完すれば", "提供された証跡から確認できる範囲で"),
-            ("追加証跡の確認を要する", "提供された証跡で確認可能な範囲で"),
-            ("追加証跡を取得・検証でき次第", "提供された証跡の範囲で"),
+        result = judgment_basis
 
-            # 「フォローアップ」系（長いパターンを先に）
-            ("全文確認のフォローアップを行うべきである", "提供された証跡の範囲で確認した"),
-            ("全文確認のフォローアップを行うべき", "提供された証跡の範囲で確認した"),
-            ("次回フォローアップの結果を待つべき", "提供された証跡の範囲で判断した"),
-            ("フォローアップによる追加証跡の確認を要する", "提供された証跡の範囲で統制の有効性を確認した"),
-            ("フォローアップを行うべきである", "提供された証跡の範囲で確認した"),
-            ("フォローアップを行うべき", "提供された証跡の範囲で確認した"),
-            ("フォローアップが必要", "確認できた範囲で"),
-            ("フォローアップを前提に", "確認できた範囲で"),
-            ("フォローアップ計画の明確化が必要", "確認できた範囲で"),
-
-            # 「再評価」「待つべき」系
-            ("結論を更新する", "以上の確認結果に基づき判断した"),
-            ("結論を再評価する", "以上の確認結果に基づき判断した"),
-            ("再評価する", "判断した"),
-            ("承認痕跡を追加で確認する必要がある", "提供された証跡の範囲で確認した"),
-            ("承認の痕跡を追加で確認する必要がある", "提供された証跡の範囲で確認した"),
-            ("最終判断は次回フォローアップの結果を待つべき", "提供された証跡の範囲で判断した"),
-            ("結果を待つべき", "提供された証跡の範囲で判断した"),
-
-            # 「根拠不足」系
-            ("根拠が不足している", "提供された証跡の範囲で確認した"),
-            ("根拠が薄い", "提供された証跡から確認できる範囲で"),
-            ("直接的な結論を下す根拠が不足", "提供された証跡の範囲で確認した"),
-
-            # 「限定的」系
-            ("限定的有効性", "有効性"),
-            ("限定的有効", "有効"),
-            ("条件付き有効", "有効"),
-            ("現状の結論は限定的有効とする", "以上より統制は有効と判断する"),
-
-            # 「未確定」系
-            ("未確定", "確認完了"),
-            ("保留", "確認完了"),
-            ("判断を保留", "確認した結果"),
-            ("有効と断定できず", "有効性を確認した"),
-
-            # 曖昧な表現
-            ("完全に確認できなかった", "確認できた範囲で"),
-            ("証跡が読み取れない", "証跡の内容を確認した結果"),
-            ("証跡の完全性を損なっている", "証跡を確認した結果"),
-            ("不備リスクを解消する追加検証が必要", "確認した範囲で統制の運用状況を評価した"),
-            ("本文閲覧不可", "証跡を確認した結果"),
-            ("ファイル形式制約", ""),
-            ("可読性不足により", "証跡を確認した結果"),
-            ("取得エラーにより", "証跡を確認した結果"),
-            ("未確認である", "確認した範囲で"),
+        # =========================================
+        # 原則1: メタ的な説明の除去
+        # 「修正方針の説明」「以下の〜」などLLMが出力しがちな前置きを除去
+        # =========================================
+        meta_prefixes = [
+            # 修正案系パターン
+            "修正案",
+            "修正案：",
+            "修正案:",
+            "【修正案】",
+            "以下の修正方針に沿って",
+            "修正案として",
+            "以下は修正後の",
+            "修正後の判断根拠",
+            "以下の判断",
+            "以下のとおり修正",
+            "レビューフィードバックを反映し",
+            "以下の点を改善した",
+            "以下のJSONを出力",
+            "JSONは以下の通り",
+            # プレースホルダーパターン
+            "要修正の場合のみ記載",
+            "禁止フレーズを除去した",
+            "引用文を原文のまま厳密に転記",
+            "例示表現を排し",
+            "ファイル名・頁・行番号を特定",
+            "結論の根拠を証跡に即して再確認",
+            "最終判断を再表現",
         ]
 
-        result = judgment_basis
-        for forbidden, replacement in forbidden_patterns:
-            if forbidden in result:
-                logger.info(f"[後処理] 禁止フレーズを置換: '{forbidden}' → '{replacement}'")
-                result = result.replace(forbidden, replacement)
+        for prefix in meta_prefixes:
+            if prefix in result:
+                # 該当する文を探して除去（文末の「。」まで）
+                start_idx = result.find(prefix)
+                if start_idx != -1:
+                    # この文の終わりを探す
+                    end_idx = result.find("。", start_idx)
+                    if end_idx != -1:
+                        removed_part = result[start_idx:end_idx + 1]
+                        result = result[:start_idx] + result[end_idx + 1:]
+                        logger.info(f"[後処理] メタ説明を除去: '{removed_part[:50]}...'")
 
-        # 評価結果が「有効」なのに否定的な表現が残っている場合の修正
+        # 先頭の番号付きリスト形式を除去（「1) 〜 2) 〜」など）
+        import re
+        result = re.sub(r'^[\s]*\d+[\)）]\s*[^\n]+[\n\s]*', '', result)
+
+        # =========================================
+        # 原則2: 確定的でない表現の修正
+        # 曖昧な結論を確定的な表現に置換
+        # =========================================
+        uncertain_to_certain = [
+            # 追加確認系 → 確認完了として表現
+            ("追加証跡が必要", "提供された証跡の範囲で確認した"),
+            ("追加で確認する必要", "確認した"),
+            ("フォローアップを要する", "確認した範囲で判断した"),
+            ("フォローアップが必要", "確認した範囲で判断した"),
+            ("再評価が必要", "確認した結果"),
+            ("結果を待つべき", "確認した範囲で判断した"),
+
+            # 限定・条件付き系 → 確定表現に
+            ("限定的有効", "有効"),
+            ("条件付き有効", "有効"),
+            ("暫定的に有効", "有効"),
+
+            # 推測系 → 事実表現に
+            ("と考えられる", "である"),
+            ("と思われる", "である"),
+            ("と推測される", "と確認した"),
+        ]
+
+        for uncertain, certain in uncertain_to_certain:
+            if uncertain in result:
+                logger.info(f"[後処理] 曖昧表現を修正: '{uncertain}' → '{certain}'")
+                result = result.replace(uncertain, certain)
+
+        # =========================================
+        # 原則3: 非ASCII文字の混入チェック
+        # 韓国語などの不正な文字が混入していないか確認
+        # =========================================
+        # 許可する文字: 日本語（ひらがな、カタカナ、漢字）、ASCII、記号
+        cleaned_chars = []
+        for char in result:
+            code = ord(char)
+            # ASCII (0-127), 日本語ひらがな (3040-309F), カタカナ (30A0-30FF),
+            # CJK統合漢字 (4E00-9FFF), 全角記号 (3000-303F), 半角カナ (FF00-FFEF)
+            if (code < 128 or
+                0x3040 <= code <= 0x309F or  # ひらがな
+                0x30A0 <= code <= 0x30FF or  # カタカナ
+                0x4E00 <= code <= 0x9FFF or  # 漢字
+                0x3000 <= code <= 0x303F or  # 全角記号
+                0xFF00 <= code <= 0xFFEF):   # 半角カナ・全角英数
+                cleaned_chars.append(char)
+            else:
+                # 不正な文字はスペースに置換
+                logger.warning(f"[後処理] 不正な文字を検出・除去: U+{code:04X}")
+                cleaned_chars.append(' ')
+
+        result = ''.join(cleaned_chars)
+
+        # 連続するスペースを1つに
+        result = re.sub(r' +', ' ', result)
+
+        # 先頭・末尾の空白を除去
+        result = result.strip()
+
+        # =========================================
+        # 評価結果との整合性チェック（ログのみ）
+        # =========================================
         if evaluation_result:
-            negative_indicators = [
-                "不備がある", "不十分である", "問題がある",
-                "統制が機能していない", "有効性に疑義"
-            ]
+            negative_indicators = ["不備がある", "不十分である", "問題がある", "有効性に疑義"]
             for indicator in negative_indicators:
                 if indicator in result:
-                    logger.warning(f"[後処理] 評価結果と矛盾する表現を検出: '{indicator}'")
-                    # 矛盾は修正せず、ログに記録のみ（内容の改ざんを避ける）
+                    logger.warning(f"[後処理] 評価結果(有効)と矛盾する表現を検出: '{indicator}'")
 
         return result
 
@@ -1935,12 +1749,35 @@ class GraphAuditOrchestrator:
                 "filePath": context.evidence_link
             })
 
+        # ユーザーフレンドリーなエラーメッセージに変換
+        user_message = self._convert_to_user_friendly_error(reason)
+
         return AuditResult(
             item_id=context.item_id,
             evaluation_result=False,
-            judgment_basis=f"評価失敗: {reason}",
+            judgment_basis=user_message,
             document_reference="（引用なし）",
             file_name=context.evidence_files[0].file_name if context.evidence_files else "",
             evidence_files_info=evidence_files_info,
             confidence=0.0,
         )
+
+    def _convert_to_user_friendly_error(self, reason: str) -> str:
+        """技術的なエラーメッセージをユーザーフレンドリーな形式に変換"""
+        # エラーパターンと対応するメッセージ
+        error_patterns = [
+            ("グラフ実行エラー", "システム処理中にエラーが発生しました。再度実行してください。"),
+            ("timeout", "処理がタイムアウトしました。証跡ファイルのサイズを確認してください。"),
+            ("rate limit", "API制限に達しました。しばらく待ってから再実行してください。"),
+            ("connection", "接続エラーが発生しました。ネットワーク接続を確認してください。"),
+            ("parse", "証跡ファイルの読み取りに失敗しました。ファイル形式を確認してください。"),
+            ("認証", "API認証に失敗しました。設定を確認してください。"),
+        ]
+
+        reason_lower = reason.lower()
+        for pattern, message in error_patterns:
+            if pattern.lower() in reason_lower:
+                return f"【評価未完了】{message}\n（技術詳細: {reason[:100]}）"
+
+        # マッチしない場合は汎用メッセージ
+        return f"【評価未完了】処理中にエラーが発生しました。\n（詳細: {reason[:150]}）"

@@ -56,90 +56,14 @@ from langchain_core.output_parsers import JsonOutputParser
 from .base_task import BaseAuditTask, TaskType, TaskResult, AuditContext
 from ..document_processor import DocumentProcessor
 
+# プロンプトをprompts.pyからインポート
+from ..prompts import A8_SOD_DETECTION_PROMPT
+
 # =============================================================================
 # ログ設定
 # =============================================================================
 
 logger = logging.getLogger(__name__)
-
-# =============================================================================
-# プロンプトテンプレート
-# =============================================================================
-
-SOD_DETECTION_PROMPT = """あなたは内部統制監査の専門家で、職務分掌（SoD: Segregation of Duties）の専門家です。
-システム権限リストや業務フローを分析し、職務分掌の違反を検出してください。
-
-【重要な指示】
-1. 「申請」と「承認」の分離を確認
-2. 以下の典型的なSoD違反パターンを検出：
-   - 同一人物が「仕訳入力」と「仕訳承認」の両方の権限を保持
-   - 同一人物が「発注」と「検収」の両方を実施
-   - 同一人物が「マスタ変更」と「トランザクション入力」を実施
-3. 権限の組み合わせによるリスクを評価
-4. 補完統制（軽減措置）の有無を確認
-
-【統制記述】
-{control_description}
-
-【テスト手続き】
-{test_procedure}
-
-【権限・業務データ】
-{authority_data}
-
-【出力形式】
-以下のJSON形式で回答してください：
-{{
-    "sod_rules": [
-        {{
-            "rule_id": "ルールID",
-            "rule_name": "ルール名",
-            "conflicting_functions": ["機能A", "機能B"],
-            "risk_description": "このSoD違反のリスク",
-            "severity": "高/中/低"
-        }}
-    ],
-    "authority_analysis": [
-        {{
-            "user_id": "ユーザーID",
-            "user_name": "ユーザー名",
-            "department": "部署",
-            "authorities": ["保有権限リスト"],
-            "sod_violations": [
-                {{
-                    "rule_id": "違反ルールID",
-                    "conflicting_authorities": ["競合権限A", "競合権限B"],
-                    "violation_type": "直接保有/兼務/代理",
-                    "risk_level": "高/中/低"
-                }}
-            ]
-        }}
-    ],
-    "violation_summary": {{
-        "total_users_analyzed": 分析ユーザー数,
-        "users_with_violations": 違反ユーザー数,
-        "total_violations": 総違反件数,
-        "high_risk_violations": 高リスク違反数,
-        "medium_risk_violations": 中リスク違反数,
-        "low_risk_violations": 低リスク違反数
-    }},
-    "compensating_controls": [
-        {{
-            "control_name": "補完統制名",
-            "description": "説明",
-            "mitigated_violations": ["軽減される違反"],
-            "effectiveness": "有効/部分的/無効"
-        }}
-    ],
-    "overall_assessment": {{
-        "sod_compliance_level": "準拠/概ね準拠/要改善/非準拠",
-        "key_risks": ["主要リスク"],
-        "recommendations": ["改善提案"]
-    }},
-    "confidence": 0.0-1.0,
-    "reasoning": "評価結果の総括"
-}}
-"""
 
 
 # =============================================================================
@@ -191,7 +115,7 @@ class SoDDetectionTask(BaseAuditTask):
             llm: LangChain ChatModel
         """
         super().__init__(llm)
-        self.prompt = ChatPromptTemplate.from_template(SOD_DETECTION_PROMPT)
+        self.prompt = ChatPromptTemplate.from_template(A8_SOD_DETECTION_PROMPT)
         self.parser = JsonOutputParser()
 
         logger.debug("[A8] SoDDetectionTask初期化完了")

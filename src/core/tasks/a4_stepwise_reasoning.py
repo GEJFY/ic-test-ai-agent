@@ -8,57 +8,8 @@ from langchain_core.output_parsers import JsonOutputParser
 
 from .base_task import BaseAuditTask, TaskType, TaskResult, AuditContext
 
-STEPWISE_REASONING_PROMPT = """あなたは内部統制監査の専門家で、財務計算の検証エキスパートです。
-Chain-of-Thought（思考の連鎖）手法を用いて、複雑な計算を段階的に検証してください。
-
-【重要な指示】
-- 複雑な計算は必ずステップごとに分解して実行
-- 各ステップで中間結果を明示
-- 「期首残高 + 当期増減 = 期末残高」などの整合性を1ステップずつ検証
-- 数式の根拠と計算過程を明確に記録
-
-【統制記述】
-{control_description}
-
-【テスト手続き】
-{test_procedure}
-
-【検証対象データ】
-{evidence_data}
-
-【出力形式】
-以下のJSON形式で回答してください：
-{{
-    "calculation_steps": [
-        {{
-            "step_number": 1,
-            "description": "このステップの説明",
-            "formula": "使用する計算式",
-            "inputs": {{"変数名": 値}},
-            "calculation": "実際の計算過程",
-            "result": 計算結果,
-            "validation": "この結果の妥当性確認"
-        }}
-    ],
-    "final_result": {{
-        "calculated_value": 最終計算値,
-        "expected_value": 期待値（あれば）,
-        "match": true/false,
-        "difference": 差異（あれば）
-    }},
-    "integrity_checks": [
-        {{
-            "check_name": "整合性チェック名",
-            "formula": "チェック式",
-            "expected": "期待される結果",
-            "actual": "実際の結果",
-            "passed": true/false
-        }}
-    ],
-    "confidence": 0.0-1.0,
-    "reasoning": "検証結果の総括"
-}}
-"""
+# プロンプトをprompts.pyからインポート
+from ..prompts import A4_STEPWISE_REASONING_PROMPT
 
 
 class StepwiseReasoningTask(BaseAuditTask):
@@ -73,7 +24,7 @@ class StepwiseReasoningTask(BaseAuditTask):
 
     def __init__(self, llm=None):
         super().__init__(llm)
-        self.prompt = ChatPromptTemplate.from_template(STEPWISE_REASONING_PROMPT)
+        self.prompt = ChatPromptTemplate.from_template(A4_STEPWISE_REASONING_PROMPT)
         self.parser = JsonOutputParser()
 
     async def execute(self, context: AuditContext) -> TaskResult:

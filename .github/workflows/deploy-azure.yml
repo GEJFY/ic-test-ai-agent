@@ -1,0 +1,202 @@
+# =============================================================================
+# Azure Deployment Workflow
+# =============================================================================
+#
+# トリガー:
+#   - 手動実行（workflow_dispatch）
+#   - mainブランチへのpush時（terraform/変更時）
+#
+# 必要なシークレット:
+#   - AZURE_CREDENTIALS: Azure サービスプリンシパルのJSON
+#   - ACR_USERNAME: Azure Container Registry ユーザー名
+#   - ACR_PASSWORD: Azure Container Registry パスワード
+#
+# 必要な変数:
+#   - ACR_REGISTRY: Azure Container Registry URL
+#   - AZURE_FUNCTION_APP: Function App名
+#   - AZURE_RESOURCE_GROUP: リソースグループ名
+#
+# =============================================================================
+
+name: Deploy to Azure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      client:
+        description: 'Client name (terraform/clients/<client>)'
+        required: true
+        type: string
+      deploy_infra:
+        description: 'Deploy infrastructure (Terraform)'
+        required: true
+        default: false
+        type: boolean
+      deploy_app:
+        description: 'Deploy application code'
+        required: true
+        default: true
+        type: boolean
+
+  push:
+    branches:
+      - main
+    paths:
+      - 'terraform/clients/*/terraform.tfvars'
+      - 'terraform/modules/azure/**'
+
+env:
+  TERRAFORM_VERSION: '1.6.0'
+  DOCKER_IMAGE_NAME: ic-test-ai-agent
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # インフラストラクチャデプロイ（Terraform）
+  # ---------------------------------------------------------------------------
+  terraform:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    if: github.event.inputs.deploy_infra == 'true'
+    environment: ${{ github.event.inputs.environment }}
+
+    defaults:
+      run:
+        working-directory: terraform/clients/${{ github.event.inputs.client }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+        env:
+          TF_VAR_azure_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+      - name: Output Results
+        run: terraform output -json > terraform-outputs.json
+
+      - name: Upload Terraform Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-outputs
+          path: terraform/clients/${{ github.event.inputs.client }}/terraform-outputs.json
+
+  # ---------------------------------------------------------------------------
+  # アプリケーションデプロイ
+  # ---------------------------------------------------------------------------
+  deploy-app:
+    name: Deploy Application
+    runs-on: ubuntu-latest
+    if: github.event.inputs.deploy_app == 'true'
+    needs: [terraform]
+    # terraformジョブがスキップされた場合も実行
+    if: always() && (needs.terraform.result == 'success' || needs.terraform.result == 'skipped')
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ vars.ACR_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+            ${{ vars.ACR_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+
+      # Azure Functions (Consumption Plan) へのデプロイ
+      - name: Deploy to Azure Functions
+        if: vars.AZURE_FUNCTION_APP != ''
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ vars.AZURE_FUNCTION_APP }}
+          package: 'platforms/azure'
+
+      # Azure Container Apps へのデプロイ（代替）
+      - name: Deploy to Container Apps
+        if: vars.AZURE_CONTAINER_APP != ''
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          containerAppName: ${{ vars.AZURE_CONTAINER_APP }}
+          resourceGroup: ${{ vars.AZURE_RESOURCE_GROUP }}
+          imageToDeploy: ${{ vars.ACR_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+
+  # ---------------------------------------------------------------------------
+  # デプロイ検証
+  # ---------------------------------------------------------------------------
+  verify:
+    name: Verify Deployment
+    runs-on: ubuntu-latest
+    needs: deploy-app
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Health Check
+        run: |
+          # エンドポイントURLを取得（環境変数から）
+          ENDPOINT_URL="${{ vars.AZURE_ENDPOINT_URL }}"
+
+          if [ -z "$ENDPOINT_URL" ]; then
+            echo "AZURE_ENDPOINT_URL not set, skipping health check"
+            exit 0
+          fi
+
+          echo "Checking health at: $ENDPOINT_URL/health"
+
+          # リトライ付きヘルスチェック
+          for i in {1..5}; do
+            if curl -sf "$ENDPOINT_URL/health"; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 30s..."
+            sleep 30
+          done
+
+          echo "Health check failed after 5 attempts"
+          exit 1

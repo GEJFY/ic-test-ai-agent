@@ -1,0 +1,166 @@
+# =============================================================================
+# docker-compose.yml - 開発・テスト用
+# =============================================================================
+#
+# 使用方法:
+#   # 起動
+#   docker-compose up -d
+#
+#   # ログ確認
+#   docker-compose logs -f
+#
+#   # 停止
+#   docker-compose down
+#
+#   # 特定のプロファイルで起動（例: Azure構成）
+#   docker-compose --profile azure up -d
+#
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # メインアプリケーション（ローカルサーバー）
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ic-test-ai-agent:dev
+    container_name: ic-test-app
+    ports:
+      - "8081:8080"
+    env_file:
+      - .env
+    environment:
+      - LOG_LEVEL=DEBUG
+      - LOG_TO_FILE=false
+    volumes:
+      # 開発時はソースをマウント（ホットリロード用）
+      - ./src:/app/src:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Ollama (ローカルLLM) - オプション
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ic-test-ollama
+    profiles:
+      - local
+      - full
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # GPU非搭載環境ではこちらを使用
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 8G
+
+  # ---------------------------------------------------------------------------
+  # アプリケーション（Ollama使用構成）
+  # ---------------------------------------------------------------------------
+  app-local:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ic-test-ai-agent:dev
+    container_name: ic-test-app-local
+    profiles:
+      - local
+    ports:
+      - "8080:8080"
+    environment:
+      - LLM_PROVIDER=LOCAL
+      - OCR_PROVIDER=TESSERACT
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=llama3.1:8b
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Azure構成（Container Apps互換テスト用）
+  # ---------------------------------------------------------------------------
+  app-azure:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ic-test-ai-agent:azure
+    container_name: ic-test-app-azure
+    profiles:
+      - azure
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - LLM_PROVIDER=AZURE_FOUNDRY
+      - OCR_PROVIDER=AZURE
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # GCP構成（Cloud Run互換テスト用）
+  # ---------------------------------------------------------------------------
+  app-gcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ic-test-ai-agent:gcp
+    container_name: ic-test-app-gcp
+    profiles:
+      - gcp
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - LLM_PROVIDER=GCP
+      - OCR_PROVIDER=GCP
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID}
+      - GCP_LOCATION=${GCP_LOCATION:-asia-northeast1}
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # AWS構成（Lambda/ECS互換テスト用）
+  # ---------------------------------------------------------------------------
+  app-aws:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ic-test-ai-agent:aws
+    container_name: ic-test-app-aws
+    profiles:
+      - aws
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - LLM_PROVIDER=AWS
+      - OCR_PROVIDER=AWS
+      - AWS_REGION=${AWS_REGION:-ap-northeast-1}
+    restart: unless-stopped
+
+# =============================================================================
+# ボリューム定義
+# =============================================================================
+volumes:
+  ollama_data:
+    name: ic-test-ollama-data

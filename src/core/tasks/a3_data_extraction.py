@@ -53,69 +53,14 @@ from langchain_core.output_parsers import JsonOutputParser
 
 from .base_task import BaseAuditTask, TaskType, TaskResult, AuditContext
 
+# プロンプトをprompts.pyからインポート
+from ..prompts import A3_DATA_EXTRACTION_PROMPT
+
 # =============================================================================
 # ログ設定
 # =============================================================================
 
 logger = logging.getLogger(__name__)
-
-# =============================================================================
-# プロンプトテンプレート
-# =============================================================================
-
-DATA_EXTRACTION_PROMPT = """あなたは内部統制監査の専門家で、財務データ分析のエキスパートです。
-複数の表データから必要な数値を抽出し、突合（照合）を行ってください。
-
-【テスト手続き】
-{test_procedure}
-
-【抽出・突合の指示】
-1. 複雑な表から必要な数値のみを抽出
-2. 単位の正規化（百万円、千円、円などを統一）
-3. 科目名の正規化（売上高/Revenue/売上/Salesなどを同一項目として認識）
-4. 異なるソース間での数値の突合（一致確認）
-
-【データソース】
-{data_sources}
-
-【出力形式】
-以下のJSON形式で回答してください：
-{{
-    "extracted_data": [
-        {{
-            "source": "データソース名",
-            "item_name": "正規化後の項目名",
-            "original_name": "元の項目名",
-            "value": 数値（円単位に正規化）,
-            "original_value": "元の値（単位含む）",
-            "unit_conversion": "単位変換の説明"
-        }}
-    ],
-    "reconciliation": [
-        {{
-            "item_name": "項目名",
-            "sources_compared": ["ソース1", "ソース2"],
-            "values": [数値1, 数値2],
-            "match": true/false,
-            "difference": 差額（あれば）,
-            "difference_percentage": 差異率（%）
-        }}
-    ],
-    "summary": {{
-        "total_items_extracted": 抽出項目数,
-        "total_reconciliations": 突合件数,
-        "matched_count": 一致件数,
-        "unmatched_count": 不一致件数,
-        "material_differences": ["重要な差異のリスト"]
-    }},
-    "confidence": 0.0-1.0,
-    "reasoning": {{
-        "verification_summary": "どのデータを抽出・突合し、何が確認できたか",
-        "evidence_details": "具体的な数値と計算過程（例: A表の売上高1,000万円とB表の1,000万円が一致）",
-        "conclusion": "突合結果と結論"
-    }}
-}}
-"""
 
 
 # =============================================================================
@@ -167,7 +112,7 @@ class DataExtractionTask(BaseAuditTask):
             llm: LangChain ChatModel
         """
         super().__init__(llm)
-        self.prompt = ChatPromptTemplate.from_template(DATA_EXTRACTION_PROMPT)
+        self.prompt = ChatPromptTemplate.from_template(A3_DATA_EXTRACTION_PROMPT)
         self.parser = JsonOutputParser()
 
         logger.debug("[A3] DataExtractionTask初期化完了")

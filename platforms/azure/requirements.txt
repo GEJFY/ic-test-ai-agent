@@ -1,15 +1,15 @@
 # Azure Functions core
 azure-functions>=1.17.0
 
-# LangChain framework
-langchain>=0.2.0
-langchain-core>=0.2.0
-langgraph>=0.2.0                      # LangGraph for workflow orchestration
+# LangChain framework (v1.x - 2026年2月最新)
+langchain>=1.2.9
+langchain-core>=1.2.9
+langgraph>=1.0.8                      # LangGraph for workflow orchestration
 
 # Cloud LLM providers
-langchain-openai>=0.1.0              # Azure OpenAI Service
-langchain-google-vertexai>=1.0.0     # GCP Vertex AI (Gemini)
-langchain-aws>=0.1.0                 # AWS Bedrock
+langchain-openai>=0.3.0              # Azure OpenAI Service (GPT-5.x)
+langchain-google-vertexai>=3.0.0     # GCP Vertex AI (Gemini 3.x)
+langchain-aws>=0.3.0                 # AWS Bedrock (Claude Opus 4.x)
 
 # Utilities
 python-dotenv>=1.0.0
@@ -26,6 +26,11 @@ python-docx>=1.0.0                    # Word file processing
 # Azure Document Intelligence (OCR_PROVIDER=AZURE)
 azure-ai-documentintelligence>=1.0.0  # Document Intelligence SDK
 azure-core>=1.30.0                    # Azure core for credentials
+
+# Azure Storage (非同期ジョブ管理用)
+azure-data-tables>=12.4.0             # Table Storage for job persistence
+azure-storage-queue>=12.8.0           # Queue Storage for job notifications
+azure-storage-blob>=12.19.0           # Blob Storage for large evidence files
 
 # AWS Textract (OCR_PROVIDER=AWS) - boto3はlangchain-awsで既に含まれる
 # boto3>=1.34.0                       # langchain-awsに含まれるため不要

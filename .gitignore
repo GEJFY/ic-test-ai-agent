@@ -43,25 +43,31 @@ local.settings.json
 # -----------------------------------------------------------------------------
 # Cloud platform specific
 # -----------------------------------------------------------------------------
+# Common deployment directories (created by deploy.ps1)
+platforms/*/.deploy/
+
 # Azure Functions
 .python_packages/
 .func/
+platforms/azure/deploy.zip
+platforms/azure/core/
+platforms/azure/infrastructure/
 
-# GCP (deployed src copy)
+# GCP Cloud Functions
 platforms/gcp/src/
 platforms/gcp/core/
 platforms/gcp/infrastructure/
 
 # AWS Lambda (deployment packages)
 platforms/aws/package/
-platforms/aws/deployment.zip
+platforms/aws/deploy.zip
 platforms/aws/core/
 platforms/aws/infrastructure/
 
 # -----------------------------------------------------------------------------
 # IDE and editors
 # -----------------------------------------------------------------------------
-.vscode/
+
 .idea/
 *.swp
 *.swo
@@ -87,7 +93,16 @@ SampleData/**/output/
 *.xlsm.bak
 test-results/
 coverage/
+htmlcov/
+.coverage
+.coverage.*
 .pytest_cache/
+
+# -----------------------------------------------------------------------------
+# Type checking and linting
+# -----------------------------------------------------------------------------
+.mypy_cache/
+.ruff_cache/
 
 # -----------------------------------------------------------------------------
 # OS specific

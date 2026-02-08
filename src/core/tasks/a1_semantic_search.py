@@ -53,50 +53,11 @@ from langchain_core.output_parsers import JsonOutputParser
 
 from .base_task import BaseAuditTask, TaskType, TaskResult, AuditContext
 
+# プロンプトをprompts.pyからインポート
+from ..prompts import A1_SEMANTIC_SEARCH_PROMPT
+
 # ロガーの設定
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# LLMプロンプト定義
-# =============================================================================
-
-SEMANTIC_SEARCH_PROMPT = """あなたは内部統制監査の専門家です。
-与えられた統制記述とテスト手続きに基づいて、エビデンス内の関連する記述を意味的に検索してください。
-
-【重要な指示】
-- キーワードの完全一致に頼らず、意味的な類似性で判断してください
-- 例：「誠実性」という単語がなくても「倫理観」「正直な姿勢」「誠意ある対応」などの類似表現を検知
-- 同義語、言い換え、関連概念も含めて検索してください
-
-【統制記述】
-{control_description}
-
-【テスト手続き】
-{test_procedure}
-
-【検索対象テキスト】
-{evidence_text}
-
-【出力形式】
-以下のJSON形式で回答してください：
-{{
-    "found_matches": [
-        {{
-            "original_term": "検索対象の概念",
-            "matched_text": "エビデンス内で見つかった関連テキスト",
-            "similarity_type": "完全一致/同義語/関連概念/言い換え",
-            "confidence": 0.0-1.0の信頼度
-        }}
-    ],
-    "overall_relevance": 0.0-1.0の全体的な関連性スコア,
-    "reasoning": {{
-        "verification_summary": "何を検索して何が見つかったか",
-        "evidence_details": "見つかった記述の具体的な内容と出典（ファイル名含む）",
-        "conclusion": "検索結果に基づく結論"
-    }}
-}}
-"""
 
 
 # =============================================================================
@@ -136,7 +97,7 @@ class SemanticSearchTask(BaseAuditTask):
         super().__init__(llm)
 
         # プロンプトテンプレートとパーサーを設定
-        self.prompt = ChatPromptTemplate.from_template(SEMANTIC_SEARCH_PROMPT)
+        self.prompt = ChatPromptTemplate.from_template(A1_SEMANTIC_SEARCH_PROMPT)
         self.parser = JsonOutputParser()
 
         logger.debug(f"[A1] {self.task_name} を初期化しました")

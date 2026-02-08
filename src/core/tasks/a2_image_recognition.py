@@ -52,70 +52,14 @@ from langchain_core.output_parsers import JsonOutputParser
 
 from .base_task import BaseAuditTask, TaskType, TaskResult, AuditContext, EvidenceFile
 
+# プロンプトをprompts.pyからインポート
+from ..prompts import A2_IMAGE_RECOGNITION_PROMPT
+
 # =============================================================================
 # ログ設定
 # =============================================================================
 
 logger = logging.getLogger(__name__)
-
-# =============================================================================
-# プロンプトテンプレート
-# =============================================================================
-
-IMAGE_RECOGNITION_PROMPT = """あなたは内部統制監査の専門家で、文書画像分析のエキスパートです。
-提供された画像から以下の情報を抽出・検証してください。
-
-【テスト手続き】
-{test_procedure}
-
-【抽出すべき情報】
-1. 承認印（印影）の有無と内容
-2. 日付（作成日、承認日等）
-3. 氏名・署名
-4. 承認者の役職・部署
-5. 文書番号・管理番号
-
-【検証事項】
-- 承認印が押印されているか
-- 日付の整合性（承認日が作成日より後か等）
-- 承認者が適切な権限を持っているか（役職等から推測）
-
-【出力形式】
-以下のJSON形式で回答してください：
-{{
-    "extracted_info": {{
-        "approval_stamps": [
-            {{
-                "detected": true/false,
-                "content": "印影の内容",
-                "position": "文書内の位置"
-            }}
-        ],
-        "dates": [
-            {{
-                "type": "作成日/承認日/その他",
-                "value": "YYYY-MM-DD形式",
-                "location": "文書内の位置"
-            }}
-        ],
-        "names": [
-            {{
-                "name": "氏名",
-                "role": "役職・部署",
-                "type": "作成者/承認者/確認者"
-            }}
-        ],
-        "document_numbers": ["文書番号のリスト"]
-    }},
-    "validation_results": {{
-        "has_valid_approval": true/false,
-        "date_consistency": true/false,
-        "authority_assessment": "承認権限の評価"
-    }},
-    "confidence": 0.0-1.0,
-    "reasoning": "分析結果の説明"
-}}
-"""
 
 
 # =============================================================================
@@ -323,7 +267,7 @@ class ImageRecognitionTask(BaseAuditTask):
                 content=[
                     {
                         "type": "text",
-                        "text": IMAGE_RECOGNITION_PROMPT.format(test_procedure=test_procedure)
+                        "text": A2_IMAGE_RECOGNITION_PROMPT.format(test_procedure=test_procedure)
                     },
                     {
                         "type": "image_url",

@@ -1,0 +1,15 @@
+{
+    "$schema": "https://json.schemastore.org/staticwebapp.config.json",
+    "globalHeaders": {
+        "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.azurewebsites.net https://*.cloudfunctions.net https://*.execute-api.amazonaws.com",
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "X-XSS-Protection": "1; mode=block"
+    },
+    "navigationFallback": {
+        "rewrite": "/index.html"
+    },
+    "mimeTypes": {
+        ".json": "application/json"
+    }
+}

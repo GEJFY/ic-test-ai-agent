@@ -8,9 +8,17 @@ main.py - GCP Cloud Functions エントリーポイント
 Excel VBAマクロからのリクエストを受け付け、AI評価結果を返します。
 
 【エンドポイント】
-1. POST /evaluate - テスト評価実行
-2. GET /health - ヘルスチェック
-3. GET /config - 設定状態確認
+=== 同期API（asyncMode: false）===
+1. POST /evaluate - テスト評価実行（同期処理）
+
+=== 非同期API（asyncMode: true、推奨）===
+2. POST /evaluate/submit - ジョブ送信（即座にジョブIDを返却）
+3. GET /evaluate/status/{job_id} - ステータス確認
+4. GET /evaluate/results/{job_id} - 結果取得
+
+=== 管理API ===
+5. GET /health - ヘルスチェック
+6. GET /config - 設定状態確認
 
 【ディレクトリ構成】
 ic-test-ai-agent/
@@ -219,6 +227,119 @@ def config_status(request: Request):
 
 
 # =============================================================================
+# 非同期APIエンドポイント（504タイムアウト対策）
+# =============================================================================
+
+@functions_framework.http
+def evaluate_submit(request: Request):
+    """
+    POST /evaluate/submit - 非同期ジョブ送信エンドポイント
+
+    評価ジョブを登録し、即座にジョブIDを返却します。
+    """
+    from core.handlers import parse_request_body
+    from core.async_handlers import handle_submit
+
+    logger.info("=" * 60)
+    logger.info("[GCP] /evaluate/submit が呼び出されました")
+
+    if request.method != 'POST':
+        return create_error_response("Method not allowed", 405)
+
+    try:
+        items, error = parse_request_body(request.get_data())
+
+        if error:
+            logger.error(f"[GCP] リクエスト解析エラー: {error}")
+            return create_error_response(error, 400)
+
+        logger.info(f"[GCP] 受信: {len(items)}件のテスト項目")
+
+        tenant_id = request.headers.get("X-Tenant-ID", "default")
+        response = run_async(handle_submit(items=items, tenant_id=tenant_id))
+
+        if response.get("error"):
+            logger.error(f"[GCP] ジョブ送信エラー: {response.get('message')}")
+            return create_response(response, 500)
+
+        logger.info(f"[GCP] ジョブ送信完了: {response.get('job_id')}")
+        return create_response(response, 202)
+
+    except Exception as e:
+        error_details = traceback.format_exc()
+        logger.error(f"[GCP] 予期せぬエラー: {e}")
+        return create_error_response(str(e), 500, error_details)
+
+
+@functions_framework.http
+def evaluate_status(request: Request):
+    """
+    GET /evaluate/status/{job_id} - ジョブステータス確認エンドポイント
+    """
+    from core.async_handlers import handle_status
+
+    # パスからjob_idを抽出
+    path = request.path
+    job_id = path.split("/")[-1] if "/status/" in path else request.args.get("job_id")
+
+    if not job_id:
+        return create_error_response("job_id is required", 400)
+
+    logger.debug(f"[GCP] /evaluate/status/{job_id} が呼び出されました")
+
+    try:
+        response = run_async(handle_status(job_id))
+
+        if response.get("status") == "not_found":
+            return create_error_response(f"Job not found: {job_id}", 404)
+
+        return create_response(response)
+
+    except Exception as e:
+        error_details = traceback.format_exc()
+        logger.error(f"[GCP] 予期せぬエラー: {e}")
+        return create_error_response(str(e), 500, error_details)
+
+
+@functions_framework.http
+def evaluate_results(request: Request):
+    """
+    GET /evaluate/results/{job_id} - ジョブ結果取得エンドポイント
+    """
+    from core.async_handlers import handle_results
+
+    # パスからjob_idを抽出
+    path = request.path
+    job_id = path.split("/")[-1] if "/results/" in path else request.args.get("job_id")
+
+    if not job_id:
+        return create_error_response("job_id is required", 400)
+
+    logger.info(f"[GCP] /evaluate/results/{job_id} が呼び出されました")
+
+    try:
+        response = run_async(handle_results(job_id))
+
+        if response.get("status") == "not_found":
+            return create_error_response(f"Job not found: {job_id}", 404)
+
+        if response.get("status") not in ["completed", "failed"]:
+            return create_response({
+                "job_id": job_id,
+                "status": response.get("status"),
+                "message": "Job not completed yet. Please check status endpoint."
+            }, 202)
+
+        logger.info(f"[GCP] 結果返却: {len(response.get('results', []))}件")
+        return create_response(response)
+
+    except Exception as e:
+        error_details = traceback.format_exc()
+        logger.error(f"[GCP] 予期せぬエラー: {e}")
+        return create_error_response(str(e), 500, error_details)
+
+
+# =============================================================================
 # ローカルテスト用
 # =============================================================================
 
@@ -231,6 +352,21 @@ if __name__ == "__main__":
     def local_evaluate():
         from flask import request
         return evaluate(request)
+
+    @app.route('/evaluate/submit', methods=['POST'])
+    def local_evaluate_submit():
+        from flask import request
+        return evaluate_submit(request)
+
+    @app.route('/evaluate/status/<job_id>', methods=['GET'])
+    def local_evaluate_status(job_id):
+        from flask import request
+        return evaluate_status(request)
+
+    @app.route('/evaluate/results/<job_id>', methods=['GET'])
+    def local_evaluate_results(job_id):
+        from flask import request
+        return evaluate_results(request)
 
     @app.route('/health', methods=['GET'])
     def local_health():

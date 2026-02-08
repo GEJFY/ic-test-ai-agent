@@ -93,7 +93,8 @@ audit_logger = AuditLogger(logger)
 DEFAULT_TIMEOUT_SECONDS = 300
 
 # 同時実行する評価処理の最大数
-MAX_CONCURRENT_EVALUATIONS = 3
+# LLM APIのレート制限に依存。Azure AI Foundryは通常10-20リクエスト/分が安全
+MAX_CONCURRENT_EVALUATIONS = 10
 
 # APIバージョン
 API_VERSION = "2.4.0-multiplatform"
@@ -238,7 +239,7 @@ def get_llm_instances() -> Tuple[Any, Any]:
         logger.error(
             f"[LLM] 初期化中にエラーが発生しました: {type(e).__name__}: {e}"
         )
-        logger.debug(f"[LLM] トレースバック:\n{traceback.format_exc()}")
+        logger.error(f"[LLM] トレースバック:\n{traceback.format_exc()}")
         return None, None
 
 
@@ -252,62 +253,30 @@ def get_orchestrator(llm: Any, vision_llm: Any) -> Any:
 
     【オーケストレーターとは】
     複数のAIタスクを順序立てて実行し、最終的な評価結果を生成する
-    コンポーネントです。2種類のオーケストレーターがあります：
+    コンポーネントです。
 
-    1. GraphAuditOrchestrator（推奨）
-       - LangGraphベースの実装
-       - セルフリフレクション機能を搭載
-       - 評価結果の品質が高い
-
-    2. AuditOrchestrator（フォールバック用）
-       - 従来のシンプルな実装
-       - セルフリフレクションなし
-
-    【環境変数】
-    - USE_GRAPH_ORCHESTRATOR: "true"（デフォルト）でGraphOrchestratorを使用
+    GraphAuditOrchestrator:
+    - LangGraphベースの実装
+    - セルフリフレクション機能を搭載
+    - 評価結果の品質が高い
 
     Args:
         llm: テキスト処理用LLM
         vision_llm: 画像処理用LLM
 
     Returns:
-        オーケストレーターインスタンス
+        GraphAuditOrchestratorインスタンス
 
     Raises:
         ImportError: オーケストレーターモジュールが見つからない場合
     """
-    # 環境変数からオーケストレーターの種類を取得
-    use_graph = os.environ.get("USE_GRAPH_ORCHESTRATOR", "true").lower() == "true"
-    logger.debug(f"オーケストレーター選択: USE_GRAPH_ORCHESTRATOR = {use_graph}")
-
-    if use_graph:
-        try:
-            # LangGraphベースのオーケストレーターを使用
-            from core.graph_orchestrator import GraphAuditOrchestrator
-
-            logger.info(
-                "[オーケストレーター] LangGraphベースを使用 "
-                "(セルフリフレクション: 有効)"
-            )
-            return GraphAuditOrchestrator(llm=llm, vision_llm=vision_llm)
-
-        except ImportError as e:
-            # インポートエラーの場合はフォールバック
-            logger.warning(
-                f"[オーケストレーター] GraphOrchestratorのインポートに失敗: {e}"
-            )
-            logger.info(
-                "[オーケストレーター] 従来のAuditOrchestratorにフォールバック"
-            )
-
-    # 従来のオーケストレーターを使用
-    from core.auditor_agent import AuditOrchestrator
+    from core.graph_orchestrator import GraphAuditOrchestrator
 
     logger.info(
-        "[オーケストレーター] 従来のAuditOrchestratorを使用 "
-        "(セルフリフレクション: 無効)"
+        "[オーケストレーター] LangGraphベースを使用 "
+        "(セルフリフレクション: 有効)"
     )
-    return AuditOrchestrator(llm=llm, vision_llm=vision_llm)
+    return GraphAuditOrchestrator(llm=llm, vision_llm=vision_llm)
 
 
 # =============================================================================
@@ -742,9 +711,6 @@ def handle_health() -> Dict[str, Any]:
         }
         logger.warning("[ヘルス] OCRFactoryモジュールが見つかりません")
 
-    # オーケストレーター設定
-    use_graph = os.environ.get("USE_GRAPH_ORCHESTRATOR", "true").lower() == "true"
-
     # プラットフォームを判定
     platform = _detect_platform()
 
@@ -756,7 +722,7 @@ def handle_health() -> Dict[str, Any]:
         "ocr": ocr_status,
         "document_processor": dp_status,
         "features": {
-            "self_reflection": use_graph,
+            "self_reflection": True,
             "multi_cloud_ocr": True,
             "multi_cloud_llm": True,
         },
@@ -839,10 +805,9 @@ def handle_config() -> Dict[str, Any]:
         logger.warning(f"[設定] OCR情報取得失敗: {e}")
 
     # オーケストレーター設定
-    use_graph = os.environ.get("USE_GRAPH_ORCHESTRATOR", "true").lower() == "true"
     result["orchestrator"] = {
-        "use_graph_orchestrator": use_graph,
-        "self_reflection_enabled": use_graph,
+        "type": "GraphAuditOrchestrator",
+        "self_reflection_enabled": True,
         "max_concurrent_evaluations": MAX_CONCURRENT_EVALUATIONS,
         "default_timeout_seconds": DEFAULT_TIMEOUT_SECONDS
     }

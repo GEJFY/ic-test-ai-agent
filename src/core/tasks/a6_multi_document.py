@@ -54,86 +54,14 @@ from langchain_core.output_parsers import JsonOutputParser
 
 from .base_task import BaseAuditTask, TaskType, TaskResult, AuditContext
 
+# プロンプトをprompts.pyからインポート
+from ..prompts import A6_MULTI_DOCUMENT_PROMPT
+
 # =============================================================================
 # ログ設定
 # =============================================================================
 
 logger = logging.getLogger(__name__)
-
-# =============================================================================
-# プロンプトテンプレート
-# =============================================================================
-
-MULTI_DOCUMENT_PROMPT = """あなたは内部統制監査の専門家です。
-複数の証跡文書を統合して、プロセス全体を再構成し、一貫性を評価してください。
-
-【重要な指示】
-1. 議事録、承認記録、配布記録、メール、システム画面など、バラバラな証跡を統合
-2. 各証跡の時系列を確認し、プロセスの流れを再構成
-3. プロセス全体に不備（抜け漏れ、矛盾、逆転）がないか一貫性を確認
-4. 証跡間の関連性（参照番号、日付、担当者等）を紐付け
-
-【統制記述】
-{control_description}
-
-【テスト手続き】
-{test_procedure}
-
-【証跡文書一覧】
-{evidence_documents}
-
-【出力形式】
-以下のJSON形式で回答してください：
-{{
-    "document_analysis": [
-        {{
-            "document_name": "文書名",
-            "document_type": "文書種別（議事録/承認記録/メール等）",
-            "date": "文書の日付",
-            "key_information": "抽出した重要情報",
-            "related_documents": ["関連する他の文書名"],
-            "process_step": "このプロセスでの位置づけ"
-        }}
-    ],
-    "process_reconstruction": {{
-        "timeline": [
-            {{
-                "sequence": 1,
-                "date": "YYYY-MM-DD",
-                "event": "イベント/アクション",
-                "document_source": "根拠文書",
-                "actors": ["関係者"]
-            }}
-        ],
-        "process_flow": "プロセス全体の流れの説明"
-    }},
-    "consistency_check": {{
-        "timeline_consistent": true/false,
-        "no_gaps": true/false,
-        "no_contradictions": true/false,
-        "issues_found": [
-            {{
-                "issue_type": "抜け漏れ/矛盾/時系列逆転",
-                "description": "問題の説明",
-                "affected_documents": ["関連文書"],
-                "severity": "高/中/低"
-            }}
-        ]
-    }},
-    "completeness_assessment": {{
-        "expected_steps": ["期待されるプロセスステップ"],
-        "documented_steps": ["文書化されているステップ"],
-        "missing_steps": ["欠落しているステップ"],
-        "completeness_score": 0.0-1.0
-    }},
-    "confidence": 0.0-1.0,
-    "reasoning": {{
-        "verification_summary": "何を検証して何が確認できたか（具体的に）",
-        "evidence_details": "どの文書のどの部分で確認したか（具体的な記載を引用）",
-        "conclusion": "結論とその根拠"
-    }}
-}}
-"""
 
 
 # =============================================================================
@@ -185,7 +113,7 @@ class MultiDocumentTask(BaseAuditTask):
             llm: LangChain ChatModel
         """
         super().__init__(llm)
-        self.prompt = ChatPromptTemplate.from_template(MULTI_DOCUMENT_PROMPT)
+        self.prompt = ChatPromptTemplate.from_template(A6_MULTI_DOCUMENT_PROMPT)
         self.parser = JsonOutputParser()
 
         logger.debug("[A6] MultiDocumentTask初期化完了")
