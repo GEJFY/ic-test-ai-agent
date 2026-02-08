@@ -9,6 +9,7 @@ test_ocr_factory.py - ocr_factory.pyのユニットテスト
 - OCRConfigError: 設定エラークラス
 - OCRFactory: OCRファクトリークラス
 - TesseractOCRClient: ローカルOCRクライアント
+- YomitokuOCRClient: YomiToku-Pro OCRクライアント（AWS Marketplace版）
 
 ================================================================================
 """
@@ -27,6 +28,7 @@ from infrastructure.ocr_factory import (
     OCRTable,
     BaseOCRClient,
     TesseractOCRClient,
+    YomitokuOCRClient,
 )
 
 
@@ -39,7 +41,7 @@ class TestOCRProvider:
 
     def test_all_providers_exist(self):
         """全プロバイダーが定義されているか"""
-        expected_providers = ["AZURE", "AWS", "GCP", "TESSERACT", "NONE"]
+        expected_providers = ["AZURE", "AWS", "GCP", "TESSERACT", "YOMITOKU", "NONE"]
         for provider in expected_providers:
             assert hasattr(OCRProvider, provider)
 
@@ -49,6 +51,7 @@ class TestOCRProvider:
         assert OCRProvider.AWS.value == "AWS"
         assert OCRProvider.GCP.value == "GCP"
         assert OCRProvider.TESSERACT.value == "TESSERACT"
+        assert OCRProvider.YOMITOKU.value == "YOMITOKU"
         assert OCRProvider.NONE.value == "NONE"
 
 
@@ -299,6 +302,284 @@ class TestTesseractOCRClient:
 
 
 # =============================================================================
+# YomitokuOCRClient テスト
+# =============================================================================
+
+class TestYomitokuOCRClient:
+    """YomitokuOCRClientのテスト"""
+
+    def test_provider_name(self):
+        """プロバイダー名"""
+        with patch.dict(os.environ, {"YOMITOKU_ENDPOINT_NAME": "test-ep"}, clear=True):
+            client = YomitokuOCRClient()
+            assert client.provider_name == "YomiToku-Pro"
+
+    def test_default_region(self):
+        """デフォルトリージョン"""
+        with patch.dict(os.environ, {}, clear=True):
+            client = YomitokuOCRClient()
+            assert client.region == "ap-northeast-1"
+
+    def test_custom_region(self):
+        """カスタムリージョン"""
+        with patch.dict(os.environ, {"AWS_REGION": "us-east-1"}):
+            client = YomitokuOCRClient()
+            assert client.region == "us-east-1"
+
+    def test_is_configured_true(self):
+        """エンドポイント設定時はTrue"""
+        with patch.dict(os.environ, {"YOMITOKU_ENDPOINT_NAME": "yomitoku-pro-endpoint"}):
+            client = YomitokuOCRClient()
+            assert client.is_configured() is True
+
+    def test_is_configured_false(self):
+        """エンドポイント未設定時はFalse"""
+        with patch.dict(os.environ, {}, clear=True):
+            client = YomitokuOCRClient()
+            assert client.is_configured() is False
+
+    def test_client_initially_none(self):
+        """初期化時のclientはNone"""
+        client = YomitokuOCRClient()
+        assert client._client is None
+
+    def test_get_client_creates_sagemaker_runtime(self):
+        """_get_client()がSageMaker Runtimeクライアントを作成"""
+        mock_boto3 = MagicMock()
+        mock_sagemaker = MagicMock()
+        mock_boto3.client.return_value = mock_sagemaker
+
+        with patch.dict(os.environ, {
+            "YOMITOKU_ENDPOINT_NAME": "test-ep",
+            "AWS_REGION": "ap-northeast-1"
+        }):
+            client = YomitokuOCRClient()
+            with patch.dict('sys.modules', {'boto3': mock_boto3}):
+                result = client._get_client()
+
+                mock_boto3.client.assert_called_once_with(
+                    'sagemaker-runtime',
+                    region_name="ap-northeast-1"
+                )
+                assert result == mock_sagemaker
+
+    def test_get_client_caches(self):
+        """_get_client()は2回目以降キャッシュを使用"""
+        with patch.dict(os.environ, {"YOMITOKU_ENDPOINT_NAME": "test-ep"}):
+            client = YomitokuOCRClient()
+            mock_sagemaker = MagicMock()
+            client._client = mock_sagemaker
+
+            # キャッシュ済みのクライアントがそのまま返される
+            result = client._get_client()
+            assert result is mock_sagemaker
+
+    def test_extract_text_not_configured(self):
+        """未設定時のエラー処理"""
+        with patch.dict(os.environ, {}, clear=True):
+            client = YomitokuOCRClient()
+            result = client.extract_text(b"dummy data")
+
+            assert result.text_content == ""
+            assert "YOMITOKU_ENDPOINT_NAME未設定" in result.error
+            assert result.provider == "YomiToku-Pro"
+
+    def _create_client_with_mock(self, response_data):
+        """テスト用ヘルパー: モックSageMakerクライアントを持つYomitokuOCRClientを作成"""
+        import json
+
+        mock_body = MagicMock()
+        mock_body.read.return_value = json.dumps(response_data).encode('utf-8')
+
+        mock_sagemaker = MagicMock()
+        mock_sagemaker.invoke_endpoint.return_value = {"Body": mock_body}
+
+        client = YomitokuOCRClient()
+        client._client = mock_sagemaker
+        return client, mock_sagemaker
+
+    def test_extract_text_simple_text_response(self):
+        """テキストフィールドのみのレスポンス"""
+        with patch.dict(os.environ, {"YOMITOKU_ENDPOINT_NAME": "test-ep"}):
+            client, mock_sagemaker = self._create_client_with_mock({
+                "text": "OCRで抽出されたテキスト"
+            })
+            result = client.extract_text(b"pdf_bytes", "application/pdf")
+
+            assert result.text_content == "OCRで抽出されたテキスト"
+            assert result.error is None
+            assert result.provider == "YomiToku-Pro"
+
+            mock_sagemaker.invoke_endpoint.assert_called_once_with(
+                EndpointName="test-ep",
+                ContentType="application/pdf",
+                Accept="application/json",
+                Body=b"pdf_bytes"
+            )
+
+    def test_extract_text_pages_response(self):
+        """ページ構造のレスポンス"""
+        response_data = {
+            "pages": [
+                {
+                    "text": "1ページ目のテキスト",
+                    "lines": [
+                        {"text": "行1", "bbox": [0, 0, 100, 20], "confidence": 0.98},
+                        {"text": "行2", "bbox": [0, 20, 100, 40], "confidence": 0.95},
+                    ]
+                },
+                {
+                    "text": "2ページ目のテキスト",
+                    "lines": [
+                        {"text": "行3", "confidence": 0.99},
+                    ]
+                }
+            ]
+        }
+
+        with patch.dict(os.environ, {"YOMITOKU_ENDPOINT_NAME": "test-ep"}):
+            client, _ = self._create_client_with_mock(response_data)
+            result = client.extract_text(b"pdf_bytes")
+
+            assert "1ページ目のテキスト" in result.text_content
+            assert "2ページ目のテキスト" in result.text_content
+            assert result.page_count == 2
+            assert len(result.elements) == 3
+            assert result.elements[0].text == "行1"
+            assert result.elements[0].confidence == 0.98
+            assert result.elements[0].page_number == 1
+            assert result.elements[2].page_number == 2
+
+    def test_extract_text_result_field_response(self):
+        """resultフィールドのレスポンス"""
+        with patch.dict(os.environ, {"YOMITOKU_ENDPOINT_NAME": "test-ep"}):
+            client, _ = self._create_client_with_mock({
+                "result": "resultフィールドのテキスト"
+            })
+            result = client.extract_text(b"pdf_bytes")
+
+            assert result.text_content == "resultフィールドのテキスト"
+
+    def test_extract_text_string_response(self):
+        """文字列直接のレスポンス"""
+        with patch.dict(os.environ, {"YOMITOKU_ENDPOINT_NAME": "test-ep"}):
+            client, _ = self._create_client_with_mock("直接テキスト")
+            result = client.extract_text(b"pdf_bytes")
+
+            assert result.text_content == "直接テキスト"
+
+    def test_extract_text_content_type_png(self):
+        """PNG画像のContentType判定"""
+        with patch.dict(os.environ, {"YOMITOKU_ENDPOINT_NAME": "test-ep"}):
+            client, mock_sagemaker = self._create_client_with_mock({"text": "ok"})
+            client.extract_text(b"png_bytes", "image/png")
+
+            call_args = mock_sagemaker.invoke_endpoint.call_args
+            assert call_args.kwargs["ContentType"] == "image/png"
+
+    def test_extract_text_content_type_jpeg(self):
+        """JPEG画像のContentType判定"""
+        with patch.dict(os.environ, {"YOMITOKU_ENDPOINT_NAME": "test-ep"}):
+            client, mock_sagemaker = self._create_client_with_mock({"text": "ok"})
+            client.extract_text(b"jpg_bytes", "image/jpeg")
+
+            call_args = mock_sagemaker.invoke_endpoint.call_args
+            assert call_args.kwargs["ContentType"] == "image/jpeg"
+
+    def test_extract_text_content_type_default(self):
+        """mime_type未指定時はPDF"""
+        with patch.dict(os.environ, {"YOMITOKU_ENDPOINT_NAME": "test-ep"}):
+            client, mock_sagemaker = self._create_client_with_mock({"text": "ok"})
+            client.extract_text(b"data")
+
+            call_args = mock_sagemaker.invoke_endpoint.call_args
+            assert call_args.kwargs["ContentType"] == "application/pdf"
+
+    def test_extract_text_sagemaker_error(self):
+        """SageMakerエンドポイントエラー"""
+        mock_sagemaker = MagicMock()
+        mock_sagemaker.invoke_endpoint.side_effect = Exception("ValidationError: Endpoint not found")
+
+        with patch.dict(os.environ, {"YOMITOKU_ENDPOINT_NAME": "test-ep"}):
+            client = YomitokuOCRClient()
+            client._client = mock_sagemaker
+            result = client.extract_text(b"data")
+
+            assert result.text_content == ""
+            assert "SageMaker Endpointエラー" in result.error
+            assert result.provider == "YomiToku-Pro"
+
+    def test_extract_text_general_error(self):
+        """一般的なエラー"""
+        mock_sagemaker = MagicMock()
+        mock_sagemaker.invoke_endpoint.side_effect = Exception("Connection timeout")
+
+        with patch.dict(os.environ, {"YOMITOKU_ENDPOINT_NAME": "test-ep"}):
+            client = YomitokuOCRClient()
+            client._client = mock_sagemaker
+            result = client.extract_text(b"data")
+
+            assert result.text_content == ""
+            assert "Connection timeout" in result.error
+
+
+# =============================================================================
+# OCRFactory YomitokuOCRClient 統合テスト
+# =============================================================================
+
+class TestOCRFactoryYomitoku:
+    """OCRFactoryのYomiToku関連テスト"""
+
+    def test_get_provider_yomitoku(self):
+        """YOMITOKUプロバイダー取得"""
+        with patch.dict(os.environ, {"OCR_PROVIDER": "YOMITOKU"}):
+            provider = OCRFactory.get_provider()
+            assert provider == OCRProvider.YOMITOKU
+
+    def test_required_env_vars_yomitoku(self):
+        """YomiToku必須環境変数"""
+        required = OCRFactory.REQUIRED_ENV_VARS.get(OCRProvider.YOMITOKU, [])
+        assert "YOMITOKU_ENDPOINT_NAME" in required
+
+    def test_get_provider_info_yomitoku(self):
+        """YomiTokuプロバイダー情報取得"""
+        info = OCRFactory.get_provider_info()
+        assert "YOMITOKU" in info
+        assert info["YOMITOKU"]["name"] == "YomiToku-Pro"
+        assert "YOMITOKU_ENDPOINT_NAME" in info["YOMITOKU"]["required_env_vars"]
+
+    def test_get_config_status_yomitoku_missing_vars(self):
+        """YomiToku設定不足の状態"""
+        with patch.dict(os.environ, {"OCR_PROVIDER": "YOMITOKU"}, clear=True):
+            OCRFactory._client_cache = None
+            OCRFactory._cached_provider = None
+
+            status = OCRFactory.get_config_status()
+            assert status["provider"] == "YOMITOKU"
+            if not status["configured"]:
+                assert "YOMITOKU_ENDPOINT_NAME" in status.get("missing_vars", [])
+
+    def test_get_config_status_yomitoku_configured(self):
+        """YomiToku設定済みの状態"""
+        env_vars = {
+            "OCR_PROVIDER": "YOMITOKU",
+            "YOMITOKU_ENDPOINT_NAME": "yomitoku-pro-endpoint"
+        }
+        with patch.dict(os.environ, env_vars, clear=True):
+            OCRFactory._client_cache = None
+            OCRFactory._cached_provider = None
+
+            status = OCRFactory.get_config_status()
+            assert status["provider"] == "YOMITOKU"
+            assert len(status.get("missing_vars", [])) == 0
+
+    def test_language_provider_map_japanese(self):
+        """日本語→YomiTokuマッピング"""
+        assert OCRFactory.LANGUAGE_PROVIDER_MAP.get("jpn") == OCRProvider.YOMITOKU
+        assert OCRFactory.LANGUAGE_PROVIDER_MAP.get("ja") == OCRProvider.YOMITOKU
+
+
+# =============================================================================
 # 統合テスト
 # =============================================================================
 
@@ -323,6 +604,7 @@ class TestOCRFactoryIntegration:
             ("AWS", OCRProvider.AWS),
             ("GCP", OCRProvider.GCP),
             ("TESSERACT", OCRProvider.TESSERACT),
+            ("YOMITOKU", OCRProvider.YOMITOKU),
             ("NONE", OCRProvider.NONE),
         ]
 
