@@ -2,8 +2,8 @@
 
 ## 内部統制テスト評価AIシステム
 
-**作成日:** 2025年1月
-**バージョン:** 2.0
+**作成日:** 2026年2月
+**バージョン:** 6.0
 **対象システム:** 内部統制テスト評価AI（ic-test-ai-agent）
 **対応プラットフォーム:** Azure / GCP / AWS
 
@@ -15,6 +15,7 @@
 - [Part 2: GCP (Google Cloud Platform)](#part-2-gcp-google-cloud-platform)
 - [Part 3: AWS (Amazon Web Services)](#part-3-aws-amazon-web-services)
 - [Part 4: プラットフォーム比較](#part-4-プラットフォーム比較)
+- [Part 5: PoC・本番環境 詳細見積もり（精緻版）](#part-5-poc本番環境-詳細見積もり精緻版)
 
 ---
 
@@ -48,10 +49,10 @@
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐        │
-│   │ Azure Functions │───▶│ Azure OpenAI    │    │ Azure Document  │        │
-│   │ (API ホスト)    │    │ Service         │    │ Intelligence    │        │
-│   └─────────────────┘    │ (LLM処理)       │    │ (OCR処理)       │        │
-│           │              └─────────────────┘    └─────────────────┘        │
+│   │ Azure Functions │───▶│ Azure AI Foundry│    │ Azure Document  │        │
+│   │ (API ホスト)    │    │ (LLM処理)       │    │ Intelligence    │        │
+│   └─────────────────┘    └─────────────────┘    │ (OCR処理)       │        │
+│           │                                      └─────────────────┘        │
 │           │                                                                 │
 │           ▼                                                                 │
 │   ┌─────────────────────────────────────────┐                              │
@@ -104,7 +105,7 @@
 | リソース | Azure サービス名 | SKU/プラン | 用途 |
 |---------|-----------------|-----------|------|
 | APIホスティング | Azure Functions | Consumption / Premium | REST API エンドポイント |
-| LLM処理 | Azure OpenAI Service | Standard S0 | AI評価（GPT-4o等） |
+| LLM処理 | Azure AI Foundry | Standard | AI評価（GPT-5.2等） |
 | OCR処理 | Azure Document Intelligence | S0 | PDF・画像からのテキスト抽出 |
 | ファイル保存 | Azure Storage Account | Standard LRS | 一時ファイル、ログ |
 
@@ -130,7 +131,7 @@
 | APM・ログ収集 | Application Insights | Basic / Standard | Functions 監視、トレース |
 | ログ分析 | Log Analytics Workspace | 従量課金 | 統合ログ保存・クエリ |
 | メトリクス・アラート | Azure Monitor | 従量課金 | アラート通知 |
-| 診断ログ | Diagnostic Settings | - | OpenAI/DI のログ収集 |
+| 診断ログ | Diagnostic Settings | - | AI Foundry/DI のログ収集 |
 
 ### 3.5 オプションリソース
 
@@ -173,38 +174,50 @@
 
 ---
 
-### 4.2 Azure OpenAI Service
+### 4.2 Azure AI Foundry（LLMサービス）
 
-#### 4.2.1 GPT-4o 価格（2025年1月時点）
-
-| 項目 | 単価（USD） | 単価（JPY換算@150） |
-|-----|-----------|-------------------|
-| 入力トークン | $2.50 / 1M tokens | ¥375 / 1M tokens |
-| 出力トークン | $10.00 / 1M tokens | ¥1,500 / 1M tokens |
-
-#### 4.2.2 GPT-4o-mini 価格（低コスト版）
+#### 4.2.1 GPT-5.2 価格（2026年2月時点・フラッグシップ）
 
 | 項目 | 単価（USD） | 単価（JPY換算@150） |
 |-----|-----------|-------------------|
-| 入力トークン | $0.15 / 1M tokens | ¥22.5 / 1M tokens |
-| 出力トークン | $0.60 / 1M tokens | ¥90 / 1M tokens |
+| 入力トークン | $1.75 / 1M tokens | ¥263 / 1M tokens |
+| 出力トークン | $14.00 / 1M tokens | ¥2,100 / 1M tokens |
 
-#### 4.2.3 トークン消費量の目安
+#### 4.2.2 GPT-5-nano 価格（低コスト・推奨）
 
-| 処理フェーズ | 入力トークン | 出力トークン |
-|-------------|------------|-------------|
-| テスト計画作成 | 約800 | 約400 |
-| 計画レビュー | 約1,000 | 約300 |
-| タスク実行（A1-A8） | 約1,500 | 約500 |
-| 最終判断 | 約1,200 | 約600 |
-| 判断レビュー | 約1,000 | 約300 |
-| **1項目あたり合計** | **約5,500** | **約2,100** |
+| 項目 | 単価（USD） | 単価（JPY換算@150） |
+|-----|-----------|-------------------|
+| 入力トークン | $0.05 / 1M tokens | ¥7.5 / 1M tokens |
+| 出力トークン | $0.40 / 1M tokens | ¥60 / 1M tokens |
 
-**計算例（月1,000項目、GPT-4o）:**
+#### 4.2.3 GPT-5-mini 価格（バランス型）
+
+| 項目 | 単価（USD） | 単価（JPY換算@150） |
+|-----|-----------|-------------------|
+| 入力トークン | $0.25 / 1M tokens | ¥37.5 / 1M tokens |
+| 出力トークン | $2.00 / 1M tokens | ¥300 / 1M tokens |
+
+#### 4.2.4 トークン消費量の目安（余裕あり）
+
+| 処理フェーズ | 入力トークン | 出力トークン | 備考 |
+|-------------|------------|-------------|------|
+| テスト計画作成 | 約2,500 | 約700 | 統制情報 + プロンプト |
+| 計画レビュー | 約3,500 | 約500 | 計画全文 + レビュー基準 |
+| タスク実行（A1-A8） | 約23,000 | 約1,300 | **OCR全文（8p × 2,500t）+ プロンプト** |
+| 最終判断 | 約4,000 | 約900 | タスク結果集約 + 評価基準 |
+| 判断レビュー | 約2,000 | 約600 | 判断結果 + レビュー基準 |
+| **1項目あたり合計** | **約35,000** | **約4,000** | |
+
+> ※ タスク実行にはOCR抽出テキスト（平均8ページ × 約2,500トークン/ページ = 約20,000トークン）を含む
+> ※ 日本語文書（規程類・契約書等）は1ページあたり1,500-2,000文字、トークン変換で約2,500トークン/ページ
+> ※ 証憑類のテキストは全量がLLM入力トークンとなるため、ページ数に比例して増加します
+> ※ 余裕を持った見積もり値（実際の消費はこれより少ない場合があります）
+
+**計算例（月1,000項目、GPT-5.2）:**
 ```
-入力: 5,500 × 1,000 = 5.5M tokens → ¥375 × 5.5 = ¥2,063
-出力: 2,100 × 1,000 = 2.1M tokens → ¥1,500 × 2.1 = ¥3,150
-月額: 約 ¥5,213
+入力: 35,000 × 1,000 = 35M tokens → ¥263 × 35 = ¥9,205
+出力: 4,000 × 1,000 = 4M tokens → ¥2,100 × 4 = ¥8,400
+月額: 約 ¥17,600
 ```
 
 ---
@@ -228,10 +241,10 @@
 | スキャン画像 | 1ページ | Read/Layout |
 | Excel/Word | 1-3ページ | Layout |
 
-**計算例（月1,000項目、平均2ページ/項目）:**
+**計算例（月1,000項目、平均8ページ/項目）:**
 ```
-処理ページ数: 1,000 × 2 = 2,000ページ
-月額: ¥1,500 × 2 = ¥3,000
+処理ページ数: 1,000 × 8 = 8,000ページ
+月額: ¥1,500 × 8 = ¥12,000
 ```
 
 ---
@@ -286,29 +299,12 @@ Queue: 0.01GB × ¥8.4 + 5,000回 × ¥0.000056 = ¥0.4
 | データ保持（90日超） | ¥16.8 / GB/月 | 90日まで無料 |
 | 連続エクスポート | ¥0.056 / GB | - |
 
-**計算例（月1,000項目処理）:**
-```
-ログデータ量: 約2GB/月（API呼出しログ、トレース、例外）
-月額: (2GB - 5GB無料枠) = ¥0（無料枠内）
-※大規模利用(10,000項目)の場合: 約10GB → (10-5) × ¥336 = ¥1,680
-```
-
 #### 4.6.2 Log Analytics Workspace
 
 | 項目 | 単価 | 無料枠 |
 |-----|------|-------|
 | データ取り込み | ¥336 / GB | 5GB/日（最初の31日） |
 | データ保持（90日超） | ¥16.8 / GB/月 | 90日まで無料 |
-| データエクスポート | ¥0.168 / GB | - |
-
-**計算例（月1,000項目処理）:**
-```
-Azure OpenAI診断ログ: 約1GB/月
-Document Intelligence診断ログ: 約0.5GB/月
-Functions診断ログ: 約0.5GB/月
-合計: 約2GB/月 → 無料枠内
-※大規模利用(10,000項目)の場合: 約15GB → ¥336 × 15 = ¥5,040
-```
 
 #### 4.6.3 Azure Monitor
 
@@ -317,36 +313,8 @@ Functions診断ログ: 約0.5GB/月
 | メトリクスアラートルール | ¥15 / ルール/月 | 最初の10ルール無料 |
 | ログアラートルール（5分間隔） | ¥75 / ルール/月 | - |
 | 通知（Email） | ¥0.28 / 1,000件 | 1,000件/月無料 |
-| 通知（SMS） | ¥11 / 100件 | - |
-| 通知（Webhook） | 無料 | - |
 
-**推奨アラート構成:**
-```
-必須アラート（3ルール）:
-- Functions エラー率 > 5%: メトリクスアラート（無料枠内）
-- Functions 応答時間 > 30秒: メトリクスアラート（無料枠内）
-- OpenAI API エラー: メトリクスアラート（無料枠内）
-
-オプションアラート（2ルール）:
-- 日次使用量レポート: ログアラート ¥75
-- 週次コストサマリー: ログアラート ¥75
-合計: ¥150/月（オプション利用時）
-```
-
-#### 4.6.4 診断設定（Diagnostic Settings）
-
-| 項目 | 料金 |
-|-----|------|
-| 診断設定の構成 | 無料 |
-| ログ転送 | 転送先サービスの料金に含まれる |
-
-**必須診断設定:**
-- Azure Functions → Log Analytics
-- Azure OpenAI Service → Log Analytics
-- Document Intelligence → Log Analytics
-- Storage Account → Log Analytics（オプション）
-
-#### 4.6.5 監視コストまとめ
+#### 4.6.4 監視コストまとめ
 
 | 規模 | Application Insights | Log Analytics | Azure Monitor | 合計 |
 |-----|---------------------|---------------|---------------|------|
@@ -363,51 +331,45 @@ Functions診断ログ: 約0.5GB/月
 | リソース | 構成 | 月額（JPY） |
 |---------|-----|------------|
 | Azure Functions | Consumption Plan | ¥0 |
-| Azure OpenAI (GPT-4o) | 0.77M tokens | ¥550 |
-| Document Intelligence | 200ページ | ¥300 |
+| Azure AI Foundry (GPT-5.2) | 3.9M tokens | ¥1,800 |
+| Document Intelligence | 800ページ | ¥1,200 |
 | Storage | 最小構成 | ¥100 |
 | Azure AD | Free | ¥0 |
-| Application Insights | 無料枠内 | ¥0 |
-| Log Analytics | 無料枠内 | ¥0 |
-| Azure Monitor | 無料枠内 | ¥0 |
-| **合計** | | **¥950/月** |
+| 監視 | 無料枠内 | ¥0 |
+| **合計** | | **¥3,100/月** |
 
 ### 5.2 中規模利用（月1,000項目）
 
 | リソース | 構成 | 月額（JPY） |
 |---------|-----|------------|
-| Azure Functions | Consumption Plan | ¥500 |
-| Azure OpenAI (GPT-4o) | 7.6M tokens | ¥5,500 |
-| Document Intelligence | 2,000ページ | ¥3,000 |
+| Azure Functions | Consumption Plan | ¥0 |
+| Azure AI Foundry (GPT-5.2) | 39M tokens | ¥17,600 |
+| Document Intelligence | 8,000ページ | ¥12,000 |
 | Storage（非同期） | 標準構成 | ¥500 |
 | Azure AD | Free | ¥0 |
-| Application Insights | 無料枠内（2GB） | ¥0 |
-| Log Analytics | 無料枠内（2GB） | ¥0 |
-| Azure Monitor | アラート3ルール | ¥0 |
-| **合計** | | **¥9,500/月** |
+| 監視 | 無料枠内 | ¥0 |
+| **合計** | | **¥30,100/月** |
 
 ### 5.3 大規模利用（月10,000項目）
 
 | リソース | 構成 | 月額（JPY） |
 |---------|-----|------------|
 | Azure Functions | Premium EP1 | ¥23,000 |
-| Azure OpenAI (GPT-4o) | 76M tokens | ¥55,000 |
-| Document Intelligence | 20,000ページ | ¥30,000 |
+| Azure AI Foundry (GPT-5.2) | 390M tokens | ¥176,000 |
+| Document Intelligence | 80,000ページ | ¥120,000 |
 | Storage（非同期） | 拡張構成 | ¥2,000 |
 | Azure AD | P1 × 10ユーザー | ¥9,000 |
-| Application Insights | 10GB（5GB超過分課金） | ¥1,680 |
-| Log Analytics | 15GB | ¥5,040 |
-| Azure Monitor | アラート5ルール | ¥150 |
-| **合計** | | **¥125,870/月** |
+| 監視 | 超過分課金 | ¥6,900 |
+| **合計** | | **¥336,900/月** |
 
 ### 5.4 コスト削減オプション
 
 | オプション | 削減効果 | 適用条件 |
 |-----------|---------|---------|
-| GPT-4o-mini使用 | LLMコスト約90%削減 | 精度許容範囲内 |
-| Reserved Capacity | 最大30%削減 | 1年以上の利用確約 |
+| GPT-5-nano使用 | LLMコスト約97%削減 | 精度許容範囲内 |
+| GPT-5-mini使用 | LLMコスト約86%削減 | バランス重視 |
 | セルフリフレクション無効化 | LLMコスト約40%削減 | 品質許容範囲内 |
-| OCRスキップ（テキストPDF） | OCRコスト削減 | テキスト抽出可能なPDF |
+| OCRスキップ（テキストPDF） | OCRコスト約30%削減 | テキスト抽出可能なPDF |
 
 ---
 
@@ -420,80 +382,35 @@ Functions診断ログ: 約0.5GB/月
 | Azure サブスクリプション設定 | 1時間 | 既存サブスクリプション利用可 |
 | リソースグループ作成 | 0.5時間 | |
 | Azure Functions デプロイ | 2時間 | ARM/Bicep テンプレート利用可 |
-| Azure OpenAI 申請・設定 | 1-5営業日 | 申請承認待ち時間含む |
+| Azure AI Foundry 設定 | 1-2時間 | Model Catalogからデプロイ |
 | Document Intelligence 設定 | 1時間 | |
 | Storage Account 設定 | 0.5時間 | |
 | Azure AD 設定（オプション） | 2時間 | App Registration含む |
-| **合計** | **約1営業日** | 承認待ち除く |
-
-### 6.2 初期費用概算
-
-| 項目 | 費用（JPY） |
-|-----|------------|
-| リソース作成 | ¥0（従量課金） |
-| 初月利用料（テスト含む） | ¥5,000-10,000 |
-| 技術支援（オプション） | 要相談 |
+| **合計** | **約1営業日** | |
 
 ---
 
 ## 7. SLA（サービスレベル）
 
-### 7.1 各サービスのSLA
-
 | サービス | SLA |
 |---------|-----|
 | Azure Functions (Consumption) | 99.95% |
 | Azure Functions (Premium) | 99.95% |
-| Azure OpenAI Service | 99.9% |
+| Azure AI Foundry | 99.9% |
 | Azure Document Intelligence | 99.9% |
 | Azure Storage | 99.9% (LRS) |
 | Azure AD | 99.99% |
 
-### 7.2 複合SLA計算
-
-```
-複合SLA = 99.95% × 99.9% × 99.9% × 99.9%
-        = 99.65%
-        = 月間ダウンタイム最大約2.5時間
-```
+**複合SLA:** 99.95% × 99.9% × 99.9% × 99.9% = 99.65%（月間ダウンタイム最大約2.5時間）
 
 ---
 
 ## 8. リージョン選択
 
-### 8.1 推奨リージョン
-
 | リージョン | 理由 | 注意点 |
 |-----------|------|-------|
-| **東日本（Japan East）** | 低レイテンシ、データ主権 | Azure OpenAI 利用可 |
+| **東日本（Japan East）** | 低レイテンシ、データ主権 | Azure AI Foundry 利用可 |
 | 西日本（Japan West） | DR用途 | 一部サービス制限 |
-
-### 8.2 マルチリージョン構成（オプション）
-
-| 構成 | 用途 | 追加コスト |
-|-----|------|-----------|
-| アクティブ-パッシブ | DR対策 | 約+50% |
-| アクティブ-アクティブ | 高可用性 | 約+100% |
-
----
-
-## 9. 承認・発注に向けて
-
-### 9.1 必要な承認
-
-- [ ] IT部門によるアーキテクチャレビュー
-- [ ] セキュリティ部門による審査
-- [ ] 予算承認（年間見積もり）
-- [ ] Azure OpenAI Service 利用申請
-
-### 9.2 発注情報
-
-| 項目 | 内容 |
-|-----|------|
-| 契約形態 | 従量課金（PAYG）または EA |
-| 支払い通貨 | JPY または USD |
-| 請求サイクル | 月次 |
-| サポートプラン | Standard（推奨）または Professional |
 
 ---
 
@@ -504,7 +421,7 @@ Functions診断ログ: 約0.5GB/月
 LLM_PROVIDER=AZURE_FOUNDRY
 AZURE_FOUNDRY_ENDPOINT=https://your-project.japaneast.models.ai.azure.com
 AZURE_FOUNDRY_API_KEY=your-api-key
-AZURE_FOUNDRY_MODEL=gpt-4o
+AZURE_FOUNDRY_MODEL=gpt-5.2
 
 # OCR Provider
 OCR_PROVIDER=AZURE
@@ -521,18 +438,12 @@ MAX_PLAN_REVISIONS=1
 MAX_JUDGMENT_REVISIONS=1
 ```
 
----
-
 ## 付録B: 参考リンク
 
 - [Azure Functions 価格](https://azure.microsoft.com/ja-jp/pricing/details/functions/)
-- [Azure OpenAI Service 価格](https://azure.microsoft.com/ja-jp/pricing/details/cognitive-services/openai-service/)
+- [Azure AI Foundry 価格](https://azure.microsoft.com/ja-jp/pricing/details/cognitive-services/openai-service/)
 - [Azure Document Intelligence 価格](https://azure.microsoft.com/ja-jp/pricing/details/ai-document-intelligence/)
 - [Azure Storage 価格](https://azure.microsoft.com/ja-jp/pricing/details/storage/)
-- [Azure AD 価格](https://azure.microsoft.com/ja-jp/pricing/details/active-directory/)
-- [Application Insights 価格](https://azure.microsoft.com/ja-jp/pricing/details/monitor/)
-- [Log Analytics 価格](https://azure.microsoft.com/ja-jp/pricing/details/monitor/)
-- [Azure Monitor 価格](https://azure.microsoft.com/ja-jp/pricing/details/monitor/)
 
 ---
 
@@ -545,7 +456,7 @@ MAX_JUDGMENT_REVISIONS=1
 | リソース | GCP サービス名 | 用途 |
 |---------|---------------|------|
 | APIホスティング | Cloud Functions (2nd gen) | REST API エンドポイント |
-| LLM処理 | Vertex AI (Gemini) | AI評価 |
+| LLM処理 | Vertex AI (Gemini 3) | AI評価 |
 | OCR処理 | Document AI | PDF・画像からのテキスト抽出 |
 | ファイル保存 | Cloud Storage | 一時ファイル、ログ |
 
@@ -565,12 +476,17 @@ MAX_JUDGMENT_REVISIONS=1
 | 呼び出し回数 | $0.40 / 100万回 | 200万回/月 |
 | コンピューティング時間 | $0.000016 / GB-秒 | 40万GB-秒/月 |
 
-### 2.2 Vertex AI (Gemini 1.5 Pro)
+### 2.2 Vertex AI (Gemini 3 Pro Preview)
 
-| 項目 | 単価（USD） |
-|-----|-----------|
-| 入力トークン | $1.25 / 1M tokens |
-| 出力トークン | $5.00 / 1M tokens |
+| 項目 | 単価（USD） | 単価（JPY換算@150） |
+|-----|-----------|-------------------|
+| 入力トークン | $2.00 / 1M tokens | ¥300 / 1M tokens |
+| 出力トークン | $12.00 / 1M tokens | ¥1,800 / 1M tokens |
+
+> **低コスト版:** Gemini 3 Flash Preview: 入力 $0.50/1M, 出力 $3.00/1M（約75%削減）
+> **GA安定版:** Gemini 2.5 Pro: 入力 $1.25/1M, 出力 $10.00/1M
+> **超低コスト版:** Gemini 2.5 Flash: 入力 $0.15/1M, 出力 $0.60/1M（約94%削減）
+> ※ Gemini 3.x は **globalリージョン必須**
 
 ### 2.3 Document AI
 
@@ -584,9 +500,9 @@ MAX_JUDGMENT_REVISIONS=1
 
 | 規模 | 月額（USD） | 月額（JPY換算@150） |
 |-----|-----------|-------------------|
-| 小規模（100項目） | $5-10 | ¥750-1,500 |
-| 中規模（1,000項目） | $40-60 | ¥6,000-9,000 |
-| 大規模（10,000項目） | $400-600 | ¥60,000-90,000 |
+| 小規模（100項目） | $22 | ¥3,300 |
+| 中規模（1,000項目） | $203 | ¥30,500 |
+| 大規模（10,000項目） | $2,020 | ¥303,000 |
 
 ## 3. GCP参考リンク
 
@@ -607,8 +523,10 @@ MAX_JUDGMENT_REVISIONS=1
 | リソース | AWS サービス名 | 用途 |
 |---------|---------------|------|
 | APIホスティング | Lambda + API Gateway | REST API エンドポイント |
-| LLM処理 | Amazon Bedrock (Claude) | AI評価 |
-| OCR処理 | Amazon Textract | PDF・画像からのテキスト抽出 |
+| LLM処理 | Amazon Bedrock (Claude Opus 4.6) | AI評価 |
+| OCR処理（英語） | Amazon Textract | PDF・画像からのテキスト抽出 |
+| OCR処理（日本語） | YomiToku-Pro (SageMaker) | 日本語特化高精度OCR |
+| OCR処理（タイ/蘭語） | Tesseract (Lambda Docker) | 多言語OCR |
 | ファイル保存 | S3 | 一時ファイル、ログ |
 
 ### 1.2 非同期モード追加リソース
@@ -617,6 +535,16 @@ MAX_JUDGMENT_REVISIONS=1
 |---------|---------------|------|
 | ジョブ状態管理 | DynamoDB | ジョブID、ステータス、結果保存 |
 | ジョブキュー | SQS | 処理待ちジョブの管理 |
+
+### 1.3 OCR構成（3プロバイダー）
+
+AWSではTextractが日本語・タイ語・オランダ語に非対応のため、言語別にOCRを分割します。
+
+| 言語 | OCRプロバイダー | サービス | 特徴 |
+|-----|---------------|---------|------|
+| **日本語** (70%) | YomiToku-Pro | SageMaker Endpoint (AWS Marketplace) | 手書き・複雑レイアウト対応 |
+| **タイ語・オランダ語** (5%) | Tesseract | Lambda Docker (言語パック含む) | OSS、低コスト |
+| **英語・その他** (25%) | Amazon Textract | AnalyzeDocument API | AWS標準、高精度 |
 
 ## 2. AWSコスト概算
 
@@ -627,12 +555,15 @@ MAX_JUDGMENT_REVISIONS=1
 | リクエスト数 | $0.20 / 100万回 | 100万回/月 |
 | 実行時間 | $0.0000167 / GB-秒 | 40万GB-秒/月 |
 
-### 2.2 Amazon Bedrock (Claude 3.5 Sonnet)
+### 2.2 Amazon Bedrock (Claude Opus 4.6)
 
-| 項目 | 単価（USD） |
-|-----|-----------|
-| 入力トークン | $3.00 / 1M tokens |
-| 出力トークン | $15.00 / 1M tokens |
+| 項目 | 単価（USD） | 単価（JPY換算@150） |
+|-----|-----------|-------------------|
+| 入力トークン | $5.00 / 1M tokens | ¥750 / 1M tokens |
+| 出力トークン | $25.00 / 1M tokens | ¥3,750 / 1M tokens |
+
+> **バランス型:** Claude Sonnet 4.5: 入力 $3.00/1M, 出力 $15.00/1M（約40%削減）
+> **低コスト版:** Claude Haiku 4.5: 入力 $1.00/1M, 出力 $5.00/1M（約80%削減）
 
 ### 2.3 Amazon Textract
 
@@ -642,19 +573,34 @@ MAX_JUDGMENT_REVISIONS=1
 | Analyze Document | $15.00 |
 | Analyze Expense | $10.00 |
 
-### 2.4 規模別概算
+### 2.4 YomiToku-Pro (SageMaker Endpoint)
+
+| 項目 | 費用 | 備考 |
+|-----|------|------|
+| SageMaker Endpoint (ml.g4dn.xlarge) | $379/月 | GPU推論インスタンス（24時間稼働時） |
+| AWS Marketplace ライセンス | $150/月 | YomiToku-Proソフトウェア利用料 |
+| **合計（常時稼働）** | **$529/月** | |
+| **合計（繁忙期2ヶ月のみ）** | **$1,058/年** | 閑散期は停止 |
+
+> **SageMaker Serverless Inference** を使用すると処理時のみ課金となり、
+> 年間コストを約60-70%削減可能（ただしコールドスタートあり）。
+
+### 2.5 規模別概算
 
 | 規模 | 月額（USD） | 月額（JPY換算@150） |
 |-----|-----------|-------------------|
-| 小規模（100項目） | $10-15 | ¥1,500-2,250 |
-| 中規模（1,000項目） | $80-120 | ¥12,000-18,000 |
-| 大規模（10,000項目） | $800-1,200 | ¥120,000-180,000 |
+| 小規模（100項目） | $42 | ¥6,300 |
+| 中規模（1,000項目） | $400 | ¥60,000 |
+| 大規模（10,000項目） | $3,990 | ¥598,500 |
+
+> ※ YomiToku-Pro(SageMaker)の固定費を含まない。含む場合は+$529/月
 
 ## 3. AWS参考リンク
 
 - [Lambda 価格](https://aws.amazon.com/lambda/pricing/)
 - [Amazon Bedrock 価格](https://aws.amazon.com/bedrock/pricing/)
 - [Amazon Textract 価格](https://aws.amazon.com/textract/pricing/)
+- [SageMaker 価格](https://aws.amazon.com/sagemaker/pricing/)
 - [S3 価格](https://aws.amazon.com/s3/pricing/)
 - [DynamoDB 価格](https://aws.amazon.com/dynamodb/pricing/)
 
@@ -667,21 +613,23 @@ MAX_JUDGMENT_REVISIONS=1
 | 機能 | Azure | GCP | AWS |
 |-----|-------|-----|-----|
 | サーバーレス関数 | Azure Functions | Cloud Functions | Lambda |
-| LLM | Azure OpenAI (GPT-4o) | Vertex AI (Gemini) | Bedrock (Claude) |
-| OCR | Document Intelligence | Document AI | Textract |
+| LLM | AI Foundry (GPT-5.2) | Vertex AI (Gemini 3 Pro) | Bedrock (Claude Opus 4.6) |
+| OCR | Document Intelligence | Document AI | Textract + YomiToku + Tesseract |
 | ジョブストレージ | Table Storage | Firestore | DynamoDB |
 | ジョブキュー | Queue Storage | Cloud Tasks | SQS |
+| OCR言語対応 | 全言語一元 | 全言語一元 | 3プロバイダー分割 |
 
 ## 2. コスト比較（中規模：月1,000項目）
 
 | 項目 | Azure | GCP | AWS |
 |-----|-------|-----|-----|
-| サーバーレス関数 | ¥500 | ¥0（無料枠） | ¥0（無料枠） |
-| LLM | ¥5,500 | ¥4,500 | ¥13,500 |
-| OCR | ¥3,000 | ¥1,500 | ¥3,000 |
+| サーバーレス関数 | ¥0 | ¥0（無料枠） | ¥0（無料枠） |
+| LLM | ¥17,600 | ¥17,700 | ¥41,250 |
+| OCR | ¥12,000 | ¥12,000 | ¥18,000 |
 | ストレージ | ¥500 | ¥300 | ¥300 |
-| **合計** | **¥9,500** | **¥6,300** | **¥16,800** |
+| **合計** | **¥30,100** | **¥30,000** | **¥59,550** |
 
+※ AWS はYomiToku-Pro(SageMaker)の固定費を含まない
 ※ LLMモデル・使用量により大きく変動します
 
 ## 3. 選択ガイド
@@ -689,8 +637,8 @@ MAX_JUDGMENT_REVISIONS=1
 | シナリオ | 推奨プラットフォーム | 理由 |
 |---------|-------------------|------|
 | Microsoft環境統合 | Azure | Azure AD、M365との連携 |
-| コスト重視 | GCP | Geminiの低価格 |
-| Claude利用 | AWS | Bedrock経由でClaude利用可 |
+| コスト重視 | GCP | Gemini 3 Flashの低価格 |
+| 最高精度（LLM + 日本語OCR） | AWS | Claude Opus 4.6 + YomiToku-Pro |
 | 既存インフラ活用 | 既存クラウド | 運用ノウハウ活用 |
 
 ---
@@ -700,28 +648,30 @@ MAX_JUDGMENT_REVISIONS=1
 # Part 5: PoC・本番環境 詳細見積もり（精緻版）
 
 > **為替レート前提:** 1 USD = ¥150（見積もり全体で統一）
-> **バッファ:** 全処理量に20%の余裕を加算済み
+> **バッファ:** 全処理量に30%の余裕を加算済み（余裕を持った見積もり）
+> **実績データ:** 本番運用時のファイル数・サイズを反映（1,328ファイル / 3.2GB）
 
 ---
 
 ## 1. 前提条件
 
-### 1.1 データ量定義
+### 1.1 データ量定義（実績ベース・余裕あり）
 
 | フェーズ | 統制数 | サンプル数/統制 | テスト件数 | 期間 | 備考 |
 |---------|-------|----------------|-----------|------|------|
-| **PoC** | 35 | 100 | 3,500 | 2-3ヶ月 | 初期検証 |
-| **開発・環境構築** | - | - | +1,500 | PoC前1ヶ月 | 環境構築・チューニング・再実行 |
-| **PoC合計** | | | **5,000** | **3-4ヶ月** | バッファ含む |
-| **本番（年間）** | 35 | 300-400 | 10,500-14,000 | **年1回** | PoCの3-4倍 |
-| **本番（バッファ含）** | | | **16,000** | **年間** | 上限14,000 × 約1.15倍 |
+| **PoC基本処理** | 35 | 平均3 | 110 | 2-3ヶ月 | 35統制の初期検証 |
+| **3回スプリント繰り返し** | - | - | 110 × 3回 = 330 | - | 検証・改善サイクル |
+| **開発・環境構築** | - | - | +200-500 | PoC前1ヶ月 | 環境構築・チューニング・再実行 |
+| **PoC実処理合計** | | | **530-830** | | 基本330件 + 開発分 |
+| **PoC合計（バッファ含・予算取り用）** | | | **1,000-1,200** | **2-3ヶ月** | 実処理×1.3-1.5倍の余裕 |
+| **本番（年間・実績）** | 35 | ~38 | **1,328** | **年1回** | **実測値: 1,328ファイル / 3.2GB** |
+| **本番（バッファ含・予算取り用）** | | | **1,800** | **年間** | 1,328 × 約1.35倍（余裕あり） |
 
 > **重要:** 本番テスト件数は**年間**の処理量です（月間ではありません）。
-> 内部統制テストは期末監査等で年1回実施され、繁忙期（2-4ヶ月）に集中処理されます。
+> 内部統制テストは期末監査等で年1回実施され、繁忙期（2-3ヶ月）に集中処理されます。
+> **実績:** 全1,328ファイル（3.2GB）は実際の本番運用データに基づく値です。
 
 ### 1.2 エビデンス（証跡）の特性
-
-内部統制テストのエビデンスは契約書・規程類・画像スキャン等、大量かつ多様なファイルで構成されます。
 
 | エビデンス種別 | 割合 | 平均ページ数 | ファイルサイズ | 特徴 |
 |--------------|------|------------|-------------|------|
@@ -731,239 +681,229 @@ MAX_JUDGMENT_REVISIONS=1
 | システムログ・画面キャプチャ | 15% | 1-3ページ | 0.2-1MB | スクリーンショット |
 | Excel帳票・報告書 | 15% | 1-5ページ | 0.1-2MB | テキスト抽出可能 |
 | その他（議事録等） | 5% | 2-10ページ | 0.5-3MB | 混在形式 |
-| **加重平均** | **100%** | **約8ページ** | **約3MB** | |
+| **加重平均** | **100%** | **約8ページ** | **約2.4MB** | **実測: 3.2GB / 1,328件** |
 
-### 1.3 処理パラメータ（大量エビデンス対応）
+> ※ ページ数は余裕を持って8ページで見積もり（実測サイズから推定6-7ページ）
+
+### 1.3 処理パラメータ（余裕を持った見積もり）
 
 | パラメータ | 値 | 算出根拠 |
 |-----------|-----|---------|
-| 1件あたりOCRページ数 | **8ページ** | エビデンス加重平均（上記） |
-| 1件あたりLLM入力トークン | **12,000** | 基本プロンプト5,500 + OCR抽出テキスト6,500 |
-| 1件あたりLLM出力トークン | **2,500** | 計画+レビュー+タスク実行+判断+判断レビュー |
-| 1件あたりファイルサイズ | **3MB** | エビデンス加重平均 |
+| 1件あたりOCRページ数 | **8ページ** | エビデンス加重平均（余裕あり） |
+| 1件あたりLLM入力トークン | **35,000** | プロンプト+統制情報 15,000 + OCR抽出テキスト 20,000 |
+| 1件あたりLLM出力トークン | **4,000** | 計画+レビュー+タスク実行+判断+判断レビュー（余裕あり） |
+| 1件あたりファイルサイズ | **2.4MB** | **実測: 3.2GB / 1,328件** |
 | セルフリフレクション | 有効 | MAX_REVISIONS=1（品質重視） |
-| バッファ係数 | **×1.2** | 再実行・エラーリトライ・追加テスト考慮 |
+| バッファ係数 | **×1.3** | 再実行・エラーリトライ・追加テスト考慮（余裕あり） |
 
-**LLMトークン内訳（1件あたり）:**
+**LLMトークン内訳（1件あたり・余裕あり）:**
 
 | 処理フェーズ | 入力トークン | 出力トークン | 備考 |
 |-------------|------------|-------------|------|
-| テスト計画作成 | 1,500 | 400 | プロンプト + 統制情報 |
-| 計画レビュー | 2,000 | 300 | 計画 + レビュー基準 |
-| タスク実行（A1-A8） | 5,500 | 800 | OCR抽出テキスト（大量）含む |
-| 最終判断 | 2,000 | 600 | タスク結果 + 評価基準 |
-| 判断レビュー | 1,000 | 400 | 判断結果 + レビュー基準 |
-| **1件合計** | **12,000** | **2,500** | |
+| テスト計画作成 | 2,500 | 700 | プロンプト + 統制情報 |
+| 計画レビュー | 3,500 | 500 | 計画全文 + レビュー基準 |
+| タスク実行（A1-A8） | 23,000 | 1,300 | **OCR全文（8p × 2,500t）+ プロンプト** |
+| 最終判断 | 4,000 | 900 | タスク結果集約 + 評価基準 |
+| 判断レビュー | 2,000 | 600 | 判断結果 + レビュー基準 |
+| **1件合計** | **35,000** | **4,000** | |
 
-### 1.4 処理量サマリー（バッファ20%加算済み）
+### 1.4 処理量サマリー（バッファ30%加算済み）
 
-| 項目 | PoC（5,000件×1.2） | 本番・年間（16,000件×1.2） |
-|-----|-------------------|--------------------------|
-| **合計処理件数** | 6,000件 | 19,200件 |
-| **OCRページ数** | 48,000ページ | 153,600ページ |
-| **LLM入力トークン** | 72M tokens | 230M tokens |
-| **LLM出力トークン** | 15M tokens | 48M tokens |
-| **ファイルストレージ** | 18GB（ピーク） | 48GB（累計）/15GB（ピーク） |
-| **API呼び出し回数** | 30,000回（5回/件） | 96,000回（5回/件） |
+| 項目 | PoC（1,200件） | 本番・年間（1,800件） |
+|-----|--------------|---------------------|
+| **合計処理件数** | 1,200件 | 1,800件 |
+| **OCRページ数** | 9,600ページ | 14,400ページ |
+| **LLM入力トークン** | 42M tokens | 63M tokens |
+| **LLM出力トークン** | 4.8M tokens | 7.2M tokens |
+| **ファイルストレージ** | 3GB（ピーク） | 3.2GB（累計）/3.5GB（ピーク） |
+| **API呼び出し回数** | 6,000回（5回/件） | 9,000回（5回/件） |
 
 ### 1.5 OCR言語別振り分け（AWSのみ該当）
 
-AWSではTextractの日本語対応が限定的なため、言語別にOCRプロバイダーを分割します。
-
-| 言語 | OCRプロバイダー | 割合 | PoC(48Kページ) | 本番(153.6Kページ) |
-|-----|---------------|------|---------------|------------------|
-| 日本語 | YomiToku-Pro (SageMaker) | 70% | 33,600ページ | 107,520ページ |
-| タイ語/オランダ語 | Tesseract (Lambda Docker) | 5% | 2,400ページ | 7,680ページ |
-| 英語/その他 | Amazon Textract | 25% | 12,000ページ | 38,400ページ |
+| 言語 | OCRプロバイダー | 割合 | PoC(9,600p) | 本番(14,400p) |
+|-----|---------------|------|------------|--------------|
+| 日本語 | YomiToku-Pro (SageMaker) | 70% | 6,720ページ | 10,080ページ |
+| タイ語/オランダ語 | Tesseract (Lambda Docker) | 5% | 480ページ | 720ページ |
+| 英語/その他 | Amazon Textract | 25% | 2,400ページ | 3,600ページ |
 
 > **Azure / GCP:** Document Intelligence / Document AI が日本語・英語・タイ語・オランダ語を
 > ネイティブ対応するため、単一OCRサービスで全言語を処理可能です。
 
 ---
 
-## 2. PoC環境見積もり（全期間合計：3-4ヶ月分）
+## 2. PoC環境見積もり（全期間合計：2-3ヶ月分）
 
 ### 2.1 Azure PoC 詳細明細
 
 | # | カテゴリ | リソース名 | プラン/SKU | 設定 | 使用量 | 費用（JPY） |
 |---|---------|-----------|-----------|------|--------|------------|
-| 1 | コンピュート | Azure Functions | **Consumption Plan** | メモリ512MB, タイムアウト230秒 | 30,000回 × 60秒 | ¥0 |
-| 2 | LLM | Azure OpenAI Service | **Standard S0** | GPT-4o, East Japan | 入力72M tokens | ¥27,000 |
-| 3 | LLM | Azure OpenAI Service | Standard S0 | GPT-4o, East Japan | 出力15M tokens | ¥22,500 |
-| 4 | OCR | Document Intelligence | **S0 / Layout** | East Japan, 全言語対応 | 48,000ページ | ¥72,000 |
-| 5 | ストレージ | Blob Storage | **Standard LRS Hot** | エビデンス一時保存 | 18GB + 60,000操作 | ¥500 |
-| 6 | ストレージ | Table Storage | **Standard LRS** | ジョブ状態管理 | 0.5GB + 100,000操作 | ¥200 |
-| 7 | ストレージ | Queue Storage | **Standard LRS** | 非同期ジョブキュー | 0.1GB + 60,000操作 | ¥100 |
-| 8 | 監視 | Application Insights | **Basic** | ログ・トレース・例外 | 4GB/月 × 3ヶ月 | ¥0 |
-| 9 | 監視 | Log Analytics Workspace | **従量課金** | 診断ログ集約, 保持90日 | 3GB/月 × 3ヶ月 | ¥0 |
-| 10 | 監視 | Azure Monitor | **メトリクスアラート** | エラー率/応答時間/API障害 | 3ルール × 3ヶ月 | ¥0 |
+| 1 | コンピュート | Azure Functions | **Consumption Plan** | メモリ512MB, タイムアウト230秒 | 6,000回 × 60秒 | ¥0 |
+| 2 | LLM | Azure AI Foundry | **Standard** | GPT-5.2, East Japan | 入力42M tokens | ¥11,050 |
+| 3 | LLM | Azure AI Foundry | Standard | GPT-5.2, East Japan | 出力4.8M tokens | ¥10,080 |
+| 4 | OCR | Document Intelligence | **S0 / Layout** | East Japan, 全言語対応 | 9,600ページ | ¥14,400 |
+| 5 | ストレージ | Blob Storage | **Standard LRS Hot** | エビデンス一時保存 | 3GB + 12,000操作 | ¥150 |
+| 6 | ストレージ | Table Storage | **Standard LRS** | ジョブ状態管理 | 0.2GB + 15,000操作 | ¥100 |
+| 7 | ストレージ | Queue Storage | **Standard LRS** | 非同期ジョブキュー | 0.05GB + 12,000操作 | ¥50 |
+| 8 | 監視 | Application Insights | **Basic** | ログ・トレース・例外 | 2GB/月 × 2-3ヶ月 | ¥0 |
+| 9 | 監視 | Log Analytics Workspace | **従量課金** | 診断ログ集約, 保持90日 | 1GB/月 × 2-3ヶ月 | ¥0 |
+| 10 | 監視 | Azure Monitor | **メトリクスアラート** | エラー率/応答時間/API障害 | 3ルール × 2-3ヶ月 | ¥0 |
 | 11 | セキュリティ | Key Vault | **Standard** | APIキー・接続文字列保管 | 5シークレット | ¥0 |
 | 12 | 認証 | Entra ID (Azure AD) | **Free** | 基本認証（PoC用） | 5ユーザー | ¥0 |
-| 13 | ネットワーク | VNet統合 | - | PoC時は不要 | - | ¥0 |
 | | | | | | | |
-| | **Azure PoC 合計** | | | | | **¥122,300** |
+| | **Azure PoC 合計** | | | | | **¥35,530** |
 
 ### 2.2 GCP PoC 詳細明細
 
 | # | カテゴリ | リソース名 | プラン | 設定 | 使用量 | USD | JPY(@150) |
 |---|---------|-----------|-------|------|--------|-----|-----------|
-| 1 | コンピュート | Cloud Functions (2nd gen) | **従量課金** | メモリ512MB, タイムアウト540秒 | 30,000回 | $0 | ¥0 |
-| 2 | LLM | Vertex AI | **Gemini 1.5 Pro** | asia-northeast1 | 入力72M tokens | $90 | ¥13,500 |
-| 3 | LLM | Vertex AI | Gemini 1.5 Pro | asia-northeast1 | 出力15M tokens | $75 | ¥11,250 |
-| 4 | OCR | Document AI | **Layout Parser** | 全言語対応 | 48,000ページ | $480 | ¥72,000 |
-| 5 | ストレージ | Cloud Storage | **Standard** | asia-northeast1 | 18GB | $0.47 | ¥71 |
-| 6 | DB | Firestore | **Native mode** | ジョブ管理 | 60,000ドキュメント | $2 | ¥300 |
-| 7 | キュー | Cloud Tasks | **従量課金** | 非同期ジョブ | 30,000タスク | $0 | ¥0 |
-| 8 | 監視 | Cloud Logging | **従量課金** | ログ収集 | 5GB/月 × 3ヶ月 | $0 | ¥0 |
+| 1 | コンピュート | Cloud Functions (2nd gen) | **従量課金** | メモリ512MB, タイムアウト540秒 | 6,000回 | $0 | ¥0 |
+| 2 | LLM | Vertex AI | **Gemini 3 Pro Preview** | global | 入力42M tokens | $84 | ¥12,600 |
+| 3 | LLM | Vertex AI | Gemini 3 Pro Preview | global | 出力4.8M tokens | $57.6 | ¥8,640 |
+| 4 | OCR | Document AI | **Layout Parser** | 全言語対応 | 9,600ページ | $96 | ¥14,400 |
+| 5 | ストレージ | Cloud Storage | **Standard** | asia-northeast1 | 3GB | $0.08 | ¥12 |
+| 6 | DB | Firestore | **Native mode** | ジョブ管理 | 6,000ドキュメント | $2 | ¥300 |
+| 7 | キュー | Cloud Tasks | **従量課金** | 非同期ジョブ | 6,000タスク | $0 | ¥0 |
+| 8 | 監視 | Cloud Logging | **従量課金** | ログ収集 | 2GB/月 × 2-3ヶ月 | $0 | ¥0 |
 | 9 | 監視 | Cloud Monitoring | **従量課金** | メトリクス・アラート | 基本 | $0 | ¥0 |
-| 10 | セキュリティ | Secret Manager | **従量課金** | API キー保管 | 5シークレット | $0.30 | ¥45 |
+| 10 | セキュリティ | Secret Manager | **従量課金** | API キー保管 | 5シークレット | $0.15 | ¥23 |
 | 11 | 認証 | IAM | **標準** | サービスアカウント | 3アカウント | $0 | ¥0 |
 | | | | | | | | |
-| | **GCP PoC 合計** | | | | | **$647** | **¥97,166** |
+| | **GCP PoC 合計** | | | | | **$240** | **¥35,975** |
 
 ### 2.3 AWS PoC 詳細明細
 
 | # | カテゴリ | リソース名 | プラン | 設定 | 使用量 | USD | JPY(@150) |
 |---|---------|-----------|-------|------|--------|-----|-----------|
-| 1 | コンピュート | Lambda | **従量課金** | メモリ512MB, タイムアウト300秒 | 30,000回 | $0 | ¥0 |
-| 2 | API | API Gateway | **REST API** | リージョンエンドポイント | 30,000回 | $0.11 | ¥17 |
-| 3 | LLM | Amazon Bedrock | **Claude 3.5 Sonnet** | ap-northeast-1 | 入力72M tokens | $216 | ¥32,400 |
-| 4 | LLM | Amazon Bedrock | Claude 3.5 Sonnet | ap-northeast-1 | 出力15M tokens | $225 | ¥33,750 |
+| 1 | コンピュート | Lambda | **従量課金** | メモリ512MB, タイムアウト300秒 | 6,000回 | $0 | ¥0 |
+| 2 | API | API Gateway | **REST API** | リージョンエンドポイント | 6,000回 | $0 | ¥0 |
+| 3 | LLM | Amazon Bedrock | **Claude Opus 4.6** | ap-northeast-1 | 入力42M tokens | $210 | ¥31,500 |
+| 4 | LLM | Amazon Bedrock | Claude Opus 4.6 | ap-northeast-1 | 出力4.8M tokens | $120 | ¥18,000 |
 | 5 | OCR(日本語) | SageMaker Endpoint | **ml.g4dn.xlarge** | YomiToku-Pro推論 | 2ヶ月稼働(24h) | $758 | ¥113,700 |
 | 6 | OCR(日本語) | AWS Marketplace | **YomiToku-Pro** | ソフトウェア利用料 | 2ヶ月 | $300 | ¥45,000 |
-| 7 | OCR(タイ/蘭) | Lambda Docker | **Tesseract OCR** | メモリ1GB, jpn+tha+nld+eng | 2,400ページ | $3 | ¥450 |
-| 8 | OCR(英語等) | Amazon Textract | **AnalyzeDocument** | テーブル・フォーム解析 | 12,000ページ | $180 | ¥27,000 |
+| 7 | OCR(タイ/蘭) | Lambda Docker | **Tesseract OCR** | メモリ1GB, jpn+tha+nld+eng | 480ページ | $1 | ¥150 |
+| 8 | OCR(英語等) | Amazon Textract | **AnalyzeDocument** | テーブル・フォーム解析 | 2,400ページ | $36 | ¥5,400 |
 | 9 | コンテナ | ECR | **Standard** | Tesseract Dockerイメージ | 1GB | $0.10 | ¥15 |
-| 10 | ストレージ | S3 | **Standard** | エビデンス一時保存 | 18GB | $0.42 | ¥63 |
-| 11 | DB | DynamoDB | **オンデマンド** | ジョブ状態管理 | 60,000 RWU | $3 | ¥450 |
-| 12 | キュー | SQS | **Standard** | 非同期ジョブ | 30,000メッセージ | $0 | ¥0 |
-| 13 | セキュリティ | Secrets Manager | **Standard** | APIキー保管 | 5シークレット × 3ヶ月 | $6 | ¥900 |
-| 14 | 監視 | CloudWatch | **Standard** | ログ・メトリクス | 5GB/月 × 3ヶ月 | $8 | ¥1,200 |
-| 15 | 監視 | CloudWatch Alarms | **Standard** | エラー率・レイテンシ | 5アラーム × 3ヶ月 | $2 | ¥300 |
+| 10 | ストレージ | S3 | **Standard** | エビデンス一時保存 | 3GB | $0.07 | ¥11 |
+| 11 | DB | DynamoDB | **オンデマンド** | ジョブ状態管理 | 6,000 RWU | $2 | ¥300 |
+| 12 | キュー | SQS | **Standard** | 非同期ジョブ | 6,000メッセージ | $0 | ¥0 |
+| 13 | セキュリティ | Secrets Manager | **Standard** | APIキー保管 | 5シークレット × 2-3ヶ月 | $3 | ¥450 |
+| 14 | 監視 | CloudWatch | **Standard** | ログ・メトリクス | 2GB/月 × 2-3ヶ月 | $5 | ¥750 |
+| 15 | 監視 | CloudWatch Alarms | **Standard** | エラー率・レイテンシ | 5アラーム × 2-3ヶ月 | $2 | ¥300 |
 | 16 | 認証 | IAM | **標準** | ロール・ポリシー | - | $0 | ¥0 |
 | | | | | | | | |
-| | **AWS PoC 合計** | | | | | **$1,701** | **¥255,245** |
+| | **AWS PoC 合計** | | | | | **$1,437** | **¥215,576** |
 
-> **AWS注記:** SageMaker(YomiToku-Pro)のコストが大きな割合を占めます。
+> **AWS注記:** SageMaker(YomiToku-Pro)のコストが約83%を占めます。
 > SageMaker Serverless Inferenceを使用する場合、処理時のみ課金となり
 > OCR日本語コストを約60-70%削減可能です（ただしコールドスタートあり）。
 
 ### 2.4 PoC見積もりサマリー
 
-| プラットフォーム | PoC全期間合計（JPY） | 月平均（3ヶ月換算） | 特徴 |
+| プラットフォーム | PoC全期間合計（JPY） | 月平均（2-3ヶ月換算） | 特徴 |
 |----------------|--------------------|--------------------|------|
-| **Azure** | **¥122,300** | ¥40,767 | OCR一元管理、バランス型 |
-| **GCP** | **¥97,166** | ¥32,389 | 最安、Gemini + Document AI |
-| **AWS** | **¥255,245** | ¥85,082 | 高精度、SageMaker OCR含む |
+| **Azure** | **¥35,530** | ¥11,800-17,800 | OCR一元管理、バランス型 |
+| **GCP** | **¥35,975** | ¥12,000-18,000 | Gemini 3 Pro + Document AI |
+| **AWS** | **¥215,576** | ¥72,000-107,800 | 最高精度、SageMaker OCR含む |
 
 ---
 
-## 3. 本番環境見積もり（年間16,000件）
+## 3. 本番環境見積もり（年間1,328件 → バッファ含1,800件）
 
 ### 3.1 本番処理の時期的特性
 
-| 想定パターン | 繁忙期 | 月間処理件数 | 備考 |
-|-------------|-------|-------------|------|
-| **繁忙期**（4ヶ月） | 1-3月, 9月 | 3,000-4,000件/月 | 期末監査・中間レビュー |
-| **通常期**（4ヶ月） | 4-5月, 10-11月 | 500-1,000件/月 | 追加テスト・再テスト |
-| **閑散期**（4ヶ月） | 6-8月, 12月 | 0-200件/月 | メンテナンスのみ |
-| **年間合計** | | **16,000件** | バッファ含む |
+| 想定パターン | 月数 | 月間処理件数 | 小計 | 備考 |
+|-------------|------|-------------|------|------|
+| **繁忙期** | 2ヶ月（2-3月） | 400-500件/月 | ~900件 | 期末監査集中処理 |
+| **通常期** | 4ヶ月（4-5月, 10-12月） | 50-100件/月 | ~320件 | 追加テスト・再テスト |
+| **閑散期** | 6ヶ月（6-9月, 1月） | 0-20件/月 | ~108件 | メンテナンスのみ |
+| **年間合計** | 12ヶ月 | | **1,328件** | **実績データ** |
 
-> リソースプランは**繁忙期のピーク負荷**に耐えられる構成とします。
+> 1,328件/年のデータ量では、Consumption Plan（従量課金）で十分対応可能です。
 
 ### 3.2 Azure 本番 年間詳細明細
 
 | # | カテゴリ | リソース名 | プラン/SKU | 設定詳細 | 年間使用量 | 年額（JPY） |
 |---|---------|-----------|-----------|---------|-----------|------------|
 | | **--- コンピュート ---** | | | | | |
-| 1 | コンピュート | Azure Functions | **Premium EP1** | 1vCPU/3.5GB, 常時1インスタンス, East Japan | 12ヶ月 | ¥276,000 |
-| | | | | ※繁忙期バースト: 最大3インスタンス | | (含む) |
+| 1 | コンピュート | Azure Functions | **Consumption Plan** | 512MB, 230秒, East Japan | 9,000回/年 | ¥0 |
 | | **--- AI/LLM ---** | | | | | |
-| 2 | LLM(入力) | Azure OpenAI Service | **Standard S0** | GPT-4o (2024-11-20), East Japan | 230M tokens | ¥86,250 |
-| 3 | LLM(出力) | Azure OpenAI Service | Standard S0 | GPT-4o (2024-11-20), East Japan | 48M tokens | ¥72,000 |
-| 4 | LLM(PTU予約) | Azure OpenAI Service | ※オプション | Provisioned Throughput Unit | - | (後述) |
+| 2 | LLM(入力) | Azure AI Foundry | **Standard** | GPT-5.2, East Japan | 63M tokens | ¥16,570 |
+| 3 | LLM(出力) | Azure AI Foundry | Standard | GPT-5.2, East Japan | 7.2M tokens | ¥15,120 |
 | | **--- OCR ---** | | | | | |
-| 5 | OCR | Document Intelligence | **S0 / Layout** | 全言語ネイティブ対応(日/英/タイ/蘭) | 153,600ページ | ¥230,400 |
+| 4 | OCR | Document Intelligence | **S0 / Layout** | 全言語ネイティブ対応(日/英/タイ/蘭) | 14,400ページ | ¥21,600 |
 | | **--- ストレージ ---** | | | | | |
-| 6 | Blob Storage | Storage Account | **Standard LRS Hot** | エビデンス一時保存, 30日自動削除 | 15GB(ピーク) + 200K操作 | ¥3,600 |
-| 7 | Table Storage | Storage Account | **Standard LRS** | ジョブ状態・評価結果保持 | 2GB + 400K操作 | ¥2,400 |
-| 8 | Queue Storage | Storage Account | **Standard LRS** | 非同期ジョブキュー | 0.5GB + 200K操作 | ¥1,200 |
+| 5 | Blob Storage | Storage Account | **Standard LRS Hot** | エビデンス一時保存, 30日自動削除 | 3.5GB(ピーク) + 18K操作 | ¥700 |
+| 6 | Table Storage | Storage Account | **Standard LRS** | ジョブ状態・評価結果保持 | 0.5GB + 36K操作 | ¥500 |
+| 7 | Queue Storage | Storage Account | **Standard LRS** | 非同期ジョブキュー | 0.1GB + 18K操作 | ¥300 |
 | | **--- 認証・セキュリティ ---** | | | | | |
-| 9 | 認証 | Entra ID (Azure AD) | **P1** | 条件付きアクセス, MFA | 5ユーザー × 12ヶ月 | ¥54,000 |
-| 10 | シークレット | Key Vault | **Standard** | APIキー・接続文字列 | 8シークレット + 50K操作 | ¥1,200 |
+| 8 | 認証 | Entra ID (Azure AD) | **P1** | 条件付きアクセス, MFA | 5ユーザー × 12ヶ月 | ¥54,000 |
+| 9 | シークレット | Key Vault | **Standard** | APIキー・接続文字列 | 8シークレット + 5K操作 | ¥600 |
 | | **--- 監視・ログ ---** | | | | | |
-| 11 | APM | Application Insights | **Basic → Standard** | トレース・例外・依存関係 | 繁忙期5GB/月, 年間25GB | ¥6,720 |
-| 12 | ログ | Log Analytics Workspace | **従量課金** | 診断ログ集約, 保持90日 | 繁忙期8GB/月, 年間30GB | ¥8,400 |
-| 13 | アラート | Azure Monitor | **メトリクス3 + ログ2** | エラー率/応答/API + 日次レポート | 5ルール × 12ヶ月 | ¥1,800 |
-| 14 | 診断設定 | Diagnostic Settings | **-** | Functions/OpenAI/DI → Log Analytics | 3設定 | ¥0 |
-| | **--- ネットワーク ---** | | | | | |
-| 15 | VNet統合 | Virtual Network | **Standard** | Functions Premium VNet統合 | 1 VNet | ¥0 |
-| 16 | NSG | Network Security Group | **Standard** | インバウンド制御 | 1 NSG | ¥0 |
+| 10 | APM | Application Insights | **Basic** | トレース・例外・依存関係 | 年間3GB（無料枠内） | ¥0 |
+| 11 | ログ | Log Analytics Workspace | **従量課金** | 診断ログ集約, 保持90日 | 年間4GB（無料枠内） | ¥0 |
+| 12 | アラート | Azure Monitor | **メトリクス3 + ログ2** | エラー率/応答/API + 日次レポート | 5ルール × 12ヶ月 | ¥1,800 |
+| 13 | 診断設定 | Diagnostic Settings | **-** | Functions/Foundry/DI → Log Analytics | 3設定 | ¥0 |
 | | | | | | | |
-| | **Azure 本番 年間合計** | | | | | **¥743,970** |
+| | **Azure 本番 年間合計** | | | | | **¥111,190** |
 
 ### 3.3 GCP 本番 年間詳細明細
 
 | # | カテゴリ | リソース名 | プラン | 設定詳細 | 年間使用量 | USD | 年額JPY(@150) |
 |---|---------|-----------|-------|---------|-----------|-----|-------------|
 | | **--- コンピュート ---** | | | | | | |
-| 1 | コンピュート | Cloud Functions (2nd gen) | **従量課金** | メモリ1GB, 最小1インスタンス | 96,000回 + 計算時間 | $180 | ¥27,000 |
+| 1 | コンピュート | Cloud Functions (2nd gen) | **従量課金** | メモリ1GB, 最小0インスタンス | 9,000回 + 計算時間 | $18 | ¥2,700 |
 | | **--- AI/LLM ---** | | | | | | |
-| 2 | LLM(入力) | Vertex AI | **Gemini 1.5 Pro** | asia-northeast1 | 230M tokens | $288 | ¥43,200 |
-| 3 | LLM(出力) | Vertex AI | Gemini 1.5 Pro | asia-northeast1 | 48M tokens | $240 | ¥36,000 |
+| 2 | LLM(入力) | Vertex AI | **Gemini 3 Pro Preview** | global | 63M tokens | $126 | ¥18,900 |
+| 3 | LLM(出力) | Vertex AI | Gemini 3 Pro Preview | global | 7.2M tokens | $86.4 | ¥12,960 |
 | | **--- OCR ---** | | | | | | |
-| 4 | OCR | Document AI | **Layout Parser** | 全言語ネイティブ対応 | 153,600ページ | $1,536 | ¥230,400 |
+| 4 | OCR | Document AI | **Layout Parser** | 全言語ネイティブ対応 | 14,400ページ | $144 | ¥21,600 |
 | | **--- ストレージ ---** | | | | | | |
-| 5 | ファイル | Cloud Storage | **Standard** | asia-northeast1, 30日ライフサイクル | 15GB(ピーク) | $36 | ¥5,400 |
-| 6 | DB | Firestore | **Native mode** | ジョブ管理・評価結果 | 200Kドキュメント | $60 | ¥9,000 |
-| 7 | キュー | Cloud Tasks | **従量課金** | 非同期ジョブ | 96,000タスク | $5 | ¥750 |
+| 5 | ファイル | Cloud Storage | **Standard** | asia-northeast1, 30日ライフサイクル | 3.5GB(ピーク) | $5 | ¥750 |
+| 6 | DB | Firestore | **Native mode** | ジョブ管理・評価結果 | 18Kドキュメント | $10 | ¥1,500 |
+| 7 | キュー | Cloud Tasks | **従量課金** | 非同期ジョブ | 9,000タスク | $2 | ¥300 |
 | | **--- 認証・セキュリティ ---** | | | | | | |
 | 8 | 認証 | IAM | **標準** | サービスアカウント | 5アカウント | $0 | ¥0 |
-| 9 | シークレット | Secret Manager | **従量課金** | APIキー保管 | 8シークレット × 12ヶ月 | $12 | ¥1,800 |
+| 9 | シークレット | Secret Manager | **従量課金** | APIキー保管 | 8シークレット × 12ヶ月 | $5 | ¥750 |
 | | **--- 監視・ログ ---** | | | | | | |
-| 10 | ログ | Cloud Logging | **従量課金** | 全サービスログ集約 | 年間30GB (無料枠50GB超過分) | $0 | ¥0 |
-| 11 | 監視 | Cloud Monitoring | **従量課金** | メトリクス・アラート | 年間 | $120 | ¥18,000 |
-| 12 | トレース | Cloud Trace | **従量課金** | リクエストトレース | 年間 | $24 | ¥3,600 |
-| | **--- ネットワーク ---** | | | | | | |
-| 13 | VPC | VPC Network | **Standard** | Serverless VPC Access | 1 VPC | $0 | ¥0 |
+| 10 | ログ | Cloud Logging | **従量課金** | 全サービスログ集約 | 年間4GB（無料枠内） | $0 | ¥0 |
+| 11 | 監視 | Cloud Monitoring | **従量課金** | メトリクス・アラート | 年間 | $15 | ¥2,250 |
+| 12 | トレース | Cloud Trace | **従量課金** | リクエストトレース | 年間 | $3 | ¥450 |
 | | | | | | | | |
-| | **GCP 本番 年間合計** | | | | | **$2,501** | **¥375,150** |
+| | **GCP 本番 年間合計** | | | | | **$414** | **¥62,160** |
 
 ### 3.4 AWS 本番 年間詳細明細
 
 | # | カテゴリ | リソース名 | プラン | 設定詳細 | 年間使用量 | USD | 年額JPY(@150) |
 |---|---------|-----------|-------|---------|-----------|-----|-------------|
 | | **--- コンピュート ---** | | | | | | |
-| 1 | コンピュート | Lambda | **従量課金** | メモリ512MB, タイムアウト300秒 | 96,000回 | $30 | ¥4,500 |
-| 2 | API | API Gateway | **REST API** | リージョンエンドポイント, WAF付き | 96,000回 | $5 | ¥750 |
+| 1 | コンピュート | Lambda | **従量課金** | メモリ512MB, タイムアウト300秒 | 9,000回 | $4 | ¥600 |
+| 2 | API | API Gateway | **REST API** | リージョンエンドポイント, WAF付き | 9,000回 | $1 | ¥150 |
 | | **--- AI/LLM ---** | | | | | | |
-| 3 | LLM(入力) | Amazon Bedrock | **Claude 3.5 Sonnet** | ap-northeast-1 | 230M tokens | $690 | ¥103,500 |
-| 4 | LLM(出力) | Amazon Bedrock | Claude 3.5 Sonnet | ap-northeast-1 | 48M tokens | $720 | ¥108,000 |
+| 3 | LLM(入力) | Amazon Bedrock | **Claude Opus 4.6** | ap-northeast-1 | 63M tokens | $315 | ¥47,250 |
+| 4 | LLM(出力) | Amazon Bedrock | Claude Opus 4.6 | ap-northeast-1 | 7.2M tokens | $180 | ¥27,000 |
 | | **--- OCR（3プロバイダー構成）---** | | | | | | |
-| 5 | OCR(日本語) | SageMaker Endpoint | **ml.g4dn.xlarge** | YomiToku-Pro推論エンドポイント | **4ヶ月稼働**(繁忙期) | $1,516 | ¥227,400 |
-| 6 | OCR(日本語) | AWS Marketplace | **YomiToku-Pro** | ソフトウェアライセンス | 4ヶ月 | $600 | ¥90,000 |
-| 7 | OCR(タイ/蘭) | Lambda Docker | **Tesseract OCR** | 1GB, jpn+tha+nld+eng lang pack | 7,680ページ | $10 | ¥1,500 |
-| 8 | OCR(英語等) | Amazon Textract | **AnalyzeDocument** | テーブル・フォーム解析 | 38,400ページ | $576 | ¥86,400 |
+| 5 | OCR(日本語) | SageMaker Endpoint | **ml.g4dn.xlarge** | YomiToku-Pro推論エンドポイント | **2ヶ月稼働**(繁忙期) | $758 | ¥113,700 |
+| 6 | OCR(日本語) | AWS Marketplace | **YomiToku-Pro** | ソフトウェアライセンス | 2ヶ月 | $300 | ¥45,000 |
+| 7 | OCR(タイ/蘭) | Lambda Docker | **Tesseract OCR** | 1GB, jpn+tha+nld+eng lang pack | 720ページ | $2 | ¥300 |
+| 8 | OCR(英語等) | Amazon Textract | **AnalyzeDocument** | テーブル・フォーム解析 | 3,600ページ | $54 | ¥8,100 |
 | 9 | コンテナ | ECR | **Standard** | Tesseract Dockerイメージ保管 | 1GB × 12ヶ月 | $1 | ¥150 |
 | | **--- ストレージ ---** | | | | | | |
-| 10 | ファイル | S3 | **Standard** | エビデンス一時保存, 30日ライフサイクル | 15GB(ピーク) | $36 | ¥5,400 |
-| 11 | DB | DynamoDB | **オンデマンド** | ジョブ状態・評価結果 | 200K RWU | $30 | ¥4,500 |
-| 12 | キュー | SQS | **Standard** | 非同期ジョブ | 96,000メッセージ | $1 | ¥150 |
+| 10 | ファイル | S3 | **Standard** | エビデンス一時保存, 30日ライフサイクル | 3.5GB(ピーク) | $5 | ¥750 |
+| 11 | DB | DynamoDB | **オンデマンド** | ジョブ状態・評価結果 | 18K RWU | $6 | ¥900 |
+| 12 | キュー | SQS | **Standard** | 非同期ジョブ | 9,000メッセージ | $0 | ¥0 |
 | | **--- 認証・セキュリティ ---** | | | | | | |
 | 13 | シークレット | Secrets Manager | **Standard** | APIキー・接続文字列 | 8シークレット × 12ヶ月 | $38 | ¥5,700 |
 | 14 | 認証 | IAM | **標準** | ロール・ポリシー | - | $0 | ¥0 |
 | | **--- 監視・ログ ---** | | | | | | |
-| 15 | ログ | CloudWatch Logs | **Standard** | 全サービスログ集約 | 年間30GB | $24 | ¥3,600 |
-| 16 | メトリクス | CloudWatch Metrics | **Standard** | カスタムメトリクス含む | 12ヶ月 | $36 | ¥5,400 |
+| 15 | ログ | CloudWatch Logs | **Standard** | 全サービスログ集約 | 年間4GB | $4 | ¥600 |
+| 16 | メトリクス | CloudWatch Metrics | **Standard** | カスタムメトリクス含む | 12ヶ月 | $12 | ¥1,800 |
 | 17 | アラーム | CloudWatch Alarms | **Standard** | エラー率/レイテンシ/コスト | 5アラーム × 12ヶ月 | $6 | ¥900 |
-| 18 | トレース | X-Ray | **従量課金** | リクエストトレース | 年間 | $12 | ¥1,800 |
-| | **--- ネットワーク ---** | | | | | | |
-| 19 | VPC | VPC | **Standard** | Lambda VPC統合 | 1 VPC | $0 | ¥0 |
+| 18 | トレース | X-Ray | **従量課金** | リクエストトレース | 年間 | $4 | ¥600 |
 | | | | | | | | |
-| | **AWS 本番 年間合計** | | | | | **$4,331** | **¥649,750** |
+| | **AWS 本番 年間合計** | | | | | **$1,690** | **¥253,500** |
 
 > **AWS SageMaker最適化オプション:**
-> - SageMaker Serverless Inference使用時: OCR日本語コスト ¥317,400 → 約¥100,000（-68%）
+> - SageMaker Serverless Inference使用時: OCR日本語コスト ¥158,700 → 約¥50,000（-68%）
 > - 閑散期のエンドポイント停止スケジュール設定で更に削減可能
 > - スポットインスタンス（ml.g4dn.xlarge）使用で最大60%削減
 
@@ -971,17 +911,20 @@ AWSではTextractの日本語対応が限定的なため、言語別にOCRプロ
 
 | プラットフォーム | 年間合計（JPY） | うちLLM | うちOCR | うちインフラ | 特徴 |
 |----------------|---------------|--------|--------|------------|------|
-| **Azure** | **¥743,970** | ¥158,250 | ¥230,400 | ¥355,320 | OCR一元管理, Premium Functions |
-| **GCP** | **¥375,150** | ¥79,200 | ¥230,400 | ¥65,550 | 最安LLM, 軽量インフラ |
-| **AWS** | **¥649,750** | ¥211,500 | ¥405,450 | ¥32,800 | 高精度LLM, 多OCR構成 |
+| **Azure** | **¥111,190** | ¥31,690 | ¥21,600 | ¥57,900 | OCR一元管理, Consumption Plan |
+| **GCP** | **¥62,160** | ¥31,860 | ¥21,600 | ¥8,700 | Gemini 3 Pro, 軽量インフラ |
+| **AWS** | **¥253,500** | ¥74,250 | ¥167,250 | ¥12,000 | 最高精度LLM, SageMaker OCR |
 
 **コスト構成比（本番年間）:**
 
 ```
-Azure:  LLM 21% | OCR 31% | インフラ 48%  ← インフラ(Premium EP1)比率高
-GCP:    LLM 21% | OCR 61% | インフラ 18%  ← OCR比率高（LLM安い）
-AWS:    LLM 33% | OCR 62% | インフラ  5%  ← OCR(SageMaker含)が支配的
+Azure:  LLM 28% | OCR 19% | インフラ 52%  ← Entra ID P1(¥54,000)が支配的
+GCP:    LLM 51% | OCR 35% | インフラ 14%  ← LLMがコスト中心
+AWS:    LLM 29% | OCR 66% | インフラ  5%  ← SageMaker OCRが圧倒的
 ```
+
+> **注:** Azure のインフラ比率が高いのは Entra ID P1（¥54,000/年）によるものです。
+> Free プランの場合、Azure 年間合計は **¥57,190** まで低下します。
 
 ---
 
@@ -989,61 +932,79 @@ AWS:    LLM 33% | OCR 62% | インフラ  5%  ← OCR(SageMaker含)が支配的
 
 ### 4.1 初年度（PoC + 本番）
 
-| プラットフォーム | PoC（3-4ヶ月） | 本番（年間） | 初年度合計 |
+| プラットフォーム | PoC（2-3ヶ月） | 本番（年間） | 初年度合計 |
 |----------------|--------------|------------|-----------|
-| **Azure** | ¥122,300 | ¥743,970 | **¥866,270** |
-| **GCP** | ¥97,166 | ¥375,150 | **¥472,316** |
-| **AWS** | ¥255,245 | ¥649,750 | **¥904,995** |
+| **Azure** | ¥35,530 | ¥111,190 | **¥146,720** |
+| **GCP** | ¥35,975 | ¥62,160 | **¥98,135** |
+| **AWS** | ¥215,576 | ¥253,500 | **¥469,076** |
 
 ### 4.2 2年目以降（本番のみ）
 
 | プラットフォーム | 年額（JPY） | 月平均 | テスト1件あたり |
 |----------------|------------|-------|---------------|
-| **Azure** | ¥743,970 | ¥62,000 | ¥46.5 |
-| **GCP** | ¥375,150 | ¥31,300 | ¥23.4 |
-| **AWS** | ¥649,750 | ¥54,100 | ¥40.6 |
+| **Azure** | ¥111,190 | ¥9,300 | ¥62 |
+| **GCP** | ¥62,160 | ¥5,200 | ¥35 |
+| **AWS** | ¥253,500 | ¥21,100 | ¥141 |
 
 ### 4.3 3年間TCO（Total Cost of Ownership）
 
 | プラットフォーム | 初年度 | 2年目 | 3年目 | 3年TCO |
 |----------------|-------|-------|-------|--------|
-| **Azure** | ¥866,270 | ¥743,970 | ¥743,970 | **¥2,354,210** |
-| **GCP** | ¥472,316 | ¥375,150 | ¥375,150 | **¥1,222,616** |
-| **AWS** | ¥904,995 | ¥649,750 | ¥649,750 | **¥2,204,495** |
+| **Azure** | ¥123,390 | ¥97,340 | ¥97,340 | **¥318,070** |
+| **GCP** | ¥72,335 | ¥46,800 | ¥46,800 | **¥165,935** |
+| **AWS** | ¥406,751 | ¥216,375 | ¥216,375 | **¥839,501** |
 
 ---
 
 ## 5. コスト最適化オプション
 
-### 5.1 LLMモデル選択によるコスト影響
+### 5.1 LLMモデル選択によるコスト影響（本番年間）
 
-| モデル | 入力単価(/1M) | 出力単価(/1M) | 本番年間LLMコスト | 精度影響 |
-|-------|-------------|-------------|-----------------|---------|
-| **Azure GPT-4o** | ¥375 | ¥1,500 | ¥158,250 | 高精度（基準） |
-| Azure GPT-4o-mini | ¥22.5 | ¥90 | **¥9,495** (-94%) | やや低下 |
-| Azure GPT-4.5 | ¥1,125 | ¥7,500 | ¥619,125 (+291%) | 最高精度 |
-| **GCP Gemini 1.5 Pro** | ¥188 | ¥750 | ¥79,200 | 高精度 |
-| GCP Gemini 1.5 Flash | ¥5.25 | ¥31.5 | **¥2,720** (-97%) | やや低下 |
-| **AWS Claude 3.5 Sonnet** | ¥450 | ¥2,250 | ¥211,500 | 最高精度 |
-| AWS Claude 3.5 Haiku | ¥120 | ¥750 | ¥63,600 (-70%) | 標準精度 |
+#### Azure（AI Foundry経由）
 
-### 5.2 処理設定によるコスト影響（Azure GPT-4o基準）
+| モデル | 入力単価(/1M) | 出力単価(/1M) | 年間LLMコスト | 精度影響 |
+|-------|-------------|-------------|--------------|---------|
+| **GPT-5.2** | ¥263 | ¥2,100 | **¥17,340**（基準） | 高精度 |
+| GPT-5-mini | ¥37.5 | ¥300 | ¥2,475 (-86%) | 良好 |
+| GPT-5-nano | ¥7.5 | ¥60 | ¥495 (-97%) | やや低下（推論型） |
+
+#### GCP（Vertex AI）
+
+| モデル | 入力単価(/1M) | 出力単価(/1M) | 年間LLMコスト | 精度影響 |
+|-------|-------------|-------------|--------------|---------|
+| **Gemini 3 Pro Preview** | ¥300 | ¥1,800 | **¥16,500**（基準） | 最高精度（Preview） |
+| Gemini 2.5 Pro | ¥188 | ¥1,500 | ¥12,400 (-25%) | 高精度（GA安定版） |
+| **Gemini 3 Flash Preview** | ¥75 | ¥450 | **¥4,125** (-75%) | 良好（低コスト推奨） |
+| Gemini 2.5 Flash | ¥22.5 | ¥90 | ¥990 (-94%) | やや低下 |
+
+#### AWS（Bedrock）
+
+| モデル | 入力単価(/1M) | 出力単価(/1M) | 年間LLMコスト | 精度影響 |
+|-------|-------------|-------------|--------------|---------|
+| **Claude Opus 4.6** | ¥750 | ¥3,750 | **¥37,125**（基準） | 最高精度（1Mトークン対応） |
+| **Claude Sonnet 4.5** | ¥450 | ¥2,250 | **¥22,275** (-40%) | 高精度（バランス推奨） |
+| Claude Haiku 4.5 | ¥150 | ¥750 | ¥7,425 (-80%) | 標準精度 |
+
+### 5.2 処理設定によるコスト影響（Azure GPT-5.2基準）
 
 | 最適化オプション | LLMコスト | OCRコスト | 年間合計 | 精度影響 |
 |----------------|----------|----------|---------|---------|
-| **標準構成（基準）** | ¥158,250 | ¥230,400 | **¥743,970** | 最高 |
-| セルフリフレクション無効化 | ¥94,950 (-40%) | ¥230,400 | ¥681,270 | やや低下 |
-| テキストPDFのOCRスキップ | ¥158,250 | ¥161,280 (-30%) | ¥674,850 | 同等 |
-| GPT-4o-mini + リフレクション無効 | ¥5,697 (-96%) | ¥230,400 | ¥591,417 | 低下 |
-| 全最適化適用 | ¥5,697 | ¥161,280 | ¥522,297 (-30%) | 低下 |
+| **標準構成（基準）** | ¥17,340 | ¥21,600 | **¥97,340** | 最高 |
+| セルフリフレクション無効化 | ¥10,400 (-40%) | ¥21,600 | ¥90,400 | やや低下 |
+| テキストPDFのOCRスキップ | ¥17,340 | ¥15,120 (-30%) | ¥90,860 | 同等 |
+| GPT-5-nano + リフレクション無効 | ¥297 (-98%) | ¥21,600 | ¥80,297 | 低下 |
+| 全最適化適用 | ¥297 | ¥15,120 | ¥73,817 (-24%) | 低下 |
 
-### 5.3 Azure Reserved Capacity / Commitment Tier
+> **注:** 1,328件/年の規模では、LLMコストよりもインフラ固定費（Entra ID P1等）の
+> 影響が大きいため、LLM最適化による総コスト削減効果は限定的です。
 
-| コミットメント | 割引率 | 適用条件 | 推奨 |
-|--------------|--------|---------|------|
-| OpenAI Provisioned (PTU) | 最大30%削減 | 月間安定利用 | 本番繁忙期のみ |
-| Functions Premium 1年予約 | 最大35%削減 | 1年コミット | 本番運用確定後 |
-| Storage Reserved | 最大38%削減 | 100TB以上 | 非該当 |
+### 5.3 低コストモデル使用時のプラットフォーム別見積もり（本番年間）
+
+| 構成 | LLMコスト | OCRコスト | インフラ | 年間合計 |
+|-----|----------|----------|---------|---------|
+| **Azure GPT-5-nano** | ¥495 | ¥21,600 | ¥58,400 | **¥80,495** |
+| **GCP Gemini 3 Flash** | ¥4,125 | ¥21,600 | ¥8,700 | **¥34,425** |
+| **AWS Claude Haiku 4.5** | ¥7,425 | ¥167,250 | ¥12,000 | **¥186,675** |
 
 ---
 
@@ -1054,42 +1015,43 @@ AWS:    LLM 33% | OCR 62% | インフラ  5%  ← OCR(SageMaker含)が支配的
 | 項目 | 推奨 | 備考 |
 |-----|------|------|
 | プラットフォーム | **GCP** | |
-| LLMモデル | Gemini 1.5 Flash | 低コスト、十分な精度 |
+| LLMモデル | Gemini 3 Flash Preview | 低コスト、十分な精度 |
 | OCR | Document AI (Layout Parser) | 全言語ネイティブ対応 |
 | セルフリフレクション | 無効化（MAX_REVISIONS=0） | |
-| **初年度予算** | **約¥300,000** | |
-| **年間運用予算** | **約¥200,000** | |
+| **初年度予算** | **約¥55,000** | |
+| **年間運用予算** | **約¥35,000** | |
 
 ### 6.2 精度最優先の場合
 
 | 項目 | 推奨 | 備考 |
 |-----|------|------|
 | プラットフォーム | **AWS** | |
-| LLMモデル | Claude 3.5 Sonnet / Opus | 最高精度 |
-| OCR | YomiToku-Pro + Textract | 日本語OCR最高品質 |
+| LLMモデル | Claude Opus 4.6 | Anthropic最高性能、1Mトークン対応 |
+| OCR | YomiToku-Pro + Textract + Tesseract | 日本語OCR最高品質 |
 | セルフリフレクション | 有効（MAX_REVISIONS=1） | |
-| **初年度予算** | **約¥900,000** | |
-| **年間運用予算** | **約¥650,000** | |
+| **初年度予算** | **約¥410,000** | |
+| **年間運用予算** | **約¥220,000** | |
 
 ### 6.3 バランス型（推奨）
 
 | 項目 | 推奨 | 備考 |
 |-----|------|------|
-| プラットフォーム | **Azure** | |
-| LLMモデル | GPT-4o → GPT-5.2移行可 | Azure Foundry経由 |
-| OCR | Document Intelligence (Layout) | 全言語一元管理 |
+| プラットフォーム | **Azure** または **GCP** | |
+| LLMモデル | GPT-5.2（Azure）/ Gemini 3 Pro Preview（GCP） | 高精度 |
+| OCR | Document Intelligence / Document AI | 全言語一元管理 |
 | セルフリフレクション | 有効（MAX_REVISIONS=1） | |
-| **初年度予算** | **約¥870,000** | |
-| **年間運用予算** | **約¥750,000** | |
-| **選定理由** | Microsoft環境との親和性、GPT-4o安定性、OCR一元管理 | |
+| **初年度予算（Azure）** | **約¥125,000** | Microsoft環境との親和性 |
+| **年間運用予算（Azure）** | **約¥100,000** | |
+| **初年度予算（GCP）** | **約¥75,000** | コスト効率重視 |
+| **年間運用予算（GCP）** | **約¥47,000** | |
 
 ### 6.4 プラットフォーム選定マトリクス
 
 | 評価軸 | Azure | GCP | AWS |
 |--------|-------|-----|-----|
 | 初年度コスト | B | **A** | C |
-| 年間運用コスト | B | **A** | B |
-| LLM精度 | A | B | **A** |
+| 年間運用コスト | B | **A** | C |
+| LLM精度 | A | A | **S** |
 | OCR品質（日本語） | A | A | **S**（YomiToku） |
 | OCR運用簡易性 | **A** | **A** | C（3プロバイダー） |
 | Microsoft連携 | **S** | C | C |
@@ -1097,6 +1059,162 @@ AWS:    LLM 33% | OCR 62% | インフラ  5%  ← OCR(SageMaker含)が支配的
 | 運用・保守性 | **A** | A | B |
 
 > S=最優秀 A=優秀 B=良好 C=可
+
+---
+
+## 7. 予算取り推奨額（余裕を持たせた金額）
+
+### 7.1 PoC予算（2-3ヶ月）
+
+予算申請では、想定外のコスト増に対応できるよう、**実測値の1.5倍**を推奨します。
+
+| プラットフォーム | 実測見積もり | **予算取り推奨額** | バッファ | 備考 |
+|----------------|------------|------------------|---------|------|
+| **Azure** | ¥35,530 | **¥55,000** | +55% | 環境構築・再実行・追加検証を考慮 |
+| **GCP** | ¥35,975 | **¥55,000** | +53% | 同上 |
+| **AWS** | ¥215,576 | **¥330,000** | +53% | SageMaker固定費含む |
+
+**推奨：** PoC予算は **¥55,000（Azure/GCP）** または **¥330,000（AWS）** で申請
+
+### 7.2 本番環境予算（年間）
+
+本番環境では、以下を考慮した予算を推奨します：
+- 実測データ量の変動（±20%）
+- LLMモデル価格改定リスク
+- 追加テスト・再テストの余裕
+
+| プラットフォーム | 実測見積もり | **予算取り推奨額** | バッファ | 備考 |
+|----------------|------------|------------------|---------|------|
+| **Azure (標準)** | ¥111,190 | **¥150,000** | +35% | Entra ID P1込み |
+| **Azure (Free AD)** | ¥57,190 | **¥80,000** | +40% | Entra ID Free使用時 |
+| **GCP** | ¥62,160 | **¥90,000** | +45% | 最もコスト効率が良い |
+| **AWS** | ¥253,500 | **¥350,000** | +38% | SageMaker固定費除く |
+| **AWS (SageMaker込)** | ¥633,500 | **¥850,000** | +34% | YomiToku-Pro年間固定費込み |
+
+**推奨：** 本番環境予算は **¥90,000（GCP）** または **¥150,000（Azure）** で申請
+
+### 7.3 初年度総額（PoC + 本番）
+
+| プラットフォーム | 実測見積もり | **予算取り推奨額** | 備考 |
+|----------------|------------|------------------|------|
+| **Azure** | ¥146,720 | **¥200,000** | バランス型・推奨 |
+| **GCP** | ¥98,135 | **¥140,000** | 最低コスト |
+| **AWS** | ¥469,076 | **¥650,000** | 最高精度（SageMaker込み） |
+
+### 7.4 3年間TCO予算
+
+| プラットフォーム | 実測見積もり | **予算取り推奨額** | 備考 |
+|----------------|------------|------------------|------|
+| **Azure** | ¥318,070 | **¥450,000** | Microsoft環境統合 |
+| **GCP** | ¥165,935 | **¥250,000** | 最もコスト効率が良い |
+| **AWS** | ¥839,501 | **¥1,200,000** | 日本語OCR最高品質 |
+
+### 7.5 推奨構成別予算（本番年間・予算取り用）
+
+#### パターンA: コスト最優先
+
+| 項目 | 内容 |
+|-----|------|
+| プラットフォーム | GCP |
+| LLMモデル | Gemini 3 Flash Preview |
+| セルフリフレクション | 無効（MAX_REVISIONS=0） |
+| 実測見積もり | ¥34,425 |
+| **予算申請額** | **¥50,000** |
+
+#### パターンB: バランス型（推奨）
+
+| 項目 | Azure | GCP |
+|-----|-------|-----|
+| LLMモデル | GPT-5.2 | Gemini 3 Pro Preview |
+| セルフリフレクション | 有効 | 有効 |
+| 実測見積もり | ¥111,190 | ¥62,160 |
+| **予算申請額** | **¥150,000** | **¥90,000** |
+
+#### パターンC: 精度最優先
+
+| 項目 | 内容 |
+|-----|------|
+| プラットフォーム | AWS |
+| LLMモデル | Claude Opus 4.6 |
+| OCR | YomiToku-Pro（SageMaker） |
+| セルフリフレクション | 有効 |
+| 実測見積もり | ¥253,500（固定費除く） |
+| **予算申請額** | **¥350,000**（固定費除く） or **¥850,000**（固定費込み） |
+
+### 7.6 LLMモデル選択ガイド（最新版）
+
+#### 高精度モデル（本番推奨）
+
+| モデル | プラットフォーム | 1,800件年間コスト | 特徴 | 推奨用途 |
+|-------|----------------|----------------|------|---------|
+| **Claude Opus 4.6** | AWS | ¥74,250 | 1Mトークンコンテキスト、最高精度 | 複雑な監査項目 |
+| **GPT-5.2** | Azure | ¥31,690 | バランス型、高精度 | 標準的な監査 |
+| **Gemini 3 Pro** | GCP | ¥31,860 | Preview版、高精度 | 最新技術試用 |
+
+#### 低コストモデル（PoC/開発推奨）
+
+| モデル | プラットフォーム | 1,800件年間コスト | 削減率 | 推奨用途 |
+|-------|----------------|----------------|--------|---------|
+| **Gemini 2.5 Flash** | GCP | ¥1,980 | -94% | PoC初期検証 |
+| **GPT-5-nano** | Azure | ¥495 | -97% | 開発・テスト |
+| **Claude Haiku 4.5** | AWS | ¥14,850 | -80% | 大量処理 |
+| **Gemini 3 Flash** | GCP | ¥8,250 | -74% | バランス型PoC |
+| **Claude Sonnet 4.5** | AWS | ¥44,550 | -40% | 本番候補 |
+
+#### モデル選択の判断基準
+
+```
+【本番環境】
+┌─ 予算 > ¥100,000/年 ────┐
+│  → Claude Opus 4.6 (AWS)  │  最高精度
+│  → GPT-5.2 (Azure)        │  バランス
+│  → Gemini 3 Pro (GCP)     │  最新技術
+└──────────────────────────┘
+
+┌─ 予算 ¥50,000-100,000/年 ┐
+│  → Gemini 3 Pro (GCP)     │  高精度・低コスト
+│  → Claude Sonnet 4.5(AWS) │  バランス
+│  → GPT-5-mini (Azure)     │  コスト削減
+└──────────────────────────┘
+
+┌─ 予算 < ¥50,000/年 ──────┐
+│  → Gemini 3 Flash (GCP)   │  推奨
+│  → Claude Haiku 4.5 (AWS) │  標準
+│  → GPT-5-nano (Azure)     │  超低コスト
+└──────────────────────────┘
+
+【PoC環境】
+  → Gemini 2.5 Flash (GCP)
+  → Gemini 3 Flash (GCP)
+  → GPT-5-nano (Azure)
+```
+
+### 7.7 予算申請時の注意事項
+
+1. **PoC予算の確保**
+   - PoC期間中は**3回スプリント繰り返し**があるため、基本処理量の約3倍のコストを見込む
+   - 開発・環境構築での試行錯誤を考慮し、**+50%以上**のバッファを推奨
+
+2. **本番予算の変動要因**
+   - 処理件数の変動（±20%）
+   - LLMモデル価格改定（年1-2回）
+   - OCRページ数の変動（文書種類による）
+
+3. **コスト削減の余地**
+   - セルフリフレクション無効化で **約30%削減**
+   - 低コストモデル利用で **最大97%削減**
+   - テキストPDF OCRスキップで **OCRコスト30%削減**
+
+4. **推奨予算構成**
+   ```
+   初年度:
+     PoC (2-3ヶ月):    ¥55,000  (GCP/Azure)
+     本番 (年間):      ¥90,000  (GCP) / ¥150,000 (Azure)
+     ────────────────────────────
+     合計:           ¥145,000 / ¥205,000
+
+   2年目以降 (年間):  ¥90,000 / ¥150,000
+   ```
 
 ---
 
@@ -1108,3 +1226,6 @@ AWS:    LLM 33% | OCR 62% | インフラ  5%  ← OCR(SageMaker含)が支配的
 | 1.1 | 2025年1月 | 監視・ログリソース追加、規模別見積もり更新 |
 | 2.0 | 2025年1月 | マルチクラウド対応（GCP、AWS追加）、プラットフォーム比較追加 |
 | 3.0 | 2026年2月 | Part 5全面改訂: 本番=年間件数に修正、大量エビデンス対応(8ページ/件)、リソース網羅的明細化、3年TCO追加 |
+| 4.0 | 2026年2月 | LLMモデル最新化(GPT-5.2/Gemini 2.5/Claude Sonnet 4.5)、実績データ反映(1,328件/3.2GB)、全コスト再計算 |
+| 5.0 | 2026年2月 | Gemini 3 Pro/Flash・Claude Opus 4.6に更新、バッファ×1.3に拡大、低コストモデル比較追加、AWS OCR(YomiToku/Tesseract)詳細化 |
+| 6.0 | 2026年2月 | **PoC処理量を精緻化**（3回スプリント繰り返し明記）、**Part 7: 予算取り推奨額を追加**（余裕を持たせた金額）、最新LLMモデル詳細比較（Gemini 3/Claude Sonnet 4.5/Opus 4.6）、モデル選択ガイド追加 |

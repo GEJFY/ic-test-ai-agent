@@ -91,10 +91,10 @@
 
     | プロバイダー | 環境変数値 | 説明 | 推奨用途 |
     |-------------|-----------|------|---------|
-    | **Azure AI Foundry** | `AZURE_FOUNDRY` | Microsoft統合AIプラットフォーム | **推奨** - GPT-4o利用 |
-    | Azure OpenAI | `AZURE` | Azure OpenAI Service | GPT-4/GPT-3.5利用 |
-    | GCP Vertex AI | `GCP` | Google Cloud Gemini | Gemini Pro利用 |
-    | AWS Bedrock | `AWS` | Amazon Bedrock | Claude/Titan利用 |
+    | **Azure AI Foundry** | `AZURE_FOUNDRY` | Microsoft統合AIプラットフォーム | **推奨** - GPT-5.2 / GPT-5-nano利用 |
+    | Azure OpenAI | `AZURE` | Azure OpenAI Service | GPT-4o利用（レガシー） |
+    | GCP Vertex AI | `GCP` | Google Cloud Gemini | Gemini 2.5 Pro / 3 Pro利用 |
+    | AWS Bedrock | `AWS` | Amazon Bedrock | Claude Sonnet 4.5 / Opus 4.6利用 |
 
     #### なぜマルチクラウド対応なのか？
 
@@ -1808,25 +1808,36 @@
     │                                                                  │
     │  【Pythonバックエンド】                                          │
     │  ┌──────────────────────────────────────────────────────────┐   │
-    │  │  pytest フレームワーク                                     │   │
-    │  │  ├── ユニットテスト（@pytest.mark.unit）                   │   │
-    │  │  │   └── 137件 - 外部依存なし、高速実行                   │   │
-    │  │  └── 統合テスト（@pytest.mark.integration）               │   │
-    │  │       └── 10件 - Azure接続必要、CI/CD環境で実行           │   │
+    │  │  pytest フレームワーク（カバレッジ: 62%）                   │   │
+    │  │  ├── ユニットテスト（約500件 - 外部依存なし、高速実行）    │   │
+    │  │  ├── E2Eテスト（26件 - ハンドラー全体フロー）             │   │
+    │  │  └── 統合テスト（約10件 - Azure/クラウド接続が必要）      │   │
     │  └──────────────────────────────────────────────────────────┘   │
     │                                                                  │
-    │  【PowerShell】                                                  │
+    │  【品質ゲート】                                                  │
     │  ┌──────────────────────────────────────────────────────────┐   │
-    │  │  手動E2Eテスト                                            │   │
-    │  │  └── scripts/test-azure-ad-auth.ps1                       │   │
-    │  │      └── Azure AD認証フローの動作確認                     │   │
+    │  │  pre-commit hooks（コミット前自動チェック）                  │   │
+    │  │  ├── flake8 (構文エラー検出)                                │   │
+    │  │  ├── bandit (セキュリティスキャン)                          │   │
+    │  │  ├── detect-secrets (シークレット検出)                      │   │
+    │  │  └── trailing-whitespace, check-yaml, check-json 等         │   │
     │  └──────────────────────────────────────────────────────────┘   │
     │                                                                  │
-    │  【VBA（Excel）】                                                │
+    │  【CI/CD (GitHub Actions)】                                      │
+    │  ┌──────────────────────────────────────────────────────────┐   │
+    │  │  ├── flake8 リンティング                                   │   │
+    │  │  ├── bandit セキュリティスキャン                            │   │
+    │  │  ├── pytest + coverage (閾値: 40%)                         │   │
+    │  │  ├── Codecov カバレッジレポート                             │   │
+    │  │  ├── Docker ビルド + ヘルスチェック                         │   │
+    │  │  └── Dependabot (依存パッケージ自動更新)                   │   │
+    │  └──────────────────────────────────────────────────────────┘   │
+    │                                                                  │
+    │  【PowerShell / VBA】                                            │
     │  ┌──────────────────────────────────────────────────────────┐   │
     │  │  手動テスト                                                │   │
-    │  │  └── Excel上での統合動作確認                              │   │
-    │  │      └── SampleDataフォルダを使用                         │   │
+    │  │  ├── scripts/test-azure-ad-auth.ps1 (Azure AD認証)        │   │
+    │  │  └── Excel上での統合動作確認 (SampleData使用)              │   │
     │  └──────────────────────────────────────────────────────────┘   │
     │                                                                  │
     └─────────────────────────────────────────────────────────────────┘
@@ -1838,51 +1849,78 @@
 
     ```powershell
     # 仮想環境を有効化
-    cd platforms\azure
     .\.venv\Scripts\Activate.ps1
 
     # テスト依存パッケージをインストール
-    pip install pytest pytest-asyncio pytest-cov
+    pip install -r requirements.txt -r requirements-dev.txt
     ```
 
     #### 11.2.2 テスト実行コマンド
 
     | コマンド | 説明 |
     | -------- | ---- |
-    | `python -m pytest tests/ -v` | 全テスト実行（156件） |
+    | `python -m pytest tests/ -v` | 全テスト実行（530+件） |
     | `python -m pytest tests/ -v -m "unit"` | ユニットテストのみ |
-    | `python -m pytest tests/ -v -m "integration"` | 統合テストのみ（Azure接続必要） |
-    | `python -m pytest tests/ -v -m "integration and azure"` | Azure統合テストのみ |
-    | `python -m pytest tests/ -v --cov=src` | カバレッジ付き実行 |
+    | `python -m pytest tests/ -v -m "integration"` | 統合テストのみ（クラウド接続必要） |
+    | `python -m pytest tests/ -v --cov=src --cov-report=term-missing` | カバレッジ付き実行 |
     | `python -m pytest tests/ -v -m "not integration"` | 統合テスト除外（CI用） |
+    | `python -m pytest tests/test_e2e.py -v` | E2Eテストのみ |
 
     #### 11.2.3 テストファイル構成
 
     ```text
     tests/
-    ├── __init__.py              # パッケージマーカー
-    ├── conftest.py              # 共通フィクスチャ（.env自動読み込み）
-    ├── test_base_task.py        # 基底クラス・データ構造テスト（21件）
-    ├── test_document_processor.py # ドキュメント処理テスト（21件）
-    ├── test_handlers.py         # ハンドラーテスト（17件）
-    ├── test_llm_factory.py      # LLMファクトリーテスト（14件）
-    ├── test_job_storage.py      # ジョブストレージテスト（39件）※Azure統合テスト含む
-    └── test_tasks.py            # A1-A8タスクテスト（20件）
+    ├── conftest.py                 # 共通フィクスチャ（.env自動読み込み）
+    │
+    │  # --- コアモジュール UT ---
+    ├── test_base_task.py           # 基底クラス・データ構造テスト
+    ├── test_tasks.py               # A1-A8タスク属性・基本動作
+    ├── test_tasks_execute.py       # A1-A8タスク execute() ロジック
+    ├── test_document_processor.py  # ドキュメント処理
+    ├── test_handlers.py            # ハンドラー UT
+    ├── test_graph_orchestrator.py  # GraphOrchestrator UT（76件）
+    ├── test_async_handlers.py      # 非同期ハンドラー UT（38件）
+    ├── test_prompts.py             # プロンプト管理 UT
+    │
+    │  # --- インフラストラクチャ UT ---
+    ├── test_llm_factory.py         # LLMファクトリー
+    ├── test_ocr_factory.py         # OCRファクトリー
+    ├── test_job_storage.py         # ジョブストレージ（Memory/Azure）
+    ├── test_job_storage_aws_gcp.py # ジョブストレージ（AWS/GCP）
+    │
+    │  # --- プラットフォーム UT ---
+    ├── test_platform_azure.py      # Azure Functions エントリポイント
+    ├── test_platform_aws.py        # AWS Lambda エントリポイント
+    ├── test_platform_gcp.py        # GCP Cloud Functions エントリポイント
+    ├── test_local_platform.py      # ローカルサーバー
+    │
+    │  # --- E2E / 統合テスト ---
+    ├── test_e2e.py                 # E2Eテスト（ハンドラー全体フロー）
+    ├── test_integration_local.py   # ローカル統合テスト
+    ├── test_integration_cloud.py   # クラウド統合テスト
+    └── test_integration_models.py  # LLMモデル統合テスト
     ```
 
-    **合計: 156件**（うち統合テスト2件はAzure接続が必要）
+    **合計: 530+件**（うち統合テストはクラウド接続が必要）
+    **コードカバレッジ: 62%**
 
     ### 11.3 テスト対象モジュール
 
-    | モジュール | テストファイル | テスト件数 | カバー内容 |
-    | ---------- | -------------- | ---------- | ---------- |
-    | `core/tasks/base_task.py` | test_base_task.py | 21 | TaskType, TaskResult, EvidenceFile, AuditContext, BaseAuditTask |
-    | `core/document_processor.py` | test_document_processor.py | 21 | TextElement, ExtractedContent, テキスト/PDF/Excel抽出 |
-    | `core/handlers.py` | test_handlers.py | 17 | EvaluationError, evaluate_single_item, mock_evaluate |
-    | `infrastructure/llm_factory.py` | test_llm_factory.py | 14 | LLMProvider, LLMConfigError, LLMFactory |
-    | `infrastructure/job_storage/` | test_job_storage.py | 39 | InMemoryJobStorage, InMemoryJobQueue, EvidenceBlobStorage, AzureQueueJobQueue, Azure統合テスト |
-    | `core/tasks/a1-a8` | test_tasks.py | 20 | 各タスククラスのインポート・属性・基本動作 |
-    | **合計** | - | **156** | - |
+    | モジュール | テストファイル | カバー内容 |
+    | ---------- | -------------- | ---------- |
+    | `core/tasks/base_task.py` | test_base_task.py | TaskType, TaskResult, EvidenceFile, AuditContext |
+    | `core/tasks/a1-a8` | test_tasks.py, test_tasks_execute.py | 属性・基本動作 + execute()ロジック |
+    | `core/document_processor.py` | test_document_processor.py | テキスト/PDF/Excel抽出 |
+    | `core/handlers.py` | test_handlers.py, test_e2e.py | ハンドラーUT + E2Eフロー |
+    | `core/graph_orchestrator.py` | test_graph_orchestrator.py | データクラス, 条件分岐, ノード, 後処理 |
+    | `core/async_handlers.py` | test_async_handlers.py | submit/status/results/cancel, シングルトン |
+    | `core/prompts.py` | test_prompts.py | PromptManager, フィードバック注入 |
+    | `infrastructure/llm_factory.py` | test_llm_factory.py | LLMProvider, LLMFactory |
+    | `infrastructure/ocr_factory.py` | test_ocr_factory.py | OCRProvider, OCRFactory |
+    | `infrastructure/job_storage/` | test_job_storage.py, test_job_storage_aws_gcp.py | Memory/Azure/AWS/GCPストレージ・キュー |
+    | `platforms/azure/` | test_platform_azure.py | Azure Functions エントリポイント |
+    | `platforms/aws/` | test_platform_aws.py | Lambda ヘルパー・ルーティング・エンドポイント |
+    | `platforms/gcp/` | test_platform_gcp.py | Cloud Functions エントリポイント |
 
     ### 11.4 テストマーカー
 
@@ -1891,16 +1929,27 @@
     ```ini
     [pytest]
     markers =
-        unit: ユニットテスト（高速、外部依存なし）
-        integration: 統合テスト（Azure接続が必要）
-        azure: Azureサービス依存テスト
+        unit: Unit tests (fast, no external dependencies)
+        integration: Integration tests (may require external services)
+        slow: Slow tests (skip with -m "not slow")
+        azure: Tests requiring Azure services
+        aws: Tests requiring AWS services
+        gcp: Tests requiring GCP services
+        local: Tests for local/on-premise environment (Ollama, Tesseract)
+        llm: Tests requiring LLM API
+        ocr: Tests requiring OCR services
     ```
 
     | マーカー | 説明 | 実行タイミング |
     | -------- | ---- | -------------- |
     | `@pytest.mark.unit` | 外部依存なしの高速テスト | 開発中常時 |
-    | `@pytest.mark.integration` | Azure接続が必要なテスト | CI/CD、デプロイ前 |
+    | `@pytest.mark.integration` | クラウド接続が必要なテスト | CI/CD、デプロイ前 |
     | `@pytest.mark.azure` | Azureサービス固有テスト | Azure環境でのみ |
+    | `@pytest.mark.aws` | AWSサービス固有テスト | AWS環境でのみ |
+    | `@pytest.mark.gcp` | GCPサービス固有テスト | GCP環境でのみ |
+    | `@pytest.mark.llm` | LLM API接続が必要なテスト | API Key設定時 |
+    | `@pytest.mark.ocr` | OCRサービスが必要なテスト | OCR設定時 |
+    | `@pytest.mark.slow` | 実行が遅いテスト | `-m "not slow"` で除外可 |
     | `@pytest.mark.asyncio` | 非同期テスト | pytest-asyncioが自動検出 |
 
     ### 11.5 Azure統合テスト
@@ -1991,37 +2040,69 @@
        - `ProcessWithApi()` をローカルAPIで実行
        - 評価結果がExcelに正しく書き込まれることを確認
 
-    ### 11.8 CI/CD統合
+    ### 11.9 CI/CD パイプライン
 
-    GitHub Actions等でのCI/CD統合例:
+    `.github/workflows/ci.yml` で以下のパイプラインが実行されます:
 
-    ```yaml
-    # .github/workflows/test.yml
-    name: Python Tests
-    on: [push, pull_request]
-    jobs:
-      test:
-        runs-on: ubuntu-latest
-        steps:
-          - uses: actions/checkout@v4
-          - name: Set up Python
-            uses: actions/setup-python@v5
-            with:
-              python-version: '3.11'
-          - name: Install dependencies
-            run: |
-              pip install -r requirements.txt
-              pip install pytest pytest-asyncio pytest-cov
-          - name: Run unit tests
-            run: python -m pytest tests/ -v -m "not integration"
-          - name: Run integration tests
-            if: github.ref == 'refs/heads/main'
-            env:
-              LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
-              AZURE_FOUNDRY_ENDPOINT: ${{ secrets.AZURE_FOUNDRY_ENDPOINT }}
-              AZURE_FOUNDRY_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
-            run: python -m pytest tests/ -v -m "integration"
+    ```text
+    ┌──────────────────────────────────────────────────────────┐
+    │  CI Pipeline (main/develop ブランチ push & PR)            │
+    ├──────────────────────────────────────────────────────────┤
+    │                                                            │
+    │  [Test Job]                                                │
+    │  ├── Python 3.11 セットアップ                              │
+    │  ├── pip install (requirements.txt + requirements-dev.txt) │
+    │  ├── flake8 リンティング (E9,F63,F7,F82)                  │
+    │  ├── bandit セキュリティスキャン (--severity-level=high)   │
+    │  ├── pytest + coverage (閾値: 40%, Codecovアップロード)    │
+    │  └── bandit-report.json アーティファクト保存               │
+    │                                                            │
+    │  [Docker Build Job] (Test成功後)                           │
+    │  ├── Docker Buildx ビルド                                  │
+    │  └── コンテナ起動 + /health ヘルスチェック                 │
+    │                                                            │
+    │  [Docker Push Job] (mainブランチpushのみ)                  │
+    │  ├── Azure Container Registry                              │
+    │  ├── GCP Artifact Registry                                 │
+    │  └── AWS ECR                                               │
+    │                                                            │
+    └──────────────────────────────────────────────────────────┘
     ```
+
+    ### 11.10 pre-commit hooks
+
+    `.pre-commit-config.yaml` で、コミット前に以下のチェックが自動実行されます:
+
+    | フック | 説明 |
+    | ------ | ---- |
+    | trailing-whitespace | 末尾空白の除去 |
+    | end-of-file-fixer | ファイル末尾改行の統一 |
+    | check-yaml / check-json | YAML/JSON構文チェック |
+    | check-merge-conflict | マージコンフリクトマーカー検出 |
+    | check-added-large-files | 500KB超ファイルの検出 |
+    | debug-statements | デバッグ文 (pdb等) の検出 |
+    | flake8 | Python構文エラー検出 (src/のみ) |
+    | bandit | セキュリティ脆弱性検出 (src/のみ) |
+    | detect-secrets | シークレット（APIキー等）の検出 |
+
+    ```powershell
+    # インストール
+    pip install pre-commit
+    pre-commit install
+
+    # 手動実行
+    pre-commit run --all-files
+    ```
+
+    ### 11.11 Dependabot
+
+    `.github/dependabot.yml` で以下の依存パッケージが週次で自動更新されます:
+
+    | エコシステム | 対象 | 更新頻度 |
+    | ------------ | ---- | -------- |
+    | pip | Python パッケージ (requirements.txt) | 毎週月曜 |
+    | github-actions | GitHub Actions バージョン | 毎週月曜 |
+    | docker | Docker ベースイメージ | 毎月 |
 
     ---
 
@@ -2967,6 +3048,7 @@
 
     | 日付 | バージョン | 変更内容 |
     | ---- | ---------- | -------- |
+    | 2026-02-09 | 1.3.0 | テストスイート大幅拡充（156件→530+件、カバレッジ62%）、E2Eテスト追加、pre-commit hooks導入（flake8/bandit/detect-secrets）、CI/CDにbanditセキュリティスキャン・Codecovカバレッジ追加、Dependabot設定追加、テストドキュメント全面更新 |
     | 2026-02-08 | 1.2.0 | クラウドリソース詳細ドキュメント追加（セクション12）、マルチクラウドアーキテクチャ図解、各プロバイダー（Azure/AWS/GCP）のリソース詳細解説、最新モデル情報更新（Gemini 3 global設定、AWS Inference Profile ID、GPT-5 Nano等）、初心者向け学習コンテンツ追加 |
     | 2026-01-30 | 1.1.2 | pytestベースのユニットテスト・統合テストスイート追加（156件）、Azure Blob/Queue統合テスト追加、テストドキュメント整備 |
     | 2026-01-30 | 1.1.1 | Azure Table Storage 64KB制限対策を強化（全証跡ファイルをBlob Storageに保存） |

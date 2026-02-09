@@ -23,8 +23,15 @@ pytest-cov>=4.0.0                     # カバレッジレポート
 # ==============================================================================
 
 # Linting & Formatting
+flake8>=7.0.0                         # Python リンター
 # ruff>=0.1.0                         # 高速リンター（オプション）
 # black>=23.0.0                       # コードフォーマッター（オプション）
+
+# Pre-commit hooks
+pre-commit>=3.0.0                     # Git pre-commit フック
+
+# Security
+bandit[toml]>=1.7.0                   # セキュリティスキャン
 
 # Type Checking
 # mypy>=1.0.0                         # 静的型チェック（オプション）
