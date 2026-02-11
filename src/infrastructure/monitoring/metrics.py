@@ -61,16 +61,16 @@ class MetricsCollector:
     監視サービスへの送信は派生クラスで実装します。
     """
 
-    _instance = None
+    _instances = {}
     _lock = Lock()
 
     def __new__(cls):
-        """シングルトンパターン"""
+        """シングルトンパターン（クラスごと）"""
         with cls._lock:
-            if cls._instance is None:
-                cls._instance = super().__new__(cls)
-                cls._instance._initialized = False
-            return cls._instance
+            if cls not in cls._instances:
+                cls._instances[cls] = super().__new__(cls)
+                cls._instances[cls]._initialized = False
+            return cls._instances[cls]
 
     def __init__(self):
         if self._initialized:
@@ -78,7 +78,7 @@ class MetricsCollector:
 
         self.metrics: List[MetricEntry] = []
         self._initialized = True
-        logger.info("MetricsCollector initialized")
+        logger.info(f"{self.__class__.__name__} initialized")
 
     def record_metric(
         self,
