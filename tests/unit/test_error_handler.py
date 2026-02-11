@@ -11,12 +11,12 @@ from datetime import datetime
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from core.error_handler import (
+from core.error_handler import (  # noqa: E402
     ErrorResponse,
     handle_exception,
     create_error_response
 )
-from core.correlation import set_correlation_id
+from core.correlation import set_correlation_id  # noqa: E402
 
 
 class TestErrorResponse:

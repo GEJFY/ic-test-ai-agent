@@ -91,7 +91,6 @@ audit_logger = AuditLogger(logger)
 
 try:
     from core.correlation import get_correlation_id, get_correlation_id_for_logging
-    from core.error_handler import handle_exception, create_error_response as create_error_handler_response
     _use_new_error_handler = True
 except ImportError:
     # フォールバック：新しいモジュールが利用できない場合
@@ -208,7 +207,7 @@ def get_llm_instances() -> Tuple[Any, Any]:
 
     try:
         # LLMファクトリーをインポート
-        from infrastructure.llm_factory import LLMFactory, LLMConfigError
+        from infrastructure.llm_factory import LLMFactory
 
         # 設定状態を確認
         status = LLMFactory.get_config_status()

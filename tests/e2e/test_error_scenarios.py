@@ -302,8 +302,8 @@ def test_error_correlation_id_preserved_in_error(
 
     # 相関IDがエラーレスポンスにも含まれる
     has_correlation_id = (
-        "X-Correlation-ID" in response.headers or
-        "x-correlation-id" in response.headers
+        "X-Correlation-ID" in response.headers
+        or "x-correlation-id" in response.headers
     )
 
     if not has_correlation_id:
@@ -331,7 +331,7 @@ def test_error_timeout_handling(
 
     # 非常に短いタイムアウトを設定
     try:
-        response = requests.post(
+        _ = requests.post(
             f"{platform_config['endpoint']}/evaluate",
             headers={
                 "X-Correlation-ID": correlation_id,
@@ -393,7 +393,7 @@ def test_error_large_payload_rejection(
         else:
             print(f"⚠ {platform_config['name']}: Large payload accepted (no size limit)")
 
-    except requests.exceptions.RequestException as e:
+    except requests.exceptions.RequestException:
         print(f"✓ {platform_config['name']}: Large payload rejected at network level")
 
 
