@@ -237,16 +237,7 @@ resource "aws_lambda_alias" "live" {
 # ------------------------------------------------------------------------------
 # 出力
 # ------------------------------------------------------------------------------
-
-output "lambda_function_arn" {
-  description = "Lambda関数のARN"
-  value       = aws_lambda_function.ic_test_ai.arn
-}
-
-output "lambda_function_name" {
-  description = "Lambda関数名"
-  value       = aws_lambda_function.ic_test_ai.function_name
-}
+# Note: lambda_function_arn と lambda_function_name は outputs.tf で定義
 
 output "lambda_invoke_arn" {
   description = "Lambda呼び出しARN（API Gateway統合用）"

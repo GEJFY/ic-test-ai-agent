@@ -81,7 +81,7 @@ jobs:
             --runtime=python311 \
             --region=${{ env.GCP_REGION }} \
             --source=./platforms/gcp \
-            --entry-point=evaluate_controls \
+            --entry-point=evaluate \
             --trigger-http \
             --allow-unauthenticated=false \
             --set-env-vars="PLATFORM=gcp" \

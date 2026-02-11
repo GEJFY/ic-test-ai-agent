@@ -72,6 +72,11 @@ output "lambda_console_url" {
   value       = "https://console.aws.amazon.com/lambda/home?region=${var.region}#/functions/${aws_lambda_function.ic_test_ai.function_name}"
 }
 
+output "s3_bucket_name" {
+  description = "Lambdaデプロイメント用S3バケット名"
+  value       = aws_s3_bucket.lambda_deployments.id
+}
+
 # ------------------------------------------------------------------------------
 # Secrets Manager
 # ------------------------------------------------------------------------------

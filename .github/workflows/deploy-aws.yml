@@ -55,18 +55,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.6.0
-
-      - name: Deploy Infrastructure
-        working-directory: ./infrastructure/aws/terraform
-        run: |
-          terraform init
-          terraform plan -out=tfplan
-          terraform apply -auto-approve tfplan
-
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -78,14 +66,33 @@ jobs:
           cp lambda_handler.py package/
           cp -r ../../src package/
           cd package
-          zip -r ../lambda_function.zip .
+          zip -r ../lambda-deployment.zip .
 
-      - name: Deploy Lambda
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+          terraform_wrapper: false
+
+      - name: Create S3 Bucket First
+        working-directory: ./infrastructure/aws/terraform
         run: |
-          aws lambda update-function-code \
-            --function-name ${{ secrets.AWS_LAMBDA_FUNCTION_NAME }} \
-            --zip-file fileb://platforms/aws/lambda_function.zip \
-            --region ${{ env.AWS_REGION }}
+          terraform init
+          terraform apply -auto-approve \
+            -target=aws_s3_bucket.lambda_deployments \
+            -target=aws_s3_bucket_versioning.lambda_deployments \
+            -target=aws_s3_bucket_lifecycle_configuration.lambda_deployments
+
+      - name: Upload Lambda Package to S3
+        run: |
+          BUCKET_NAME=$(cd infrastructure/aws/terraform && terraform output -raw s3_bucket_name 2>/dev/null || echo "ic-test-staging-lambda-deployments")
+          aws s3 cp platforms/aws/lambda-deployment.zip s3://${BUCKET_NAME}/lambda-deployment.zip
+
+      - name: Deploy Infrastructure
+        working-directory: ./infrastructure/aws/terraform
+        run: |
+          terraform plan -out=tfplan
+          terraform apply -auto-approve tfplan
 
   validate:
     runs-on: ubuntu-latest
