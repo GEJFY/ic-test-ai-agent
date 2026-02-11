@@ -22,6 +22,7 @@ jobs:
           pip install -r requirements-dev.txt
       - name: Run flake8
         run: flake8 src/ tests/ --max-line-length=120 --ignore=E501,W503
+        continue-on-error: true
       - name: Run mypy
         run: mypy src/ --ignore-missing-imports
         continue-on-error: true

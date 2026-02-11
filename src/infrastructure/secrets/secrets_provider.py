@@ -5,11 +5,19 @@ Azure Key Vault、AWS Secrets Manager、GCP Secret Managerの共通インター�
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
+from enum import Enum
+from typing import Optional
 import logging
 import os
 
 logger = logging.getLogger(__name__)
+
+
+class Platform(Enum):
+    """プラットフォーム識別子"""
+    AZURE = "azure"
+    AWS = "aws"
+    GCP = "gcp"
 
 
 class SecretProvider(ABC):
@@ -155,7 +163,7 @@ class EnvironmentSecretProvider(SecretProvider):
 
 
 def get_secret_provider(
-    provider_type: Optional[str] = None,
+    provider_type: Optional[str | Platform] = None,
     fallback_to_env: bool = True,
     **kwargs
 ) -> SecretProvider:
@@ -163,7 +171,7 @@ def get_secret_provider(
     プロバイダータイプに応じたSecretProviderインスタンスを取得します。
 
     Args:
-        provider_type: プロバイダータイプ（"azure", "aws", "gcp", "env"）
+        provider_type: プロバイダータイプ（"azure", "aws", "gcp", "env" または Platform enum）
                        Noneの場合は環境変数SECRET_PROVIDERまたはCLOUD_PLATFORMから取得
         fallback_to_env: クラウドプロバイダー接続失敗時に環境変数にフォールバックするか
         **kwargs: プロバイダー固有の初期化パラメータ
@@ -181,6 +189,7 @@ def get_secret_provider(
 
         >>> # 明示的にAzure Key Vaultを指定
         >>> provider = get_secret_provider(provider_type="azure")
+        >>> provider = get_secret_provider(provider_type=Platform.AZURE)
 
         >>> # フォールバックなしで環境変数プロバイダーを使用
         >>> provider = get_secret_provider(provider_type="env", fallback_to_env=False)
@@ -188,6 +197,8 @@ def get_secret_provider(
     # プロバイダータイプの決定
     if provider_type is None:
         provider_type = os.getenv("SECRET_PROVIDER") or os.getenv("CLOUD_PLATFORM", "env")
+    elif isinstance(provider_type, Platform):
+        provider_type = provider_type.value
 
     provider_type = provider_type.lower()
 
