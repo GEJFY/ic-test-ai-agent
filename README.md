@@ -16,12 +16,12 @@
 
 ## 対応クラウドプロバイダー
 
-| プロバイダー | モデル | 環境変数値 |
-|-------------|--------|-----------|
-| Azure AI Foundry | GPT-5.2 / GPT-5-nano | `AZURE_FOUNDRY` |
-| AWS Bedrock | Claude Sonnet 4.5 / Opus 4.6 | `AWS` |
-| GCP Vertex AI | Gemini 2.5 Pro / 3 Pro | `GCP` |
-| Azure OpenAI | GPT-4o (レガシー) | `AZURE` |
+| プロバイダー | LLMモデル | OCRサービス | 環境変数値 |
+|-------------|-----------|------------|-----------|
+| Azure AI Foundry | GPT-4o | Document Intelligence | `AZURE_FOUNDRY` |
+| AWS Bedrock | Claude Sonnet | Textract | `AWS` |
+| GCP Vertex AI | Gemini Pro | Document AI | `GCP` |
+| Azure OpenAI | GPT-4o (レガシー) | Document Intelligence | `AZURE` |
 
 ## クイックスタート
 
@@ -64,9 +64,11 @@ curl http://localhost:8000/api/health
 
 各プラットフォームのセットアップガイドを参照してください：
 
-- [Azure セットアップガイド](platforms/azure/README.md)
-- [AWS セットアップガイド](platforms/aws/README.md)
-- [GCP セットアップガイド](platforms/gcp/README.md)
+- [前提条件・開発環境セットアップ](docs/setup/PREREQUISITES.md)
+- [Azure セットアップガイド](docs/setup/AZURE_SETUP.md)
+- [AWS セットアップガイド](docs/setup/AWS_SETUP.md)
+- [GCP セットアップガイド](docs/setup/GCP_SETUP.md)
+- [クライアント（VBA/PowerShell）セットアップ](docs/setup/CLIENT_SETUP.md)
 
 ## 監査タスク (A1-A8)
 
@@ -74,14 +76,14 @@ curl http://localhost:8000/api/health
 
 | タスク | 説明 | 技術 |
 |--------|------|------|
-| A1 | 意味検索 | セマンティックサーチ |
-| A2 | 画像認識 | Vision API / OCR |
-| A3 | 照合検証 | 複数文書間の整合性確認 |
-| A4 | 書類完全性確認 | 必須フィールドの存在確認 |
-| A5 | 根拠文書存在確認 | エビデンスファイルの検証 |
-| A6 | 署名検証 | 承認・署名の有無確認 |
-| A7 | 計算検証 | 数値計算の正確性確認 |
-| A8 | 期間検証 | 日付範囲の妥当性確認 |
+| A1 | 意味検索 | セマンティックサーチによる文書検索 |
+| A2 | 画像認識 | 承認印・署名・日付の抽出（Vision API/OCR） |
+| A3 | データ抽出 | 表からの数値抽出と突合 |
+| A4 | 段階的推論 | ステップバイステップの計算・検証 |
+| A5 | 意味推論 | 意味検索+推論の組み合わせ |
+| A6 | 複数文書統合 | 複数ドキュメントの統合理解 |
+| A7 | パターン分析 | 時系列データのパターン検出 |
+| A8 | SoD検出 | 職務分掌違反の検出 |
 
 ## アーキテクチャ
 
@@ -99,27 +101,49 @@ VBA/PowerShell → API Gateway (APIM/API Gateway/Apigee)
 
 ## ドキュメント
 
+### セットアップガイド
+
+- [前提条件・開発環境](docs/setup/PREREQUISITES.md) - Python、CLI、Git等のインストール
+- [Azure セットアップ](docs/setup/AZURE_SETUP.md) - Azure環境構築チュートリアル
+- [AWS セットアップ](docs/setup/AWS_SETUP.md) - AWS環境構築チュートリアル
+- [GCP セットアップ](docs/setup/GCP_SETUP.md) - GCP環境構築チュートリアル
+- [クライアントセットアップ](docs/setup/CLIENT_SETUP.md) - VBA/PowerShellクライアント設定
+- [GitHub Secrets設定](docs/setup/GITHUB_SECRETS_SETUP.md) - CI/CD用シークレット設定
+
+### 設計・運用ドキュメント
+
 - [システム仕様書](SYSTEM_SPECIFICATION.md) - 完全な仕様とアーキテクチャ
+- [システムアーキテクチャ](docs/architecture/SYSTEM_ARCHITECTURE.md) - 全体設計図
+- [API Gateway設計](docs/architecture/API_GATEWAY_DESIGN.md) - APIM/API Gateway/Apigee設計
 - [クラウドコスト見積もり](docs/CLOUD_COST_ESTIMATION.md) - 運用コスト試算
-- [アーキテクチャドキュメント](docs/architecture/) - 設計書
-- [監視ガイド](docs/monitoring/) - ログ・メトリクス
-- [運用ガイド](docs/operations/) - デプロイ・トラブルシューティング
-- [セキュリティガイド](docs/security/) - シークレット管理
+
+### 監視・セキュリティ
+
+- [相関ID設計](docs/monitoring/CORRELATION_ID.md) - リクエスト追跡の仕組み
+- [エラーハンドリング](docs/monitoring/ERROR_HANDLING.md) - エラー処理ガイド
+- [クエリサンプル集](docs/monitoring/QUERY_SAMPLES.md) - ログ検索クエリ
+- [シークレット管理](docs/security/SECRET_MANAGEMENT.md) - Key Vault/Secrets Manager統合
+
+### 運用ガイド
+
+- [デプロイメントガイド](docs/operations/DEPLOYMENT_GUIDE.md) - デプロイ手順
+- [監視運用手順書](docs/operations/MONITORING_RUNBOOK.md) - アラート対応
+- [トラブルシューティング](docs/operations/TROUBLESHOOTING.md) - 問題解決
 
 ## テスト
 
 ```bash
-# 全テスト実行
-pytest -v
+# 全テスト実行（505テスト）
+python -m pytest tests/ -v
 
 # カバレッジレポート生成
-pytest --cov=src --cov-report=html
+python -m pytest tests/ --cov=src --cov-report=html
 
-# E2Eテスト（統合テスト）
-pytest tests/e2e/ -v --integration
+# 統合テスト（クラウド接続が必要）
+python -m pytest tests/integration/ -v --integration
 
-# 特定プラットフォームのテスト
-pytest tests/test_platform_azure.py -v
+# ユニットテストのみ
+python -m pytest tests/unit/ -v
 ```
 
 ## コスト見積もり
@@ -161,14 +185,22 @@ pytest tests/test_platform_azure.py -v
 
 ## 更新履歴
 
+### Version 1.3.0 (2026-02-11)
+
+- コードベース品質改善・ファイル構成整理
+- ドキュメント完全版作成（アーキテクチャ、監視、セキュリティ、運用）
+- セットアップガイドを初心者向け超詳細チュートリアルに刷新
+- 505テストケース（カバレッジ80%以上）
+
 ### Version 1.2.0 (2026-02-08)
+
 - API Gateway層統合（APIM/API Gateway/Apigee）
 - 監視強化（Application Insights/X-Ray/Cloud Logging）
 - シークレット管理統合（Key Vault/Secrets Manager/Secret Manager）
 - 相関ID実装（完全なリクエスト追跡）
-- 467テストケース（カバレッジ80%以上）
 
 ### Version 1.0.0 (2025-12-15)
+
 - 初期リリース
 - 8種類の監査タスク実装
 - マルチクラウド対応（Azure/AWS/GCP）
@@ -176,4 +208,4 @@ pytest tests/test_platform_azure.py -v
 
 ---
 
-**開発**: Goyo Systems | **更新日**: 2026-02-09
+**開発**: Goyo Systems | **更新日**: 2026-02-11
