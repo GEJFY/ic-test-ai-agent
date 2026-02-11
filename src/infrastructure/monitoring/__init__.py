@@ -41,6 +41,7 @@ class Platform(Enum):
     AZURE = "AZURE"
     AWS = "AWS"
     GCP = "GCP"
+    LOCAL = "LOCAL"
     UNKNOWN = "UNKNOWN"
 
 
@@ -68,7 +69,12 @@ def detect_platform() -> Platform:
     if llm_provider in ["AZURE", "AWS", "GCP"]:
         return Platform[llm_provider]
 
-    return Platform.UNKNOWN
+    # ローカル開発環境検出
+    if os.getenv("ENVIRONMENT") == "local" or os.getenv("ENV") == "local":
+        return Platform.LOCAL
+
+    # デフォルトはローカル環境（クラウド検出できなかった場合）
+    return Platform.LOCAL
 
 
 def get_monitoring_provider(platform: Optional[Platform] = None):
@@ -93,8 +99,12 @@ def get_monitoring_provider(platform: Optional[Platform] = None):
     elif platform == Platform.GCP:
         from .gcp_monitoring import GCPMonitoring
         return GCPMonitoring()
+    elif platform == Platform.LOCAL:
+        # ローカル環境: 基本的なロギングのみ
+        from .metrics import MetricsCollector
+        return MetricsCollector()
     else:
-        # フォールバック: 基本的なロギングのみ
+        # UNKNOWN フォールバック
         from .metrics import MetricsCollector
         return MetricsCollector()
 

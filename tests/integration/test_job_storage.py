@@ -251,6 +251,10 @@ class TestEvidenceBlobStorage:
     def test_blob_storage_requires_connection_string(self):
         """接続文字列なしでエラー"""
         with patch.dict('os.environ', {}, clear=True):
+            # グローバルキャッシュをクリア
+            import infrastructure.job_storage.azure_blob as blob_module
+            blob_module._evidence_storage = None
+
             from infrastructure.job_storage.azure_blob import get_evidence_storage
             result = get_evidence_storage()
             # 接続文字列がない場合はNoneが返る

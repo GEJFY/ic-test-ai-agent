@@ -29,34 +29,7 @@ import os
 import time
 import uuid
 from typing import Dict, Any
-from src.infrastructure.monitoring import Platform, detect_platform
-
-
-# ================================================================================
-# Pytest設定
-# ================================================================================
-
-def pytest_addoption(parser):
-    parser.addoption(
-        "--integration",
-        action="store_true",
-        default=False,
-        help="Run integration tests (requires cloud access)"
-    )
-
-
-def pytest_configure(config):
-    config.addinivalue_line("markers", "integration: mark test as integration test")
-
-
-def pytest_collection_modifyitems(config, items):
-    if config.getoption("--integration"):
-        return
-
-    skip_integration = pytest.mark.skip(reason="need --integration option to run")
-    for item in items:
-        if "integration" in item.keywords:
-            item.add_marker(skip_integration)
+from infrastructure.monitoring import Platform, detect_platform
 
 
 # ================================================================================
@@ -81,7 +54,7 @@ def test_azure_application_insights_logging(correlation_id: str):
     if not connection_string:
         pytest.skip("APPLICATIONINSIGHTS_CONNECTION_STRING not set")
 
-    from src.infrastructure.monitoring.azure_monitor import AzureMonitor
+    from infrastructure.monitoring.azure_monitor import AzureMonitor
 
     monitor = AzureMonitor()
 
@@ -142,7 +115,7 @@ def test_aws_cloudwatch_xray_logging(correlation_id: str):
     # Lambda環境をシミュレート
     os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "integration-test-function"
 
-    from src.infrastructure.monitoring.aws_xray import AWSXRay
+    from infrastructure.monitoring.aws_xray import AWSXRay
 
     monitor = AWSXRay()
 
@@ -203,7 +176,7 @@ def test_gcp_cloud_logging_trace(correlation_id: str):
     if not project_id:
         pytest.skip("GCP_PROJECT not set")
 
-    from src.infrastructure.monitoring.gcp_monitoring import GCPMonitoring
+    from infrastructure.monitoring.gcp_monitoring import GCPMonitoring
 
     monitor = GCPMonitoring()
 
@@ -268,9 +241,9 @@ def test_monitoring_initialization_all_platforms():
     """
     全プラットフォームで監視モジュールが初期化できることを確認
     """
-    from src.infrastructure.monitoring.azure_monitor import AzureMonitor
-    from src.infrastructure.monitoring.aws_xray import AWSXRay
-    from src.infrastructure.monitoring.gcp_monitoring import GCPMonitoring
+    from infrastructure.monitoring.azure_monitor import AzureMonitor
+    from infrastructure.monitoring.aws_xray import AWSXRay
+    from infrastructure.monitoring.gcp_monitoring import GCPMonitoring
 
     # Azure
     azure_monitor = AzureMonitor()
@@ -294,7 +267,7 @@ def test_metrics_collector_integration(correlation_id: str):
     """
     メトリクスコレクターがローカルとリモートの両方に記録することを確認
     """
-    from src.infrastructure.monitoring.metrics import MetricsCollector
+    from infrastructure.monitoring.metrics import MetricsCollector
 
     collector = MetricsCollector()
     collector.clear_metrics()

@@ -34,7 +34,7 @@ pre-commit>=3.0.0                     # Git pre-commit フック
 bandit[toml]>=1.7.0                   # セキュリティスキャン
 
 # Type Checking
-# mypy>=1.0.0                         # 静的型チェック（オプション）
+mypy>=1.0.0                           # 静的型チェック
 
 # Documentation
 # mkdocs>=1.5.0                       # ドキュメント生成（オプション）
