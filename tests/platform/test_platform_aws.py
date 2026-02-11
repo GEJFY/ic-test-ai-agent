@@ -18,7 +18,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 # lambda_handler は dotenv に依存するので先にモック化
 # platforms/aws をsys.pathに追加してインポート
-_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _aws_dir = os.path.join(_project_root, "platforms", "aws")
 
 
