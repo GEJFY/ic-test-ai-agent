@@ -65,3 +65,22 @@ azure-storage-blob>=12.19.0           # Blob Storage for large evidence files
 # pytesseract>=0.3.10
 # pdf2image>=1.16.0
 # Pillow>=10.0.0
+
+# ==============================================================================
+# Monitoring & Observability（Phase 3: 監視最適化）
+# ==============================================================================
+
+# OpenTelemetry - プラットフォーム共通トレース基盤
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0
+
+# Azure Application Insights（Azureデプロイ時）
+# azure-monitor-opentelemetry>=1.0.0
+
+# AWS X-Ray（AWSデプロイ時）
+# aws-xray-sdk>=2.12.0
+
+# GCP Cloud Logging/Trace（GCPデプロイ時）
+# google-cloud-logging>=3.8.0
+# google-cloud-trace>=1.11.0
+# opencensus-ext-stackdriver>=0.11.0

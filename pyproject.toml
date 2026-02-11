@@ -5,3 +5,38 @@
 [tool.bandit]
 exclude_dirs = ["tests", "platforms"]
 skips = ["B101"]  # assert の使用を許可（テストで必要）
+
+# =============================================================================
+# Pytest設定
+# =============================================================================
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+# Pytestパス設定（srcディレクトリをPythonパスに追加）
+pythonpath = [".", "src"]
+
+# カバレッジ設定
+addopts = [
+    "--cov=src",
+    "--cov-report=html",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+    "-v",
+    "--tb=short",
+]
+
+# テストマーカー（テストの分類）
+markers = [
+    "unit: ユニットテスト（高速、外部依存なし）",
+    "integration: 統合テスト（中速、外部サービスのモック使用）",
+    "e2e: E2Eテスト（低速、実際のサービス使用）",
+    "load: 負荷テスト（Locustなど）",
+    "platform: プラットフォーム固有テスト",
+    "slow: 実行に時間がかかるテスト",
+    "azure: Azureプラットフォーム固有",
+    "aws: AWSプラットフォーム固有",
+    "gcp: GCPプラットフォーム固有",
+]

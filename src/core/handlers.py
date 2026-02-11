@@ -84,6 +84,24 @@ logger = get_logger(__name__)
 # 監査専用ロガー（評価処理の詳細記録用）
 audit_logger = AuditLogger(logger)
 
+# =============================================================================
+# 相関ID・エラーハンドリング
+# =============================================================================
+# 相関IDとエラーハンドラーをインポート（Phase 1実装）
+
+try:
+    from core.correlation import get_correlation_id, get_correlation_id_for_logging
+    from core.error_handler import handle_exception, create_error_response as create_error_handler_response
+    _use_new_error_handler = True
+except ImportError:
+    # フォールバック：新しいモジュールが利用できない場合
+    logger.warning("相関ID・エラーハンドラーモジュールが見つかりません。基本機能のみ使用します。")
+    def get_correlation_id():
+        return None
+    def get_correlation_id_for_logging():
+        return {}
+    _use_new_error_handler = False
+
 
 # =============================================================================
 # 定数定義
@@ -439,6 +457,9 @@ def _create_error_result(
     Returns:
         dict: エラー結果（評価結果の形式に準拠）
     """
+    # 相関IDを取得（利用可能な場合）
+    correlation_id = get_correlation_id() if _use_new_error_handler else None
+
     result = {
         "ID": item_id,
         "evaluationResult": False,
@@ -451,6 +472,10 @@ def _create_error_result(
             "timestamp": datetime.now().isoformat()
         }
     }
+
+    # 相関IDを含める
+    if correlation_id:
+        result["_debug"]["correlation_id"] = correlation_id
 
     if details:
         result["_debug"].update(details)
@@ -939,11 +964,18 @@ def create_error_response(
     """
     logger.error(f"[レスポンス] エラーレスポンス作成: {status_code} - {message}")
 
+    # 相関IDを取得
+    correlation_id = get_correlation_id() if _use_new_error_handler else None
+
     error_data = {
         "error": True,
         "message": message,
         "timestamp": datetime.now().isoformat()
     }
+
+    # 相関IDを含める
+    if correlation_id:
+        error_data["correlation_id"] = correlation_id
 
     # トレースバックは開発環境でのみ含める
     if error_traceback and os.environ.get("DEBUG", "").lower() == "true":
