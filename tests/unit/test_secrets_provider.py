@@ -255,8 +255,8 @@ class TestGetDefaultProvider:
 class TestAzureKeyVaultProvider:
     """AzureKeyVaultProviderのテストクラス（モック使用）"""
 
-    @patch('infrastructure.secrets.azure_keyvault.SecretClient')
-    @patch('infrastructure.secrets.azure_keyvault.DefaultAzureCredential')
+    @patch('azure.keyvault.secrets.SecretClient')
+    @patch('azure.identity.DefaultAzureCredential')
     def test_azure_provider_initialization(self, mock_credential, mock_client):
         """
         AzureKeyVaultProviderが正しく初期化されることを確認
@@ -268,10 +268,13 @@ class TestAzureKeyVaultProvider:
         # DefaultAzureCredentialが呼ばれた
         mock_credential.assert_called_once()
         # SecretClientが呼ばれた
-        mock_client.assert_called_once()
+        mock_client.assert_called_once_with(
+            vault_url="https://test.vault.azure.net",
+            credential=mock_credential.return_value
+        )
 
-    @patch('infrastructure.secrets.azure_keyvault.SecretClient')
-    @patch('infrastructure.secrets.azure_keyvault.DefaultAzureCredential')
+    @patch('azure.keyvault.secrets.SecretClient')
+    @patch('azure.identity.DefaultAzureCredential')
     def test_azure_provider_get_secret(self, mock_credential, mock_client):
         """
         AzureKeyVaultProviderでシークレット取得ができることを確認

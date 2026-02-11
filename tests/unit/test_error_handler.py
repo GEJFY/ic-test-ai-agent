@@ -194,7 +194,7 @@ class TestHandleException:
 
     def test_handle_exception_without_correlation_id(self):
         """
-        相関IDが設定されていない場合、Noneが設定されることを確認
+        相関IDが設定されていない場合、"unknown"が設定されることを確認
         """
         set_correlation_id(None)
 
@@ -207,7 +207,8 @@ class TestHandleException:
                 user_message="相関IDなしエラー"
             )
 
-        assert error_response.correlation_id is None
+        # 相関IDがない場合は"unknown"が設定される
+        assert error_response.correlation_id == "unknown"
 
 
 class TestCreateErrorResponse:
@@ -221,45 +222,57 @@ class TestCreateErrorResponse:
         """
         本番環境用エラーレスポンス生成をテスト
         """
-        response = create_error_response(
+        error_response = create_error_response(
             error_code="API_ERROR",
-            user_message="APIエラーが発生しました",
-            include_internal=False
+            internal_message="Internal: API connection failed",
+            user_message="APIエラーが発生しました"
         )
 
-        # production環境の環境変数を設定していないのでデフォルト動作を確認
+        # production環境（include_internal=False）でdictに変換
+        response = error_response.to_dict(include_internal=False)
+
         assert response["error_code"] == "API_ERROR"
         assert response["message"] == "APIエラーが発生しました"
         assert response["correlation_id"] == "test-correlation-id"
+        assert "internal_message" not in response  # 本番環境では内部メッセージは含まれない
 
     def test_create_error_response_development(self):
         """
         開発環境用エラーレスポンス生成をテスト
         """
-        response = create_error_response(
+        error_response = create_error_response(
             error_code="API_ERROR",
-            user_message="APIエラーが発生しました",
             internal_message="Internal: Connection timeout",
-            include_internal=True
+            user_message="APIエラーが発生しました"
         )
+
+        # 開発環境（include_internal=True）でdictに変換
+        response = error_response.to_dict(include_internal=True)
 
         assert response["internal_message"] == "Internal: Connection timeout"
         assert response["error_code"] == "API_ERROR"
+        assert response["message"] == "APIエラーが発生しました"
 
     def test_create_error_response_with_trace(self):
         """
         トレースバック付きエラーレスポンス生成をテスト
         """
-        trace = "Traceback (most recent call last):\n  File \"test.py\", line 10"
+        try:
+            raise ValueError("Test exception for trace")
+        except Exception as e:
+            error_response = create_error_response(
+                error_code="TRACED_ERROR",
+                internal_message="Internal: Test exception occurred",
+                user_message="トレース付きエラー",
+                exception=e
+            )
 
-        response = create_error_response(
-            error_code="TRACED_ERROR",
-            user_message="トレース付きエラー",
-            trace=trace,
-            include_internal=True
-        )
+            # 開発環境（include_internal=True）でdictに変換
+            response = error_response.to_dict(include_internal=True)
 
-        assert response["traceback"] == trace
+            # トレースバックが含まれることを確認
+            assert "traceback" in response
+            assert "ValueError: Test exception for trace" in response["traceback"]
 
     def test_create_error_response_without_correlation_id(self):
         """
@@ -267,25 +280,34 @@ class TestCreateErrorResponse:
         """
         set_correlation_id(None)
 
-        response = create_error_response(
+        error_response = create_error_response(
             error_code="NO_CORR_ERROR",
+            internal_message="Internal: No correlation ID",
             user_message="相関IDなし"
         )
 
-        assert response["correlation_id"] is None
+        response = error_response.to_dict(include_internal=False)
+
+        # 相関IDがない場合は"unknown"が設定される
+        assert response["correlation_id"] == "unknown"
 
     def test_create_error_response_auto_error_id(self):
         """
         エラーIDが自動生成されることを確認
         """
-        response = create_error_response(
+        error_response = create_error_response(
             error_code="AUTO_ID_ERROR",
+            internal_message="Internal: Auto ID test",
             user_message="自動ID生成"
         )
 
-        # error_idが存在し、形式が正しい（ERR-で始まる）
+        response = error_response.to_dict(include_internal=False)
+
+        # error_idが存在し、形式が正しい（8文字の16進数）
         assert "error_id" in response
-        assert response["error_id"].startswith("ERR-")
+        assert len(response["error_id"]) == 8
+        # 16進数文字のみで構成されていることを確認
+        int(response["error_id"], 16)  # 例外が発生しなければOK
 
 
 class TestErrorHandlingIntegration:
