@@ -1,190 +1,111 @@
-# =============================================================================
-# AWS Deployment Workflow
-# =============================================================================
-#
-# トリガー:
-#   - 手動実行（workflow_dispatch）
-#
-# 必要なシークレット:
-#   - AWS_ACCESS_KEY_ID: AWSアクセスキー
-#   - AWS_SECRET_ACCESS_KEY: AWSシークレットキー
-#
-# 必要な変数:
-#   - AWS_REGION: AWSリージョン
-#   - AWS_ECR_REGISTRY: ECRレジストリURL
-#   - AWS_LAMBDA_FUNCTION: Lambda関数名
-#
-# =============================================================================
-
 name: Deploy to AWS
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'platforms/aws/**'
+      - 'src/**'
+      - 'infrastructure/aws/**'
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Environment to deploy'
+        description: 'Environment'
         required: true
-        default: 'prod'
+        default: 'staging'
         type: choice
-        options:
-          - dev
-          - staging
-          - prod
-      client:
-        description: 'Client name (terraform/clients/<client>)'
-        required: true
-        type: string
-      deploy_infra:
-        description: 'Deploy infrastructure (Terraform)'
-        required: true
-        default: false
-        type: boolean
-      deploy_app:
-        description: 'Deploy application code'
-        required: true
-        default: true
-        type: boolean
+        options: [staging, production]
 
 env:
-  TERRAFORM_VERSION: '1.6.0'
-  DOCKER_IMAGE_NAME: ic-test-ai-agent
+  PYTHON_VERSION: '3.11'
+  AWS_REGION: 'ap-northeast-1'
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # インフラストラクチャデプロイ（Terraform）
-  # ---------------------------------------------------------------------------
-  terraform:
-    name: Terraform Apply
+  test:
     runs-on: ubuntu-latest
-    if: github.event.inputs.deploy_infra == 'true'
-    environment: ${{ github.event.inputs.environment }}
-
-    defaults:
-      run:
-        working-directory: terraform/clients/${{ github.event.inputs.client }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+          pytest tests/ -k "not e2e and not integration" --cov=src
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: python scripts/audit_security.py
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Package Lambda Function
+        run: |
+          cd platforms/aws
+          pip install -r requirements.txt -t package/
+          cp lambda_handler.py package/
+          cp -r ../../src package/
+          cd package
+          zip -r ../lambda-deployment.zip .
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_version: 1.6.0
+          terraform_wrapper: false
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ vars.AWS_REGION }}
+      - name: Create S3 Bucket First
+        working-directory: ./infrastructure/aws/terraform
+        run: |
+          terraform init
+          terraform apply -auto-approve \
+            -target=aws_s3_bucket.lambda_deployments \
+            -target=aws_s3_bucket_versioning.lambda_deployments \
+            -target=aws_s3_bucket_lifecycle_configuration.lambda_deployments
 
-      - name: Terraform Init
-        run: terraform init
+      - name: Upload Lambda Package to S3
+        run: |
+          BUCKET_NAME=$(cd infrastructure/aws/terraform && terraform output -raw s3_bucket_name 2>/dev/null || echo "ic-test-staging-lambda-deployments")
+          aws s3 cp platforms/aws/lambda-deployment.zip s3://${BUCKET_NAME}/lambda-deployment.zip
 
-      - name: Terraform Validate
-        run: terraform validate
+      - name: Deploy Infrastructure
+        working-directory: ./infrastructure/aws/terraform
+        run: |
+          terraform plan -out=tfplan
+          terraform apply -auto-approve tfplan
 
-      - name: Terraform Plan
-        run: terraform plan -out=tfplan
-
-      - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
-
-      - name: Output Results
-        run: terraform output -json > terraform-outputs.json
-
-      - name: Upload Terraform Outputs
-        uses: actions/upload-artifact@v4
-        with:
-          name: terraform-outputs
-          path: terraform/clients/${{ github.event.inputs.client }}/terraform-outputs.json
-
-  # ---------------------------------------------------------------------------
-  # アプリケーションデプロイ（Lambda）
-  # ---------------------------------------------------------------------------
-  deploy-app:
-    name: Deploy Application
+  validate:
     runs-on: ubuntu-latest
-    if: github.event.inputs.deploy_app == 'true'
-    needs: [terraform]
-    if: always() && (needs.terraform.result == 'success' || needs.terraform.result == 'skipped')
-    environment: ${{ github.event.inputs.environment }}
-
+    needs: deploy
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Install dependencies
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Validate
+        env:
+          AWS_API_GATEWAY_ENDPOINT: ${{ secrets.AWS_API_GATEWAY_ENDPOINT }}
+          AWS_API_KEY: ${{ secrets.AWS_API_KEY }}
         run: |
-          pip install -r platforms/aws/requirements.txt -t platforms/aws/package/
-
-      - name: Copy source code
-        run: |
-          cp -r src platforms/aws/package/
-          cp platforms/aws/lambda_handler.py platforms/aws/package/
-
-      - name: Create deployment package
-        run: |
-          cd platforms/aws/package
-          zip -r ../deployment.zip .
-
-      - name: Deploy to Lambda
-        run: |
-          aws lambda update-function-code \
-            --function-name ${{ vars.AWS_LAMBDA_FUNCTION }} \
-            --zip-file fileb://platforms/aws/deployment.zip
-
-      - name: Wait for update
-        run: |
-          aws lambda wait function-updated \
-            --function-name ${{ vars.AWS_LAMBDA_FUNCTION }}
-
-  # ---------------------------------------------------------------------------
-  # デプロイ検証
-  # ---------------------------------------------------------------------------
-  verify:
-    name: Verify Deployment
-    runs-on: ubuntu-latest
-    needs: deploy-app
-    environment: ${{ github.event.inputs.environment }}
-
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Test Lambda function
-        run: |
-          # Lambda関数を直接呼び出してテスト
-          aws lambda invoke \
-            --function-name ${{ vars.AWS_LAMBDA_FUNCTION }} \
-            --payload '{"httpMethod": "GET", "path": "/health"}' \
-            --cli-binary-format raw-in-base64-out \
-            response.json
-
-          cat response.json
-
-          # ステータスコード確認
-          STATUS=$(cat response.json | jq -r '.statusCode')
-          if [ "$STATUS" != "200" ]; then
-            echo "Health check failed with status: $STATUS"
-            exit 1
-          fi
-
-          echo "Health check passed!"
+          pip install requests
+          python scripts/validate_deployment.py --platform aws

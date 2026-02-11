@@ -43,3 +43,14 @@ pdf2image>=1.16.0              # PDFをTesseractで処理する場合に必要
 
 # DynamoDB/SQS - boto3経由で使用
 # 追加パッケージ不要
+
+# ==============================================================================
+# Monitoring & Observability（Phase 3: 監視最適化）
+# ==============================================================================
+
+# AWS X-Ray統合
+aws-xray-sdk>=2.12.0
+
+# OpenTelemetry（オプション）
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0

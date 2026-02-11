@@ -106,7 +106,7 @@ class TestAzureFoundryModels:
 
     def _test_model(self, model_name: str, description: str):
         """モデルテストの共通ロジック"""
-        from infrastructure.llm_factory import LLMFactory, LLMConfigError
+        from infrastructure.llm_factory import LLMFactory
 
         start_time = time.time()
         try:

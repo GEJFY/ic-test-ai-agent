@@ -143,9 +143,15 @@ async def evaluate(req: func.HttpRequest) -> func.HttpResponse:
         - 500: 内部エラー
     """
     from core.handlers import handle_evaluate, parse_request_body, create_json_response, create_error_response
+    from core.correlation import get_or_create_correlation_id
 
     logger.info("=" * 60)
     logger.info("[API] /api/evaluate が呼び出されました")
+
+    # 相関ID抽出・設定
+    headers = dict(req.headers)
+    correlation_id = get_or_create_correlation_id(headers)
+    logger.info(f"[Correlation ID] {correlation_id}")
 
     try:
         # リクエストボディを解析
@@ -157,7 +163,8 @@ async def evaluate(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 body=resp["body"],
                 mimetype=resp["content_type"],
-                status_code=resp["status_code"]
+                status_code=resp["status_code"],
+                headers={"X-Correlation-ID": correlation_id}
             )
 
         logger.info(f"[API] 受信: {len(items)}件のテスト項目")
@@ -172,7 +179,8 @@ async def evaluate(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             body=resp["body"],
             mimetype=resp["content_type"],
-            status_code=resp["status_code"]
+            status_code=resp["status_code"],
+            headers={"X-Correlation-ID": correlation_id}
         )
 
     except Exception as e:
@@ -184,7 +192,8 @@ async def evaluate(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             body=resp["body"],
             mimetype=resp["content_type"],
-            status_code=resp["status_code"]
+            status_code=resp["status_code"],
+            headers={"X-Correlation-ID": correlation_id}
         )
 
 
@@ -196,8 +205,14 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
     システムの稼働状態と設定状況を返します。
     """
     from core.handlers import handle_health, create_json_response
+    from core.correlation import get_or_create_correlation_id
 
     logger.info("[API] /api/health が呼び出されました")
+
+    # 相関ID抽出・設定
+    headers = dict(req.headers)
+    correlation_id = get_or_create_correlation_id(headers)
+    logger.info(f"[Correlation ID] {correlation_id}")
 
     status = handle_health()
 
@@ -208,7 +223,8 @@ def health(req: func.HttpRequest) -> func.HttpResponse:
     return func.HttpResponse(
         body=resp["body"],
         mimetype=resp["content_type"],
-        status_code=resp["status_code"]
+        status_code=resp["status_code"],
+        headers={"X-Correlation-ID": correlation_id}
     )
 
 
@@ -220,8 +236,14 @@ def config_status(req: func.HttpRequest) -> func.HttpResponse:
     AI機能に必要な設定の状態を詳細に表示します。
     """
     from core.handlers import handle_config, create_json_response
+    from core.correlation import get_or_create_correlation_id
 
     logger.info("[API] /api/config が呼び出されました")
+
+    # 相関ID抽出・設定
+    headers = dict(req.headers)
+    correlation_id = get_or_create_correlation_id(headers)
+    logger.info(f"[Correlation ID] {correlation_id}")
 
     config = handle_config()
 
@@ -236,7 +258,8 @@ def config_status(req: func.HttpRequest) -> func.HttpResponse:
     return func.HttpResponse(
         body=resp["body"],
         mimetype=resp["content_type"],
-        status_code=resp["status_code"]
+        status_code=resp["status_code"],
+        headers={"X-Correlation-ID": correlation_id}
     )
 
 
@@ -269,9 +292,15 @@ async def evaluate_submit(req: func.HttpRequest) -> func.HttpResponse:
     """
     from core.handlers import parse_request_body, create_json_response, create_error_response
     from core.async_handlers import handle_submit
+    from core.correlation import get_or_create_correlation_id
 
     logger.info("=" * 60)
     logger.info("[API] /api/evaluate/submit が呼び出されました")
+
+    # 相関ID抽出・設定
+    headers = dict(req.headers)
+    correlation_id = get_or_create_correlation_id(headers)
+    logger.info(f"[Correlation ID] {correlation_id}")
 
     try:
         # リクエストボディを解析
@@ -283,7 +312,8 @@ async def evaluate_submit(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 body=resp["body"],
                 mimetype=resp["content_type"],
-                status_code=resp["status_code"]
+                status_code=resp["status_code"],
+                headers={"X-Correlation-ID": correlation_id}
             )
 
         logger.info(f"[API] 受信: {len(items)}件のテスト項目")
@@ -300,7 +330,8 @@ async def evaluate_submit(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 body=resp["body"],
                 mimetype=resp["content_type"],
-                status_code=500
+                status_code=500,
+                headers={"X-Correlation-ID": correlation_id}
             )
 
         logger.info(f"[API] ジョブ送信完了: {response.get('job_id')}")
@@ -310,7 +341,8 @@ async def evaluate_submit(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             body=resp["body"],
             mimetype=resp["content_type"],
-            status_code=202  # Accepted
+            status_code=202,  # Accepted
+            headers={"X-Correlation-ID": correlation_id}
         )
 
     except Exception as e:
@@ -322,7 +354,8 @@ async def evaluate_submit(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             body=resp["body"],
             mimetype=resp["content_type"],
-            status_code=resp["status_code"]
+            status_code=resp["status_code"],
+            headers={"X-Correlation-ID": correlation_id}
         )
 
 
@@ -346,9 +379,15 @@ async def evaluate_status(req: func.HttpRequest) -> func.HttpResponse:
     """
     from core.handlers import create_json_response, create_error_response
     from core.async_handlers import handle_status
+    from core.correlation import get_or_create_correlation_id
 
     job_id = req.route_params.get("job_id")
     logger.debug(f"[API] /api/evaluate/status/{job_id} が呼び出されました")
+
+    # 相関ID抽出・設定
+    headers = dict(req.headers)
+    correlation_id = get_or_create_correlation_id(headers)
+    logger.debug(f"[Correlation ID] {correlation_id}")
 
     try:
         response = await handle_status(job_id)
@@ -358,14 +397,16 @@ async def evaluate_status(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 body=resp["body"],
                 mimetype=resp["content_type"],
-                status_code=404
+                status_code=404,
+                headers={"X-Correlation-ID": correlation_id}
             )
 
         resp = create_json_response(response)
         return func.HttpResponse(
             body=resp["body"],
             mimetype=resp["content_type"],
-            status_code=200
+            status_code=200,
+            headers={"X-Correlation-ID": correlation_id}
         )
 
     except Exception as e:
@@ -376,7 +417,8 @@ async def evaluate_status(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             body=resp["body"],
             mimetype=resp["content_type"],
-            status_code=resp["status_code"]
+            status_code=resp["status_code"],
+            headers={"X-Correlation-ID": correlation_id}
         )
 
 
@@ -399,9 +441,15 @@ async def evaluate_results(req: func.HttpRequest) -> func.HttpResponse:
     """
     from core.handlers import create_json_response, create_error_response
     from core.async_handlers import handle_results
+    from core.correlation import get_or_create_correlation_id
 
     job_id = req.route_params.get("job_id")
     logger.info(f"[API] /api/evaluate/results/{job_id} が呼び出されました")
+
+    # 相関ID抽出・設定
+    headers = dict(req.headers)
+    correlation_id = get_or_create_correlation_id(headers)
+    logger.info(f"[Correlation ID] {correlation_id}")
 
     try:
         response = await handle_results(job_id)
@@ -411,7 +459,8 @@ async def evaluate_results(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 body=resp["body"],
                 mimetype=resp["content_type"],
-                status_code=404
+                status_code=404,
+                headers={"X-Correlation-ID": correlation_id}
             )
 
         if response.get("status") not in ["completed", "failed"]:
@@ -424,7 +473,8 @@ async def evaluate_results(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 body=resp["body"],
                 mimetype=resp["content_type"],
-                status_code=202  # Accepted (still processing)
+                status_code=202,  # Accepted (still processing)
+                headers={"X-Correlation-ID": correlation_id}
             )
 
         logger.info(f"[API] 結果返却: {len(response.get('results', []))}件")
@@ -433,7 +483,8 @@ async def evaluate_results(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             body=resp["body"],
             mimetype=resp["content_type"],
-            status_code=200
+            status_code=200,
+            headers={"X-Correlation-ID": correlation_id}
         )
 
     except Exception as e:
@@ -444,7 +495,8 @@ async def evaluate_results(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             body=resp["body"],
             mimetype=resp["content_type"],
-            status_code=resp["status_code"]
+            status_code=resp["status_code"],
+            headers={"X-Correlation-ID": correlation_id}
         )
 
 

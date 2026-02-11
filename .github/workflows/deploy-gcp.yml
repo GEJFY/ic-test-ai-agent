@@ -1,209 +1,104 @@
-# =============================================================================
-# GCP Deployment Workflow
-# =============================================================================
-#
-# トリガー:
-#   - 手動実行（workflow_dispatch）
-#
-# 必要なシークレット:
-#   - GCP_SA_KEY: GCPサービスアカウントキー（JSON）
-#
-# 必要な変数:
-#   - GCP_PROJECT_ID: GCPプロジェクトID
-#   - GCP_REGION: GCPリージョン
-#   - GCP_ARTIFACT_REGISTRY: Artifact Registry URL
-#   - GCP_CLOUD_RUN_SERVICE: Cloud Runサービス名
-#
-# =============================================================================
-
 name: Deploy to GCP
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'platforms/gcp/**'
+      - 'src/**'
+      - 'infrastructure/gcp/**'
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Environment to deploy'
+        description: 'Environment'
         required: true
-        default: 'prod'
+        default: 'staging'
         type: choice
-        options:
-          - dev
-          - staging
-          - prod
-      client:
-        description: 'Client name (terraform/clients/<client>)'
-        required: true
-        type: string
-      deploy_infra:
-        description: 'Deploy infrastructure (Terraform)'
-        required: true
-        default: false
-        type: boolean
-      deploy_app:
-        description: 'Deploy application code'
-        required: true
-        default: true
-        type: boolean
+        options: [staging, production]
 
 env:
-  TERRAFORM_VERSION: '1.6.0'
-  DOCKER_IMAGE_NAME: ic-test-ai-agent
+  PYTHON_VERSION: '3.11'
+  GCP_REGION: 'asia-northeast1'
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # インフラストラクチャデプロイ（Terraform）
-  # ---------------------------------------------------------------------------
-  terraform:
-    name: Terraform Apply
+  test:
     runs-on: ubuntu-latest
-    if: github.event.inputs.deploy_infra == 'true'
-    environment: ${{ github.event.inputs.environment }}
-
-    defaults:
-      run:
-        working-directory: terraform/clients/${{ github.event.inputs.client }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+          pytest tests/ -k "not e2e and not integration" --cov=src
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: python scripts/audit_security.py
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_version: 1.6.0
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+      - name: Deploy Infrastructure
+        working-directory: ./infrastructure/gcp/terraform
+        run: |
+          terraform init
+          terraform plan -out=tfplan
+          terraform apply -auto-approve tfplan
+
+      - uses: actions/setup-python@v5
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Setup gcloud CLI
-        uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy Cloud Functions
+        run: |
+          gcloud functions deploy ic-test-evaluator \
+            --gen2 \
+            --runtime=python311 \
+            --region=${{ env.GCP_REGION }} \
+            --source=./platforms/gcp \
+            --entry-point=evaluate \
+            --trigger-http \
+            --allow-unauthenticated=false \
+            --set-env-vars="PLATFORM=gcp" \
+            --service-account=${{ secrets.GCP_FUNCTION_SERVICE_ACCOUNT }}
+
+  validate:
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          project_id: ${{ vars.GCP_PROJECT_ID }}
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Validate
-        run: terraform validate
-
-      - name: Terraform Plan
-        run: terraform plan -out=tfplan
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Validate
         env:
-          TF_VAR_gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
-
-      - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
-
-      - name: Output Results
-        run: terraform output -json > terraform-outputs.json
-
-      - name: Upload Terraform Outputs
-        uses: actions/upload-artifact@v4
-        with:
-          name: terraform-outputs
-          path: terraform/clients/${{ github.event.inputs.client }}/terraform-outputs.json
-
-  # ---------------------------------------------------------------------------
-  # アプリケーションデプロイ（Cloud Run）
-  # ---------------------------------------------------------------------------
-  deploy-app:
-    name: Deploy Application
-    runs-on: ubuntu-latest
-    if: github.event.inputs.deploy_app == 'true'
-    needs: [terraform]
-    if: always() && (needs.terraform.result == 'success' || needs.terraform.result == 'skipped')
-    environment: ${{ github.event.inputs.environment }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Setup gcloud CLI
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ vars.GCP_PROJECT_ID }}
-
-      - name: Configure Docker for Artifact Registry
+          GCP_APIGEE_ENDPOINT: ${{ secrets.GCP_APIGEE_ENDPOINT }}
+          GCP_API_KEY: ${{ secrets.GCP_API_KEY }}
         run: |
-          gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and Push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ vars.GCP_ARTIFACT_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
-            ${{ vars.GCP_ARTIFACT_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:latest
-
-      - name: Deploy to Cloud Run
-        uses: google-github-actions/deploy-cloudrun@v2
-        with:
-          service: ${{ vars.GCP_CLOUD_RUN_SERVICE }}
-          region: ${{ vars.GCP_REGION }}
-          image: ${{ vars.GCP_ARTIFACT_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
-          env_vars: |
-            LLM_PROVIDER=GCP
-            OCR_PROVIDER=GCP
-            GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }}
-            GCP_LOCATION=${{ vars.GCP_REGION }}
-
-  # ---------------------------------------------------------------------------
-  # デプロイ検証
-  # ---------------------------------------------------------------------------
-  verify:
-    name: Verify Deployment
-    runs-on: ubuntu-latest
-    needs: deploy-app
-    environment: ${{ github.event.inputs.environment }}
-
-    steps:
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Setup gcloud CLI
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ vars.GCP_PROJECT_ID }}
-
-      - name: Get Cloud Run URL
-        id: get-url
-        run: |
-          URL=$(gcloud run services describe ${{ vars.GCP_CLOUD_RUN_SERVICE }} \
-            --region=${{ vars.GCP_REGION }} \
-            --format='value(status.url)')
-          echo "url=$URL" >> $GITHUB_OUTPUT
-
-      - name: Health Check
-        run: |
-          ENDPOINT_URL="${{ steps.get-url.outputs.url }}"
-
-          echo "Checking health at: $ENDPOINT_URL/health"
-
-          # IDトークンを取得
-          TOKEN=$(gcloud auth print-identity-token)
-
-          # リトライ付きヘルスチェック
-          for i in {1..5}; do
-            if curl -sf -H "Authorization: Bearer $TOKEN" "$ENDPOINT_URL/health"; then
-              echo "Health check passed!"
-              exit 0
-            fi
-            echo "Attempt $i failed, retrying in 30s..."
-            sleep 30
-          done
-
-          echo "Health check failed after 5 attempts"
-          exit 1
+          pip install requests
+          python scripts/validate_deployment.py --platform gcp

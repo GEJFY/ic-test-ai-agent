@@ -307,3 +307,28 @@ def create_mock_graph_state(item_id: str = "CLC-01") -> Dict[str, Any]:
 def mock_graph_state():
     """GraphOrchestrator状態フィクスチャ"""
     return create_mock_graph_state()
+
+
+# =============================================================================
+# 統合テストスキップ設定
+# =============================================================================
+
+def pytest_addoption(parser):
+    """pytestコマンドラインオプション追加"""
+    parser.addoption(
+        "--integration",
+        action="store_true",
+        default=False,
+        help="Run integration tests (requires cloud access)"
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """統合テストマーカーを処理"""
+    if config.getoption("--integration"):
+        return
+
+    skip_integration = pytest.mark.skip(reason="need --integration option to run")
+    for item in items:
+        if "integration" in item.keywords:
+            item.add_marker(skip_integration)

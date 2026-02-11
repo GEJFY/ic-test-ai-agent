@@ -125,22 +125,25 @@ def run_async(coro):
         loop.close()
 
 
-def create_response(data, status_code=200):
+def create_response(data, status_code=200, extra_headers=None):
     """JSONレスポンスを作成"""
     response = make_response(
         json.dumps(data, ensure_ascii=False),
         status_code
     )
     response.headers['Content-Type'] = 'application/json; charset=utf-8'
+    if extra_headers:
+        for key, value in extra_headers.items():
+            response.headers[key] = value
     return response
 
 
-def create_error_response(message, status_code=500, tb=None):
+def create_error_response(message, status_code=500, tb=None, extra_headers=None):
     """エラーレスポンスを作成"""
     error_data = {"error": True, "message": message}
     if tb:
         error_data["traceback"] = tb
-    return create_response(error_data, status_code)
+    return create_response(error_data, status_code, extra_headers)
 
 
 # =============================================================================
@@ -155,13 +158,20 @@ def evaluate(request: Request):
     内部統制テスト項目をAIで評価し、結果を返します。
     """
     from core.handlers import handle_evaluate, parse_request_body
+    from core.correlation import get_or_create_correlation_id
 
     logger.info("=" * 60)
     logger.info("[GCP] /evaluate が呼び出されました")
 
+    # 相関ID抽出・設定
+    headers = dict(request.headers)
+    correlation_id = get_or_create_correlation_id(headers)
+    logger.info(f"[Correlation ID] {correlation_id}")
+    correlation_headers = {"X-Correlation-ID": correlation_id}
+
     # POSTメソッドのみ許可
     if request.method != 'POST':
-        return create_error_response("Method not allowed", 405)
+        return create_error_response("Method not allowed", 405, extra_headers=correlation_headers)
 
     try:
         # リクエストボディを解析
@@ -169,7 +179,7 @@ def evaluate(request: Request):
 
         if error:
             logger.error(f"[GCP] リクエスト解析エラー: {error}")
-            return create_error_response(error, 400)
+            return create_error_response(error, 400, extra_headers=correlation_headers)
 
         logger.info(f"[GCP] 受信: {len(items)}件のテスト項目")
 
@@ -179,13 +189,13 @@ def evaluate(request: Request):
         logger.info(f"[GCP] レスポンス送信: {len(response)}件")
         logger.info("=" * 60)
 
-        return create_response(response)
+        return create_response(response, extra_headers=correlation_headers)
 
     except Exception as e:
         error_details = traceback.format_exc()
         logger.error(f"[GCP] 予期せぬエラー: {e}")
         logger.error(f"[GCP] トレースバック:\n{error_details}")
-        return create_error_response(str(e), 500, error_details)
+        return create_error_response(str(e), 500, error_details, extra_headers=correlation_headers)
 
 
 @functions_framework.http
@@ -196,13 +206,19 @@ def health(request: Request):
     システムの稼働状態と設定状況を返します。
     """
     from core.handlers import handle_health
+    from core.correlation import get_or_create_correlation_id
 
     logger.info("[GCP] /health が呼び出されました")
+
+    # 相関ID抽出・設定
+    headers = dict(request.headers)
+    correlation_id = get_or_create_correlation_id(headers)
+    logger.info(f"[Correlation ID] {correlation_id}")
 
     status = handle_health()
     status["platform"] = "GCP Cloud Functions"
 
-    return create_response(status)
+    return create_response(status, extra_headers={"X-Correlation-ID": correlation_id})
 
 
 @functions_framework.http
@@ -213,8 +229,14 @@ def config_status(request: Request):
     AI機能に必要な設定の状態を詳細に表示します。
     """
     from core.handlers import handle_config
+    from core.correlation import get_or_create_correlation_id
 
     logger.info("[GCP] /config が呼び出されました")
+
+    # 相関ID抽出・設定
+    headers = dict(request.headers)
+    correlation_id = get_or_create_correlation_id(headers)
+    logger.info(f"[Correlation ID] {correlation_id}")
 
     config = handle_config()
     config["platform"] = {
@@ -223,7 +245,7 @@ def config_status(request: Request):
         "framework": "functions-framework"
     }
 
-    return create_response(config)
+    return create_response(config, extra_headers={"X-Correlation-ID": correlation_id})
 
 
 # =============================================================================
@@ -239,19 +261,26 @@ def evaluate_submit(request: Request):
     """
     from core.handlers import parse_request_body
     from core.async_handlers import handle_submit
+    from core.correlation import get_or_create_correlation_id
 
     logger.info("=" * 60)
     logger.info("[GCP] /evaluate/submit が呼び出されました")
 
+    # 相関ID抽出・設定
+    headers = dict(request.headers)
+    correlation_id = get_or_create_correlation_id(headers)
+    logger.info(f"[Correlation ID] {correlation_id}")
+    correlation_headers = {"X-Correlation-ID": correlation_id}
+
     if request.method != 'POST':
-        return create_error_response("Method not allowed", 405)
+        return create_error_response("Method not allowed", 405, extra_headers=correlation_headers)
 
     try:
         items, error = parse_request_body(request.get_data())
 
         if error:
             logger.error(f"[GCP] リクエスト解析エラー: {error}")
-            return create_error_response(error, 400)
+            return create_error_response(error, 400, extra_headers=correlation_headers)
 
         logger.info(f"[GCP] 受信: {len(items)}件のテスト項目")
 
@@ -260,15 +289,15 @@ def evaluate_submit(request: Request):
 
         if response.get("error"):
             logger.error(f"[GCP] ジョブ送信エラー: {response.get('message')}")
-            return create_response(response, 500)
+            return create_response(response, 500, extra_headers=correlation_headers)
 
         logger.info(f"[GCP] ジョブ送信完了: {response.get('job_id')}")
-        return create_response(response, 202)
+        return create_response(response, 202, extra_headers=correlation_headers)
 
     except Exception as e:
         error_details = traceback.format_exc()
         logger.error(f"[GCP] 予期せぬエラー: {e}")
-        return create_error_response(str(e), 500, error_details)
+        return create_error_response(str(e), 500, error_details, extra_headers=correlation_headers)
 
 
 @functions_framework.http
@@ -277,28 +306,35 @@ def evaluate_status(request: Request):
     GET /evaluate/status/{job_id} - ジョブステータス確認エンドポイント
     """
     from core.async_handlers import handle_status
+    from core.correlation import get_or_create_correlation_id
+
+    # 相関ID抽出・設定
+    headers = dict(request.headers)
+    correlation_id = get_or_create_correlation_id(headers)
+    correlation_headers = {"X-Correlation-ID": correlation_id}
 
     # パスからjob_idを抽出
     path = request.path
     job_id = path.split("/")[-1] if "/status/" in path else request.args.get("job_id")
 
     if not job_id:
-        return create_error_response("job_id is required", 400)
+        return create_error_response("job_id is required", 400, extra_headers=correlation_headers)
 
     logger.debug(f"[GCP] /evaluate/status/{job_id} が呼び出されました")
+    logger.debug(f"[Correlation ID] {correlation_id}")
 
     try:
         response = run_async(handle_status(job_id))
 
         if response.get("status") == "not_found":
-            return create_error_response(f"Job not found: {job_id}", 404)
+            return create_error_response(f"Job not found: {job_id}", 404, extra_headers=correlation_headers)
 
-        return create_response(response)
+        return create_response(response, extra_headers=correlation_headers)
 
     except Exception as e:
         error_details = traceback.format_exc()
         logger.error(f"[GCP] 予期せぬエラー: {e}")
-        return create_error_response(str(e), 500, error_details)
+        return create_error_response(str(e), 500, error_details, extra_headers=correlation_headers)
 
 
 @functions_framework.http
@@ -307,36 +343,43 @@ def evaluate_results(request: Request):
     GET /evaluate/results/{job_id} - ジョブ結果取得エンドポイント
     """
     from core.async_handlers import handle_results
+    from core.correlation import get_or_create_correlation_id
+
+    # 相関ID抽出・設定
+    headers = dict(request.headers)
+    correlation_id = get_or_create_correlation_id(headers)
+    correlation_headers = {"X-Correlation-ID": correlation_id}
 
     # パスからjob_idを抽出
     path = request.path
     job_id = path.split("/")[-1] if "/results/" in path else request.args.get("job_id")
 
     if not job_id:
-        return create_error_response("job_id is required", 400)
+        return create_error_response("job_id is required", 400, extra_headers=correlation_headers)
 
     logger.info(f"[GCP] /evaluate/results/{job_id} が呼び出されました")
+    logger.info(f"[Correlation ID] {correlation_id}")
 
     try:
         response = run_async(handle_results(job_id))
 
         if response.get("status") == "not_found":
-            return create_error_response(f"Job not found: {job_id}", 404)
+            return create_error_response(f"Job not found: {job_id}", 404, extra_headers=correlation_headers)
 
         if response.get("status") not in ["completed", "failed"]:
             return create_response({
                 "job_id": job_id,
                 "status": response.get("status"),
                 "message": "Job not completed yet. Please check status endpoint."
-            }, 202)
+            }, 202, extra_headers=correlation_headers)
 
         logger.info(f"[GCP] 結果返却: {len(response.get('results', []))}件")
-        return create_response(response)
+        return create_response(response, extra_headers=correlation_headers)
 
     except Exception as e:
         error_details = traceback.format_exc()
         logger.error(f"[GCP] 予期せぬエラー: {e}")
-        return create_error_response(str(e), 500, error_details)
+        return create_error_response(str(e), 500, error_details, extra_headers=correlation_headers)
 
 
 # =============================================================================

@@ -164,6 +164,16 @@ class JsonFormatter(logging.Formatter):
             "line": record.lineno,
         }
 
+        # 相関IDを自動的に含める
+        try:
+            from core.correlation import get_correlation_id
+            correlation_id = get_correlation_id()
+            if correlation_id:
+                log_data["correlation_id"] = correlation_id
+        except (ImportError, Exception):
+            # correlation モジュールが利用できない場合はスキップ
+            pass
+
         # 例外情報がある場合は追加
         if record.exc_info:
             log_data["exception"] = {

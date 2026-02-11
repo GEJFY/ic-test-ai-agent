@@ -44,3 +44,16 @@ google-cloud-firestore>=2.0.0
 
 # GCP Cloud Tasks - ジョブキュー
 google-cloud-tasks>=2.0.0
+
+# ==============================================================================
+# Monitoring & Observability（Phase 3: 監視最適化）
+# ==============================================================================
+
+# GCP Cloud Logging/Trace統合
+google-cloud-logging>=3.8.0
+google-cloud-trace>=1.11.0
+opencensus-ext-stackdriver>=0.11.0
+
+# OpenTelemetry（オプション）
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0

@@ -22,7 +22,9 @@ import json
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 import base64
 
-from core.tasks.base_task import TaskType, TaskResult, AuditContext, EvidenceFile
+from core.tasks.base_task import (
+    TaskType, TaskResult, AuditContext, EvidenceFile
+)
 
 
 # =============================================================================
@@ -115,7 +117,10 @@ class TestTaskInfo:
             assert "type" in info
             assert "name" in info
             assert "description" in info
-            assert info["type"] in ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8"]
+            expected_types = [
+                "A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8"
+            ]
+            assert info["type"] in expected_types
 
 
 # =============================================================================
@@ -208,7 +213,9 @@ class TestImageRecognitionTask:
                     file_name="承認書.png",
                     extension=".png",
                     mime_type="image/png",
-                    base64_content=base64.b64encode(b"fake image data").decode()
+                    base64_content=base64.b64encode(
+                        b"fake image data"
+                    ).decode()
                 )
             ]
         )
