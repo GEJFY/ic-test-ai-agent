@@ -9,7 +9,7 @@
 3. [Azure CLIのセットアップ](#3-azure-cliのセットアップ)
 4. [リソースグループの作成](#4-リソースグループの作成)
 5. [Azure Functions](#5-azure-functions)
-6. [Azure AI Foundry (GPT-4o)](#6-azure-ai-foundry-gpt-4o)
+6. [Azure AI Foundry (GPT-5.2)](#6-azure-ai-foundry-gpt-52)
 7. [Document Intelligence](#7-document-intelligence)
 8. [API Management (APIM)](#8-api-management-apim)
 9. [Key Vault](#9-key-vault)
@@ -96,7 +96,7 @@ Azure未経験の方でも、このガイドに沿って進めるだけで以下
 
 本プロジェクトでAzureを選択した主な理由は以下の通りです。
 
-1. **Azure AI Foundry** - GPT-4oなどのOpenAIモデルをエンタープライズ環境で安全に利用可能
+1. **Azure AI Foundry** - GPT-5.2などのOpenAIモデルをエンタープライズ環境で安全に利用可能
 2. **Document Intelligence** - 日本語の業務文書（PDF、Excel等）のOCR処理に強い
 3. **統合セキュリティ** - Key Vault、Managed Identity等でシークレット管理が容易
 4. **日本リージョン** - japaneast（東日本）リージョンでデータ主権を確保
@@ -292,7 +292,7 @@ Azureサブスクリプション
   └── リソースグループ: rg-ic-test-ai-prod
         ├── Azure Functions（APIバックエンド）
         ├── Storage Account（データ保存）
-        ├── Azure AI Foundry（GPT-4o）
+        ├── Azure AI Foundry（GPT-5.2）
         ├── Document Intelligence（文書OCR）
         ├── API Management（API Gateway）
         ├── Key Vault（シークレット管理）
@@ -387,7 +387,7 @@ Azure Functionsは**イベント駆動**のサーバーレスコンピューテ�
     ├── HTTP POST /evaluate ──────→ │                              │
     │                               ├── トリガー起動               │
     │                               ├── リクエスト解析             │
-    │                               ├── GPT-4o呼び出し ─────────→ │
+    │                               ├── GPT-5.2呼び出し ─────────→ │
     │                               │ ←──── 評価結果 ─────────────┤
     │                               ├── レスポンス生成             │
     │ ←────── 評価結果JSON ─────────┤                              │
@@ -558,11 +558,11 @@ Functions in func-ic-test-ai-prod:
 
 ---
 
-## 6. Azure AI Foundry (GPT-4o)
+## 6. Azure AI Foundry (GPT-5.2)
 
 ### 📖 Azure AI Foundryとは
 
-**Azure AI Foundry**（旧Azure OpenAI Service）は、OpenAIのGPT-4o、GPT-4等のモデルをAzureのエンタープライズ環境で利用できるサービスです。
+**Azure AI Foundry**（旧Azure OpenAI Service）は、OpenAIのGPT-5.2、GPT-4等のモデルをAzureのエンタープライズ環境で利用できるサービスです。
 
 **OpenAI直接利用との違い:**
 
@@ -614,12 +614,12 @@ az cognitiveservices account create `
 }
 ```
 
-### GPT-4oモデルのデプロイ
+### GPT-5.2モデルのデプロイ
 
 リソースを作成しただけではモデルは使えません。次に、モデルを**デプロイ**します。
 
 ```powershell
-# GPT-4oモデルをデプロイ
+# GPT-5.2モデルをデプロイ
 az cognitiveservices account deployment create `
   --name ic-test-openai `
   --resource-group rg-ic-test-ai-prod `
@@ -709,7 +709,7 @@ python test_openai.py
 実際に有効に機能しているかを検証することです。具体的には...
 ```
 
-✅ **確認ポイント**: GPT-4oからの応答が日本語で返ってくれば、Azure AI Foundryの設定は成功です。
+✅ **確認ポイント**: GPT-5.2からの応答が日本語で返ってくれば、Azure AI Foundryの設定は成功です。
 
 ### 環境変数の設定
 
@@ -724,12 +724,12 @@ python test_openai.py
 
 ### トークン使用量とコスト管理
 
-GPT-4oの料金はトークン数に基づきます。
+GPT-5.2の料金はトークン数に基づきます。
 
 | モデル | 入力トークン | 出力トークン |
 |--------|------------|------------|
-| GPT-4o | $2.50 / 100万トークン | $10.00 / 100万トークン |
-| GPT-4o-mini | $0.15 / 100万トークン | $0.60 / 100万トークン |
+| GPT-5.2 | $2.50 / 100万トークン | $10.00 / 100万トークン |
+| GPT-5.2-mini | $0.15 / 100万トークン | $0.60 / 100万トークン |
 
 💡 **ヒント**: 内部統制テスト1件あたり約2,000~5,000トークンを使用します。1000件のテスト評価で約$5~$15（約750~2,250円）が目安です。
 
@@ -1217,8 +1217,8 @@ print(f"APIキー: {secret.value[:10]}...")
 
 | シークレット名 | 用途 | 設定元 |
 |--------------|------|--------|
-| `AZURE-FOUNDRY-API-KEY` | GPT-4o APIキー | セクション6で取得 |
-| `AZURE-FOUNDRY-ENDPOINT` | GPT-4oエンドポイント | セクション6で取得 |
+| `AZURE-FOUNDRY-API-KEY` | GPT-5.2 APIキー | セクション6で取得 |
+| `AZURE-FOUNDRY-ENDPOINT` | GPT-5.2エンドポイント | セクション6で取得 |
 | `AZURE-DOCUMENT-INTELLIGENCE-KEY` | Document Intelligence APIキー | セクション7で取得 |
 | `AZURE-DOCUMENT-INTELLIGENCE-ENDPOINT` | Document Intelligenceエンドポイント | セクション7で取得 |
 | `OPENAI-API-KEY` | OpenAI API直接利用時のキー（オプション） | OpenAI管理画面 |
@@ -1236,7 +1236,7 @@ print(f"APIキー: {secret.value[:10]}...")
 主な機能:
 - **リクエスト追跡**: 各API呼び出しの成功/失敗、レスポンスタイムを記録
 - **例外監視**: アプリケーションで発生したエラーを自動記録
-- **依存関係追跡**: 外部サービス（GPT-4o、Document Intelligence等）への呼び出しを記録
+- **依存関係追跡**: 外部サービス（GPT-5.2、Document Intelligence等）への呼び出しを記録
 - **カスタムメトリクス**: 評価件数、処理時間等のビジネスメトリクスを記録
 - **分散トレーシング**: 相関IDを使ったリクエストの追跡
 - **ログクエリ**: KQL（Kusto Query Language）でログを分析
@@ -1830,7 +1830,7 @@ Azureの無料枠と、本プロジェクトの各サービスのコストを把
 | Application Insights | **月5GBまで** | $2.30/GB |
 | Storage Account | **5GB (LRS)** | $0.018/GB/月 |
 | Key Vault | **月1万トランザクション** | $0.03/1万トランザクション |
-| Azure AI Foundry (GPT-4o) | なし | 入力$2.50/出力$10.00 per 100万トークン |
+| Azure AI Foundry (GPT-5.2) | なし | 入力$2.50/出力$10.00 per 100万トークン |
 | Document Intelligence | **月500ページ (F0)** | $1.50/1000ページ (S0) |
 
 ### コスト見積もり（月間）
@@ -1844,7 +1844,7 @@ Azureの無料枠と、本プロジェクトの各サービスのコストを把
 | Application Insights | 1GB/月 | **無料** |
 | Storage Account | 1GB | **$0.02** |
 | Key Vault | 1000回/月 | **無料** |
-| GPT-4o | 50万トークン | **約$4** |
+| GPT-5.2 | 50万トークン | **約$4** |
 | Document Intelligence | 100ページ | **無料 (F0)** |
 | **合計** | | **約$4~5/月（約600~750円）** |
 
@@ -1855,7 +1855,7 @@ Azureの無料枠と、本プロジェクトの各サービスのコストを把
 1. **Consumptionプランを使う**: Functions、APIMともに従量課金で無駄がない
 2. **Application Insightsのサンプリング**: 本番環境ではサンプリング率を10~20%に設定
 3. **Log Analytics保持期間**: 30日（無料枠）を超えないよう設定
-4. **GPT-4o-miniの活用**: 単純な評価にはGPT-4o-mini（1/15のコスト）を使用
+4. **GPT-5.2-miniの活用**: 単純な評価にはGPT-5.2-mini（1/15のコスト）を使用
 5. **リソースの停止/削除**: テスト後は不要なリソースを削除
 
 ### 予算アラートの設定
@@ -1901,7 +1901,7 @@ az group delete --name rg-ic-test-ai-prod --yes --no-wait
 | 1 | Azure CLIによるクラウドリソース管理 | セクション3 |
 | 2 | リソースグループによるリソースの論理的管理 | セクション4 |
 | 3 | サーバーレスアーキテクチャ（Azure Functions） | セクション5 |
-| 4 | AIサービスの設定と利用（GPT-4o） | セクション6 |
+| 4 | AIサービスの設定と利用（GPT-5.2） | セクション6 |
 | 5 | 文書OCR処理（Document Intelligence） | セクション7 |
 | 6 | API Gatewayの構築と認証（APIM） | セクション8 |
 | 7 | シークレット管理のベストプラクティス（Key Vault） | セクション9 |
@@ -1920,7 +1920,7 @@ az group delete --name rg-ic-test-ai-prod --yes --no-wait
 │                                                                 │
 │  ┌──────────┐    ┌──────────────┐    ┌───────────────────┐     │
 │  │  APIM    │───→│ Azure        │───→│ Azure AI Foundry  │     │
-│  │ (Gateway)│    │ Functions    │    │ (GPT-4o)          │     │
+│  │ (Gateway)│    │ Functions    │    │ (GPT-5.2)          │     │
 │  └──────────┘    │ (Python 3.11)│    └───────────────────┘     │
 │       ↑          └──────┬───────┘    ┌───────────────────┐     │
 │       │                 │       └───→│ Document          │     │
@@ -1937,7 +1937,7 @@ az group delete --name rg-ic-test-ai-prod --yes --no-wait
 ### 次に読むべきドキュメント
 
 1. **運用ガイド**: `docs/operations/DEPLOYMENT_GUIDE.md` - CI/CDパイプラインの構築
-2. **API仕様**: `docs/api/` - 各エンドポイントの詳細仕様
+2. **API Gateway設計**: `docs/architecture/API_GATEWAY_DESIGN.md` - APIM/API Gateway/Apigee設計
 3. **監視ダッシュボード**: Application Insightsでのダッシュボード作成方法
 
 ### 参考リンク（公式ドキュメント）

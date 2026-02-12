@@ -28,7 +28,7 @@
 ### 1. 環境変数設定
 
 ```powershell
-$RESOURCE_GROUP = "ic-test-rg"
+$RESOURCE_GROUP = "rg-ic-test-ai-prod"
 $LOCATION = "japaneast"
 $PROJECT_NAME = "ic-test"
 ```
@@ -54,7 +54,7 @@ az deployment group create \
 ```bash
 # Key Vaultにシークレット登録
 az keyvault secret set --vault-name <KEY_VAULT_NAME> \
-  --name "azure-foundry-api-key" --value "<YOUR_API_KEY>"
+  --name "AZURE-FOUNDRY-API-KEY" --value "<YOUR_API_KEY>"
 ```
 
 ### 5. デプロイ検証
@@ -93,7 +93,7 @@ terraform apply tfplan
 ```bash
 # Secrets Managerにシークレット登録
 aws secretsmanager create-secret \
-  --name bedrock-api-key \
+  --name ic-test-ai-prod-bedrock-api-key \
   --secret-string "<YOUR_API_KEY>" \
   --region $AWS_REGION
 ```
@@ -111,7 +111,7 @@ python scripts/validate_deployment.py --platform aws
 ### 1. 環境変数設定
 
 ```bash
-export GCP_PROJECT="ic-test-project"
+export GCP_PROJECT="${GCP_PROJECT_ID}"  # 例: ic-test-ai-prod
 export GCP_REGION="asia-northeast1"
 ```
 

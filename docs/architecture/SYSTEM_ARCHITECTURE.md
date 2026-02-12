@@ -791,7 +791,9 @@ ic-test-ai-agent/
 |   |   |-- correlation.py            # 相関ID管理 (ContextVar)
 |   |   |-- error_handler.py          # 環境適応型エラーハンドリング
 |   |   |-- document_processor.py     # 文書処理
+|   |   |-- highlighting_service.py   # 証跡ハイライトサービス
 |   |   |-- prompts.py                # LLMプロンプトテンプレート
+|   |   |-- types.py                  # 共通型定義 (AuditResult, AuditContext等)
 |   |   |-- tasks/                    # AIタスク群
 |   |   |   |-- __init__.py
 |   |   |   |-- base_task.py          # タスク基底クラス + データモデル
@@ -822,7 +824,15 @@ ic-test-ai-agent/
 |   |   |   |-- aws_secrets.py       # AWS Secrets Manager実装
 |   |   |   |-- gcp_secrets.py       # GCP Secret Manager実装
 |   |   |-- job_storage/             # ジョブストレージ
-|   |       |-- __init__.py
+|   |       |-- __init__.py          # プロバイダー自動検出
+|   |       |-- memory.py            # インメモリ実装（開発用）
+|   |       |-- azure_table.py       # Azure Table Storage実装
+|   |       |-- azure_blob.py        # Azure Blob Storage実装
+|   |       |-- azure_queue.py       # Azure Queue Storage実装
+|   |       |-- aws_dynamodb.py      # AWS DynamoDB実装
+|   |       |-- aws_sqs.py           # AWS SQS実装
+|   |       |-- gcp_firestore.py     # GCP Firestore実装
+|   |       |-- gcp_tasks.py         # GCP Cloud Tasks実装
 |
 |-- platforms/                        # プラットフォーム固有のエントリポイント
 |   |-- azure/                        # Azure Functions
@@ -865,14 +875,28 @@ ic-test-ai-agent/
 |   |-- conftest.py
 |   |-- unit/                         # 単体テスト
 |   |-- integration/                  # 統合テスト
+|   |-- e2e/                          # E2Eテスト
+|   |-- platform/                     # プラットフォーム固有テスト
 |
 |-- docs/                             # ドキュメント
-|   |-- architecture/
-|       |-- SYSTEM_ARCHITECTURE.md    # 本文書
-|       |-- API_GATEWAY_DESIGN.md     # API Gateway設計書
+|   |-- architecture/                 # アーキテクチャ文書
+|   |   |-- SYSTEM_ARCHITECTURE.md   # 本文書
+|   |   |-- API_GATEWAY_DESIGN.md    # API Gateway設計書
+|   |-- setup/                        # セットアップガイド
+|   |-- operations/                   # 運用ガイド
+|   |-- monitoring/                   # 監視関連
+|   |-- security/                     # セキュリティ関連
+|
+|-- scripts/                          # ユーティリティスクリプト
+|   |-- excel/                        # Excel VBAマクロ
+|   |-- powershell/                   # PowerShellスクリプト
 |
 |-- requirements.txt                  # 本番依存パッケージ
 |-- requirements-dev.txt              # 開発用依存パッケージ
+|-- pyproject.toml                    # プロジェクト設定
+|-- Dockerfile                        # コンテナビルド定義
+|-- docker-compose.yml                # ローカル開発用コンテナ構成
+|-- SYSTEM_SPECIFICATION.md           # システム仕様書
 ```
 
 ---
@@ -884,17 +908,17 @@ ic-test-ai-agent/
 | 変数名 | 説明 | デフォルト |
 |--------|------|----------|
 | `ENVIRONMENT` | 実行環境 (production/development) | `development` |
-| `LLM_PROVIDER` | LLMプロバイダー (azure/aws/gcp) | 自動検出 |
+| `LLM_PROVIDER` | LLMプロバイダー (AZURE_FOUNDRY/AWS/GCP/LOCAL) | 自動検出 |
 | `SECRET_PROVIDER` | シークレットプロバイダー | 自動検出 |
 | `MAX_PLAN_REVISIONS` | 計画レビュー最大修正回数 | `1` |
 | `MAX_JUDGMENT_REVISIONS` | 判断レビュー最大修正回数 | `1` |
 | `SKIP_PLAN_CREATION` | 計画作成スキップ | `false` |
-| `JOB_STORAGE_TYPE` | ジョブストレージタイプ | `memory` |
+| `JOB_STORAGE_PROVIDER` | ジョブストレージプロバイダー | `memory` |
 | `DEBUG` | デバッグモード | `false` |
 
 ### B. APIバージョン
 
-現行バージョン: **2.4.0-multiplatform**
+現行バージョン: **2.5.0**
 
 ### C. 参照文書
 

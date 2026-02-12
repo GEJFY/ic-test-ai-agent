@@ -10,6 +10,7 @@
 - **Excel統合**: VBAマクロによる自動データ読み込み・結果書き戻し
 - **マルチクラウド対応**: Azure AI Foundry、AWS Bedrock、GCP Vertex AIをサポート
 - **AI評価**: 8種類の監査タスク（A1-A8）を自動実行
+- **証跡ハイライト**: PDF/Excel/テキストのエビデンス該当箇所を自動ハイライト
 - **非同期処理**: 大量テスト項目のタイムアウト回避
 - **監視統合**: Application Insights、X-Ray、Cloud Loggingによるトレース
 - **セキュリティ**: Key Vault/Secrets Manager統合、相関ID追跡
@@ -18,10 +19,10 @@
 
 | プロバイダー | LLMモデル | OCRサービス | 環境変数値 |
 |-------------|-----------|------------|-----------|
-| Azure AI Foundry | GPT-4o | Document Intelligence | `AZURE_FOUNDRY` |
-| AWS Bedrock | Claude Sonnet | Textract | `AWS` |
-| GCP Vertex AI | Gemini Pro | Document AI | `GCP` |
-| Azure OpenAI | GPT-4o (レガシー) | Document Intelligence | `AZURE` |
+| Azure AI Foundry | GPT-5.2 | Document Intelligence | `AZURE_FOUNDRY` |
+| AWS Bedrock | Claude Opus 4.6 | Textract | `AWS` |
+| GCP Vertex AI | Gemini 3 Pro | Document AI | `GCP` |
+| Azure OpenAI | GPT-5.2 (レガシー) | Document Intelligence | `AZURE` |
 
 ## クイックスタート
 
@@ -133,7 +134,7 @@ VBA/PowerShell → API Gateway (APIM/API Gateway/Apigee)
 ## テスト
 
 ```bash
-# 全テスト実行（505テスト）
+# 全テスト実行（792テスト）
 python -m pytest tests/ -v
 
 # カバレッジレポート生成
@@ -185,12 +186,19 @@ python -m pytest tests/unit/ -v
 
 ## 更新履歴
 
-### Version 1.3.0 (2026-02-11)
+### Version 2.5.0 (2026-02-12)
+
+- 証跡ハイライト機能追加（PDF/Excel/テキスト対応）
+- Azureデプロイ用ソースコード追加（platforms/azure/src/）
+- クラウドコスト見積もり v9.0（為替¥152/USD）
+- セットアップガイドをアーキテクチャと整合性更新
+- 792テストケース
+
+### Version 2.4.0 (2026-02-11)
 
 - コードベース品質改善・ファイル構成整理
 - ドキュメント完全版作成（アーキテクチャ、監視、セキュリティ、運用）
 - セットアップガイドを初心者向け超詳細チュートリアルに刷新
-- 505テストケース（カバレッジ80%以上）
 
 ### Version 1.2.0 (2026-02-08)
 
@@ -208,4 +216,4 @@ python -m pytest tests/unit/ -v
 
 ---
 
-**開発**: Goyo Systems | **更新日**: 2026-02-11
+**開発**: Goyo Systems | **更新日**: 2026-02-12
