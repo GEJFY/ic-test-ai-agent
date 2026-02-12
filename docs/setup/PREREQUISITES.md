@@ -492,11 +492,10 @@ python -m pytest tests/ -v
 ```text
 ========================= test session starts =========================
 ...
-============= 505 passed, 274 skipped in XXs =============
+============= 792 passed, XXX skipped in XXs =============
 ```
 
-- **505 passed**: 505件のテストが成功
-- **274 skipped**: 274件のテストがスキップ（クラウド接続が必要なテスト等）
+- **792 passed**: 792件のテストが成功（環境によりスキップ数は変動）
 - **failed が 0件**: エラーがないこと
 
 > **テストが失敗する場合**: 依存関係が正しくインストールされていない可能性があります。
@@ -521,7 +520,7 @@ APIサーバーをローカル環境で起動して動作確認することも�
 
 ```powershell
 # ローカルサーバーの起動
-python -m uvicorn src.main:app --reload --port 8000
+python -m uvicorn platforms.local.main:app --reload --port 8000
 ```
 
 ブラウザで `http://localhost:8000/docs` にアクセスすると、
