@@ -22,7 +22,7 @@
 ' 【必要なファイル】
 ' - ExcelToJson.bas（本ファイル）
 ' - setting.json（設定ファイル）
-' - CallCloudApi.ps1（PowerShellスクリプト）
+' - scripts/powershell/CallCloudApi.ps1（PowerShellスクリプト）
 '
 ' 【使い方】
 ' 1. setting.jsonでAPI設定と列マッピングを設定
@@ -823,7 +823,8 @@ Private Function CallPowerShellApi(inputPath As String, outputPath As String, co
 
     ' PowerShellスクリプトのパスを取得
     ' OneDrive環境でもローカルパスに変換
-    psScriptPath = GetLocalPath(ThisWorkbook.Path) & "\" & scriptName
+    ' PS1ファイルは scripts/powershell/ に配置
+    psScriptPath = GetLocalPath(ThisWorkbook.Path) & "\scripts\powershell\" & scriptName
 
     WriteLog LOG_LEVEL_DEBUG, "CallPowerShellApi", "スクリプトパス: " & psScriptPath
 
@@ -833,7 +834,7 @@ Private Function CallPowerShellApi(inputPath As String, outputPath As String, co
         ShowErrorMessage ERR_POWERSHELL_SCRIPT_NOT_FOUND, _
                          "PowerShellスクリプトが見つかりません。" & vbCrLf & _
                          "パス: " & psScriptPath & vbCrLf & vbCrLf & _
-                         scriptName & "がExcelファイルと同じフォルダにあるか確認してください。"
+                         scriptName & "が scripts\powershell\ フォルダにあるか確認してください。"
         CallPowerShellApi = False
         Exit Function
     End If
