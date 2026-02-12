@@ -21,6 +21,10 @@ pypdf>=3.0.0
 openpyxl>=3.1.0
 python-docx>=1.0.0
 
+# Evidence highlighting (証跡ハイライト)
+pymupdf>=1.24.0                       # PDF highlighting (PyMuPDF/fitz)
+reportlab>=4.0.0                      # Text-to-PDF with highlighting
+
 # ==============================================================================
 # OCR Providers
 # ==============================================================================

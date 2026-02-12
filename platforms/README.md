@@ -145,50 +145,53 @@ PDF/画像からテキストを抽出する場合は以下のいずれかが必�
 ic-test-ai-agent/
 │
 ├── src/                              # 共通コード（全プラットフォーム共有）
+│   │                                 # ※ 唯一のソースオブトゥルース
+│   │                                 # ※ 各デプロイスクリプトがここからコピー
 │   │
 │   ├── core/                         # ビジネスロジック
 │   │   ├── __init__.py
 │   │   ├── handlers.py               # プラットフォーム非依存ハンドラー
-│   │   │                             # → 全APIリクエストの処理を統一
 │   │   ├── auditor_agent.py          # 監査エージェント
-│   │   │                             # → AIによる評価ロジックのコア
 │   │   ├── graph_orchestrator.py     # LangGraphオーケストレーター
-│   │   │                             # → セルフリフレクション機能
 │   │   ├── document_processor.py     # ドキュメント処理
-│   │   │                             # → PDF/Excel/画像の読み込み
+│   │   ├── highlighting_service.py   # 証跡ハイライト（PDF/Excel/テキスト）
 │   │   └── tasks/                    # 評価タスク定義（A1-A8）
-│   │       ├── __init__.py
-│   │       ├── base_task.py          # 基底クラス
-│   │       ├── a1_semantic_search.py # 意味検索タスク
-│   │       ├── a2_image_recognition.py # 画像認識タスク
-│   │       ├── a3_data_extraction.py # データ抽出タスク
-│   │       ├── a4_stepwise_reasoning.py # 段階的推論タスク
-│   │       ├── a5_semantic_reasoning.py # 意味推論タスク
-│   │       ├── a6_multi_document.py  # 複数文書統合タスク
-│   │       ├── a7_pattern_analysis.py # パターン分析タスク
-│   │       └── a8_sod_detection.py   # 職務分掌検出タスク
+│   │       ├── base_task.py
+│   │       ├── a1_semantic_search.py
+│   │       ├── a2_image_recognition.py
+│   │       ├── a3_data_extraction.py
+│   │       ├── a4_stepwise_reasoning.py
+│   │       ├── a5_semantic_reasoning.py
+│   │       ├── a6_multi_document.py
+│   │       ├── a7_pattern_analysis.py
+│   │       └── a8_sod_detection.py
 │   │
 │   └── infrastructure/               # インフラ抽象化レイヤー
-│       ├── __init__.py
 │       ├── llm_factory.py            # マルチLLM対応ファクトリー
-│       │                             # → Azure/GCP/AWS のLLMを統一インターフェースで提供
-│       └── ocr_factory.py            # マルチOCR対応ファクトリー
-│                                     # → 各社OCRサービスを統一インターフェースで提供
+│       ├── ocr_factory.py            # マルチOCR対応ファクトリー
+│       └── job_storage/              # 非同期ジョブストレージ
 │
-├── platforms/                        # プラットフォーム別エントリーポイント
+├── platforms/                        # プラットフォーム別エントリーポイントのみ
 │   │
 │   ├── azure/                        # Azure Functions
 │   │   ├── function_app.py           # エントリーポイント（HTTPトリガー）
 │   │   ├── host.json                 # Azure Functions ランタイム設定
+│   │   ├── deploy.ps1                # デプロイスクリプト（src/をZIPパッケージ）
 │   │   └── requirements.txt          # Azure用Python依存関係
 │   │
 │   ├── gcp/                          # GCP Cloud Functions
 │   │   ├── main.py                   # エントリーポイント（HTTPトリガー）
+│   │   ├── deploy.ps1                # デプロイスクリプト
 │   │   └── requirements.txt          # GCP用Python依存関係
 │   │
-│   └── aws/                          # AWS Lambda
-│       ├── lambda_handler.py         # エントリーポイント（API Gateway連携）
-│       └── requirements.txt          # AWS用Python依存関係
+│   ├── aws/                          # AWS Lambda
+│   │   ├── lambda_handler.py         # エントリーポイント（API Gateway連携）
+│   │   ├── deploy.ps1                # デプロイスクリプト
+│   │   └── requirements.txt          # AWS用Python依存関係
+│   │
+│   └── local/                        # ローカル/オンプレミス
+│       ├── main.py                   # エントリーポイント（FastAPI）
+│       └── requirements.txt          # ローカル用Python依存関係
 │
 ├── .env.example                      # 環境変数サンプル（★コピーして使用）
 ├── setting.json.example              # VBAマクロ設定サンプル（★コピーして使用）
@@ -203,9 +206,10 @@ ic-test-ai-agent/
 |-------------|------|-------------|
 | `src/core/` | ビジネスロジック（評価処理） | 通常は不要 |
 | `src/infrastructure/` | クラウドサービス抽象化 | 通常は不要 |
-| `platforms/azure/` | Azure Functions 用コード | 通常は不要 |
-| `platforms/gcp/` | GCP Cloud Functions 用コード | 通常は不要 |
-| `platforms/aws/` | AWS Lambda 用コード | 通常は不要 |
+| `platforms/azure/` | Azure Functions エントリーポイント | 通常は不要 |
+| `platforms/gcp/` | GCP Cloud Functions エントリーポイント | 通常は不要 |
+| `platforms/aws/` | AWS Lambda エントリーポイント | 通常は不要 |
+| `platforms/local/` | ローカル/オンプレミス エントリーポイント | 通常は不要 |
 | プロジェクトルート | 設定ファイル | **編集が必要** |
 
 ---
