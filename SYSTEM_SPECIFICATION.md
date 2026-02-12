@@ -92,7 +92,6 @@
     | プロバイダー | 環境変数値 | 説明 | 推奨用途 |
     |-------------|-----------|------|---------|
     | **Azure AI Foundry** | `AZURE_FOUNDRY` | Microsoft統合AIプラットフォーム | **推奨** - GPT-5.2 / GPT-5-nano利用 |
-    | Azure OpenAI | `AZURE` | Azure OpenAI Service | GPT-4o利用（レガシー） |
     | GCP Vertex AI | `GCP` | Google Cloud Gemini | Gemini 2.5 Pro / 3 Pro利用 |
     | AWS Bedrock | `AWS` | Amazon Bedrock | Claude Sonnet 4.5 / Opus 4.6利用 |
 
@@ -188,7 +187,7 @@
                                 ▼
     ┌─────────────────────────────────────────────────────────────────┐
     │                       LLM プロバイダー                          │
-    │  Azure AI Foundry / Azure OpenAI / GCP Vertex AI / AWS Bedrock │
+    │  Azure AI Foundry / GCP Vertex AI / AWS Bedrock                │
     └─────────────────────────────────────────────────────────────────┘
     ```
 
@@ -586,7 +585,6 @@
 
     | プロバイダー | 必須環境変数 |
     |-------------|-------------|
-    | `AZURE` | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT_NAME` |
     | `AZURE_FOUNDRY` | `AZURE_FOUNDRY_ENDPOINT`, `AZURE_FOUNDRY_API_KEY` |
     | `GCP` | `GCP_PROJECT_ID`, `GCP_LOCATION` |
     | `AWS` | `AWS_REGION` |
@@ -999,7 +997,7 @@
     # Azure AI Foundry設定
     AZURE_FOUNDRY_ENDPOINT=https://your-project.openai.azure.com/
     AZURE_FOUNDRY_API_KEY=your-api-key-here
-    AZURE_FOUNDRY_MODEL=gpt-4o
+    AZURE_FOUNDRY_MODEL=gpt-5-nano
     AZURE_FOUNDRY_API_VERSION=2024-02-15-preview
 
     # ==================================================
@@ -1097,7 +1095,7 @@
             LLM_PROVIDER=AZURE_FOUNDRY `
             AZURE_FOUNDRY_ENDPOINT=https://your-project.openai.azure.com/ `
             AZURE_FOUNDRY_API_KEY=your-api-key `
-            AZURE_FOUNDRY_MODEL=gpt-4o
+            AZURE_FOUNDRY_MODEL=gpt-5-nano
     ```
 
     #### ステップ3: デプロイ
@@ -2434,7 +2432,7 @@
     | `global.anthropic.claude-opus-4-6-v1` | 最高性能、グローバル推論 | 約9秒 |
     | `global.anthropic.claude-opus-4-5-20251101-v1:0` | 高性能モデル | 約7秒 |
     | `jp.anthropic.claude-sonnet-4-5-20250929-v1:0` | 日本リージョン、バランス型 | 約1.6秒 |
-    | `anthropic.claude-3-haiku-20240307-v1:0` | 高速・低コスト | 約0.5秒 |
+    | `anthropic.claude-haiku-4-5-20251001-v1:0` | 高速・低コスト | 約0.5秒 |
 
     **環境変数設定**
 
@@ -2948,10 +2946,10 @@
     │  └──────────────┘  └──────────────┘  └──────────────┘         │
     │                                                                 │
     │  【LLMプロバイダー層】                                          │
-    │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐          │
-    │  │  Azure   │ │  Azure   │ │   GCP    │ │   AWS    │          │
-    │  │  Foundry │ │  OpenAI  │ │  Vertex  │ │  Bedrock │          │
-    │  └──────────┘ └──────────┘ └──────────┘ └──────────┘          │
+    │  ┌──────────┐ ┌──────────┐ ┌──────────┐                        │
+    │  │  Azure   │ │   GCP    │ │   AWS    │                        │
+    │  │  Foundry │ │  Vertex  │ │  Bedrock │                        │
+    │  └──────────┘ └──────────┘ └──────────┘                        │
     │                                                                 │
     └─────────────────────────────────────────────────────────────────┘
     ```
@@ -2964,14 +2962,13 @@
     【LangChainの役割】
 
     従来のアプローチ:
-    アプリ ──直接呼び出し──▶ OpenAI API
-    アプリ ──直接呼び出し──▶ Azure OpenAI API  ← 個別実装が必要
-    アプリ ──直接呼び出し──▶ Vertex AI API
+    アプリ ──直接呼び出し──▶ Azure AI Foundry API
+    アプリ ──直接呼び出し──▶ Vertex AI API      ← 個別実装が必要
+    アプリ ──直接呼び出し──▶ Bedrock API
 
     LangChainを使用:
     アプリ ──統一インターフェース──▶ LangChain ──▶ 各種LLM
-                                            ├──▶ OpenAI
-                                            ├──▶ Azure OpenAI
+                                            ├──▶ Azure AI Foundry
                                             ├──▶ Vertex AI
                                             └──▶ Bedrock
     ```

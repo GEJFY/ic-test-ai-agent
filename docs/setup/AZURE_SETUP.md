@@ -96,7 +96,7 @@ Azure未経験の方でも、このガイドに沿って進めるだけで以下
 
 本プロジェクトでAzureを選択した主な理由は以下の通りです。
 
-1. **Azure AI Foundry** - GPT-5.2などのOpenAIモデルをエンタープライズ環境で安全に利用可能
+1. **Azure AI Foundry** - GPT-5.2等の複数モデルをエンタープライズ環境で安全に利用可能
 2. **Document Intelligence** - 日本語の業務文書（PDF、Excel等）のOCR処理に強い
 3. **統合セキュリティ** - Key Vault、Managed Identity等でシークレット管理が容易
 4. **日本リージョン** - japaneast（東日本）リージョンでデータ主権を確保
@@ -292,7 +292,7 @@ Azureサブスクリプション
   └── リソースグループ: rg-ic-test-ai-prod
         ├── Azure Functions（APIバックエンド）
         ├── Storage Account（データ保存）
-        ├── Azure AI Foundry（GPT-5.2）
+        ├── Azure AI Foundry（GPT-5 Nano）
         ├── Document Intelligence（文書OCR）
         ├── API Management（API Gateway）
         ├── Key Vault（シークレット管理）
@@ -387,7 +387,7 @@ Azure Functionsは**イベント駆動**のサーバーレスコンピューテ�
     ├── HTTP POST /evaluate ──────→ │                              │
     │                               ├── トリガー起動               │
     │                               ├── リクエスト解析             │
-    │                               ├── GPT-5.2呼び出し ─────────→ │
+    │                               ├── GPT-5 Nano呼び出し ──────→ │
     │                               │ ←──── 評価結果 ─────────────┤
     │                               ├── レスポンス生成             │
     │ ←────── 評価結果JSON ─────────┤                              │
@@ -461,10 +461,10 @@ func-test-project/
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "LLM_PROVIDER": "AZURE",
+    "LLM_PROVIDER": "AZURE_FOUNDRY",
     "AZURE_FOUNDRY_API_KEY": "<後で設定>",
     "AZURE_FOUNDRY_ENDPOINT": "<後で設定>",
-    "AZURE_FOUNDRY_DEPLOYMENT_NAME": "gpt-4o"
+    "AZURE_FOUNDRY_MODEL": "gpt-5-nano"
   }
 }
 ```
@@ -560,11 +560,11 @@ Functions in func-ic-test-ai-prod:
 
 ## 6. Azure AI Foundry (GPT-5.2)
 
-### 📖 Azure AI Foundryとは
+### Azure AI Foundryとは
 
-**Azure AI Foundry**（旧Azure OpenAI Service）は、OpenAIのGPT-5.2、GPT-4等のモデルをAzureのエンタープライズ環境で利用できるサービスです。
+**Azure AI Foundry**は、GPT-5.2、Claude、Phi-4、Mistral等の複数モデルをAzureのエンタープライズ環境で統合的に利用できるプラットフォームです。
 
-**OpenAI直接利用との違い:**
+**本システムではAzure AI Foundry（`LLM_PROVIDER=AZURE_FOUNDRY`）を推奨します。**
 
 | 観点 | OpenAI API直接 | Azure AI Foundry |
 |------|---------------|-----------------|
@@ -573,18 +573,14 @@ Functions in func-ic-test-ai-prod:
 | コンプライアンス | 限定的 | **SOC2, ISO27001等** |
 | ネットワーク | パブリック | **VNet統合、Private Endpoint対応** |
 | データ利用 | 学習に使われる可能性 | **学習には使われない** |
-| コンテンツフィルタリング | 基本的 | **企業向けのカスタマイズ可能** |
+| モデル選択 | OpenAIのみ | **GPT-5.2, Claude, Phi-4, Mistral等** |
 
-内部統制テストの評価データには機密性の高い業務情報が含まれるため、Azure AI Foundryの利用を推奨します。
-
-### Azure AI Studioでのリソース作成
-
-Azure AI Foundryリソースの作成はAzure CLIで行います。
+### Azure AI Foundryリソースの作成
 
 ```powershell
-# Azure OpenAI リソース作成
+# Azure AI Foundryリソース作成
 az cognitiveservices account create `
-  --name ic-test-openai `
+  --name ic-test-ai-foundry `
   --resource-group rg-ic-test-ai-prod `
   --kind OpenAI `
   --sku S0 `
@@ -592,19 +588,19 @@ az cognitiveservices account create `
 ```
 
 各パラメータの意味:
-- `az cognitiveservices account create`: Cognitive Services（AI系サービスの総称）リソースを作成
-- `--name ic-test-openai`: リソース名
-- `--kind OpenAI`: サービスの種類。`OpenAI` でAzure AI Foundryを指定
+
+- `--name ic-test-ai-foundry`: リソース名
+- `--kind OpenAI`: サービスの種類（Azure AI Foundryの内部種別）
 - `--sku S0`: 料金プラン。S0は標準プラン
 - `--location japaneast`: 東日本リージョン
 
 期待される出力:
 ```json
 {
-  "id": "/subscriptions/.../resourceGroups/rg-ic-test-ai-prod/providers/Microsoft.CognitiveServices/accounts/ic-test-openai",
+  "id": "/subscriptions/.../resourceGroups/rg-ic-test-ai-prod/providers/Microsoft.CognitiveServices/accounts/ic-test-ai-foundry",
   "kind": "OpenAI",
   "location": "japaneast",
-  "name": "ic-test-openai",
+  "name": "ic-test-ai-foundry",
   "properties": {
     "provisioningState": "Succeeded"
   },
@@ -619,33 +615,32 @@ az cognitiveservices account create `
 リソースを作成しただけではモデルは使えません。次に、モデルを**デプロイ**します。
 
 ```powershell
-# GPT-5.2モデルをデプロイ
+# GPT-5 Nanoモデルをデプロイ（コスト効率重視の推奨モデル）
 az cognitiveservices account deployment create `
-  --name ic-test-openai `
+  --name ic-test-ai-foundry `
   --resource-group rg-ic-test-ai-prod `
-  --deployment-name gpt-4o `
-  --model-name gpt-4o `
-  --model-version "2024-08-06" `
+  --deployment-name gpt-5-nano `
+  --model-name gpt-5-nano `
+  --model-version "2026-01-01" `
   --model-format OpenAI `
   --sku-capacity 10 `
   --sku-name "Standard"
 ```
 
 各パラメータの意味:
-- `--deployment-name gpt-4o`: デプロイメント名（API呼び出し時に使用）
-- `--model-name gpt-4o`: 使用するモデル
-- `--model-version "2024-08-06"`: モデルバージョン
+
+- `--deployment-name gpt-5-nano`: デプロイメント名（API呼び出し時に使用）
+- `--model-name gpt-5-nano`: GPT-5 Nano（高速・低レイテンシ、推奨）
+- `--model-version "2026-01-01"`: モデルバージョン
 - `--sku-capacity 10`: トークン/分の割当量（1000トークン/分単位）。10 = 10K TPM
 - `--sku-name "Standard"`: デプロイメントの種類
-
-⚠️ **注意**: `--sku-capacity` はリージョンごとに上限があります。japaneastで利用可能な容量はAzure Portalの「クォータ」ページで確認できます。
 
 ### エンドポイントとAPIキーの取得
 
 ```powershell
 # エンドポイントの取得
 az cognitiveservices account show `
-  --name ic-test-openai `
+  --name ic-test-ai-foundry `
   --resource-group rg-ic-test-ai-prod `
   --query "properties.endpoint" `
   --output tsv
@@ -653,44 +648,36 @@ az cognitiveservices account show `
 
 期待される出力:
 ```
-https://ic-test-openai.openai.azure.com/
+https://ic-test-ai-foundry.openai.azure.com/
 ```
 
 ```powershell
 # APIキーの取得
 az cognitiveservices account keys list `
-  --name ic-test-openai `
+  --name ic-test-ai-foundry `
   --resource-group rg-ic-test-ai-prod `
   --query "key1" `
   --output tsv
 ```
 
-期待される出力:
-```
-abcdef1234567890abcdef1234567890
-```
-
-📖 **学習ポイント - `--query` パラメータ**: Azure CLIでは `--query` でJMESPathクエリを使って出力をフィルタリングできます。JSONの中から必要な値だけを取り出せる便利な機能です。
-
 ### Python SDKでの呼び出しテスト
 
 ```python
-# test_openai.py - Azure AI Foundry接続テスト
+# test_foundry.py - Azure AI Foundry接続テスト
 from openai import AzureOpenAI
 
 client = AzureOpenAI(
     api_key="<取得したAPIキー>",
-    api_version="2024-08-06",
-    azure_endpoint="https://ic-test-openai.openai.azure.com/"
+    api_version="2024-08-01-preview",
+    azure_endpoint="https://ic-test-ai-foundry.openai.azure.com/"
 )
 
 response = client.chat.completions.create(
-    model="gpt-4o",  # デプロイメント名
+    model="gpt-5-nano",  # デプロイメント名
     messages=[
         {"role": "system", "content": "あなたは内部統制の専門家です。"},
         {"role": "user", "content": "内部統制テストの目的を簡潔に説明してください。"}
     ],
-    temperature=0.0,
     max_tokens=500
 )
 
@@ -700,7 +687,7 @@ print(response.choices[0].message.content)
 ```powershell
 # テスト実行
 pip install openai
-python test_openai.py
+python test_foundry.py
 ```
 
 期待される出力例:
@@ -709,7 +696,7 @@ python test_openai.py
 実際に有効に機能しているかを検証することです。具体的には...
 ```
 
-✅ **確認ポイント**: GPT-5.2からの応答が日本語で返ってくれば、Azure AI Foundryの設定は成功です。
+✅ **確認ポイント**: GPT-5 Nanoからの応答が日本語で返ってくれば、Azure AI Foundryの設定は成功です。
 
 ### 環境変数の設定
 
@@ -717,21 +704,21 @@ python test_openai.py
 
 | 環境変数名 | 説明 | 例 |
 |-----------|------|-----|
+| `LLM_PROVIDER` | LLMプロバイダー指定 | `AZURE_FOUNDRY` |
 | `AZURE_FOUNDRY_API_KEY` | APIキー | `abcdef1234...` |
-| `AZURE_FOUNDRY_ENDPOINT` | エンドポイントURL | `https://ic-test-openai.openai.azure.com/` |
-| `AZURE_FOUNDRY_DEPLOYMENT_NAME` | デプロイメント名 | `gpt-4o` |
-| `LLM_PROVIDER` | LLMプロバイダー指定 | `AZURE` |
+| `AZURE_FOUNDRY_ENDPOINT` | エンドポイントURL | `https://ic-test-ai-foundry.openai.azure.com/` |
+| `AZURE_FOUNDRY_MODEL` | モデル名 | `gpt-5-nano` |
 
 ### トークン使用量とコスト管理
 
-GPT-5.2の料金はトークン数に基づきます。
+GPT-5シリーズの料金はトークン数に基づきます。
 
 | モデル | 入力トークン | 出力トークン |
 |--------|------------|------------|
 | GPT-5.2 | $2.50 / 100万トークン | $10.00 / 100万トークン |
-| GPT-5.2-mini | $0.15 / 100万トークン | $0.60 / 100万トークン |
+| GPT-5 Nano | $0.10 / 100万トークン | $0.40 / 100万トークン |
 
-💡 **ヒント**: 内部統制テスト1件あたり約2,000~5,000トークンを使用します。1000件のテスト評価で約$5~$15（約750~2,250円）が目安です。
+💡 **ヒント**: 内部統制テスト1件あたり約2,000~5,000トークンを使用します。GPT-5 Nanoで1000件の評価で約$1~$3（約150~450円）が目安です。
 
 ---
 
@@ -1119,7 +1106,7 @@ az keyvault secret set `
 az keyvault secret set `
   --vault-name kv-ic-test-ai-prod `
   --name "AZURE-FOUNDRY-ENDPOINT" `
-  --value "https://ic-test-openai.openai.azure.com/"
+  --value "https://ic-test-ai-foundry.openai.azure.com/"
 
 # Document Intelligence API Keyを登録
 az keyvault secret set `
@@ -1152,7 +1139,6 @@ AZURE-FOUNDRY-API-KEY
 AZURE-FOUNDRY-ENDPOINT
 AZURE-DOCUMENT-INTELLIGENCE-KEY
 AZURE-DOCUMENT-INTELLIGENCE-ENDPOINT
-OPENAI-API-KEY
 ```
 
 ### 📖 Managed Identity（マネージドID）によるアクセス
@@ -1217,11 +1203,10 @@ print(f"APIキー: {secret.value[:10]}...")
 
 | シークレット名 | 用途 | 設定元 |
 |--------------|------|--------|
-| `AZURE-FOUNDRY-API-KEY` | GPT-5.2 APIキー | セクション6で取得 |
-| `AZURE-FOUNDRY-ENDPOINT` | GPT-5.2エンドポイント | セクション6で取得 |
+| `AZURE-FOUNDRY-API-KEY` | Azure AI Foundry APIキー | セクション6で取得 |
+| `AZURE-FOUNDRY-ENDPOINT` | Azure AI Foundryエンドポイント | セクション6で取得 |
 | `AZURE-DOCUMENT-INTELLIGENCE-KEY` | Document Intelligence APIキー | セクション7で取得 |
 | `AZURE-DOCUMENT-INTELLIGENCE-ENDPOINT` | Document Intelligenceエンドポイント | セクション7で取得 |
-| `OPENAI-API-KEY` | OpenAI API直接利用時のキー（オプション） | OpenAI管理画面 |
 
 ✅ **確認ポイント**: `az keyvault secret list` で全シークレットが登録されていることを確認してください。
 
@@ -1236,7 +1221,7 @@ print(f"APIキー: {secret.value[:10]}...")
 主な機能:
 - **リクエスト追跡**: 各API呼び出しの成功/失敗、レスポンスタイムを記録
 - **例外監視**: アプリケーションで発生したエラーを自動記録
-- **依存関係追跡**: 外部サービス（GPT-5.2、Document Intelligence等）への呼び出しを記録
+- **依存関係追跡**: 外部サービス（Azure AI Foundry、Document Intelligence等）への呼び出しを記録
 - **カスタムメトリクス**: 評価件数、処理時間等のビジネスメトリクスを記録
 - **分散トレーシング**: 相関IDを使ったリクエストの追跡
 - **ログクエリ**: KQL（Kusto Query Language）でログを分析
@@ -1354,6 +1339,32 @@ requests
 | `evaluation_count` | 評価件数 |
 | `llm_token_usage` | LLMトークン使用量 |
 | `error_count` | エラー発生数 |
+
+### アラートルール（Bicep自動設定）
+
+`app-insights.bicep` では以下の2つのアラートルールが自動作成されます。
+
+| アラート名 | 条件 | 重要度 | 評価間隔 |
+| --- | --- | --- | --- |
+| エラー率アラート | 5分間に例外が10件超過 | Warning (2) | 5分毎 |
+| レスポンスタイムアラート | 15分間の平均レスポンスタイムが3秒超過 | Informational (3) | 5分毎 |
+
+### Key Vault診断ログ（Bicep自動設定）
+
+`key-vault.bicep` では、Key VaultのすべてのログとメトリクスをLog Analytics Workspaceに送信する診断設定が自動作成されます。
+
+- **送信先**: Log Analytics Workspace
+- **ログカテゴリ**: allLogs（全カテゴリ）
+- **メトリクス**: AllMetrics
+- **保持期間**: 30日
+
+```kusto
+// Key Vaultのシークレットアクセスログ確認
+AzureDiagnostics
+| where ResourceProvider == "MICROSOFT.KEYVAULT"
+| where OperationName == "SecretGet"
+| summarize Count = count() by Identity, OperationName
+```
 
 ✅ **確認ポイント**: Azure Portal → Application Insights → ログ でクエリが実行でき、データが表示されれば成功です。
 
@@ -1720,7 +1731,7 @@ curl -H "Ocp-Apim-Subscription-Key: $SUB_KEY" "$APIM_URL/api/health"
   "llm": {
     "provider": "AZURE",
     "configured": true,
-    "model": "gpt-4o"
+    "model": "gpt-5-nano"
   },
   "ocr": {
     "provider": "AZURE",
@@ -1791,7 +1802,7 @@ curl -H "Ocp-Apim-Subscription-Key: $SUB_KEY" "$APIM_URL/api/config"
     "status": {
       "provider": "AZURE",
       "configured": true,
-      "model": "gpt-4o"
+      "model": "gpt-5-nano"
     }
   },
   "ocr": {
@@ -1830,7 +1841,7 @@ Azureの無料枠と、本プロジェクトの各サービスのコストを把
 | Application Insights | **月5GBまで** | $2.30/GB |
 | Storage Account | **5GB (LRS)** | $0.018/GB/月 |
 | Key Vault | **月1万トランザクション** | $0.03/1万トランザクション |
-| Azure AI Foundry (GPT-5.2) | なし | 入力$2.50/出力$10.00 per 100万トークン |
+| Azure AI Foundry (GPT-5 Nano) | なし | 入力$0.10/出力$0.40 per 100万トークン |
 | Document Intelligence | **月500ページ (F0)** | $1.50/1000ページ (S0) |
 
 ### コスト見積もり（月間）
@@ -1844,7 +1855,7 @@ Azureの無料枠と、本プロジェクトの各サービスのコストを把
 | Application Insights | 1GB/月 | **無料** |
 | Storage Account | 1GB | **$0.02** |
 | Key Vault | 1000回/月 | **無料** |
-| GPT-5.2 | 50万トークン | **約$4** |
+| GPT-5 Nano | 50万トークン | **約$0.25** |
 | Document Intelligence | 100ページ | **無料 (F0)** |
 | **合計** | | **約$4~5/月（約600~750円）** |
 
@@ -1855,7 +1866,7 @@ Azureの無料枠と、本プロジェクトの各サービスのコストを把
 1. **Consumptionプランを使う**: Functions、APIMともに従量課金で無駄がない
 2. **Application Insightsのサンプリング**: 本番環境ではサンプリング率を10~20%に設定
 3. **Log Analytics保持期間**: 30日（無料枠）を超えないよう設定
-4. **GPT-5.2-miniの活用**: 単純な評価にはGPT-5.2-mini（1/15のコスト）を使用
+4. **GPT-5 Nanoの活用**: 単純な評価にはGPT-5 Nano（高速・低コスト）を使用
 5. **リソースの停止/削除**: テスト後は不要なリソースを削除
 
 ### 予算アラートの設定
@@ -1901,7 +1912,7 @@ az group delete --name rg-ic-test-ai-prod --yes --no-wait
 | 1 | Azure CLIによるクラウドリソース管理 | セクション3 |
 | 2 | リソースグループによるリソースの論理的管理 | セクション4 |
 | 3 | サーバーレスアーキテクチャ（Azure Functions） | セクション5 |
-| 4 | AIサービスの設定と利用（GPT-5.2） | セクション6 |
+| 4 | AIサービスの設定と利用（GPT-5 Nano） | セクション6 |
 | 5 | 文書OCR処理（Document Intelligence） | セクション7 |
 | 6 | API Gatewayの構築と認証（APIM） | セクション8 |
 | 7 | シークレット管理のベストプラクティス（Key Vault） | セクション9 |
@@ -1920,7 +1931,7 @@ az group delete --name rg-ic-test-ai-prod --yes --no-wait
 │                                                                 │
 │  ┌──────────┐    ┌──────────────┐    ┌───────────────────┐     │
 │  │  APIM    │───→│ Azure        │───→│ Azure AI Foundry  │     │
-│  │ (Gateway)│    │ Functions    │    │ (GPT-5.2)          │     │
+│  │ (Gateway)│    │ Functions    │    │ (GPT-5 Nano)      │     │
 │  └──────────┘    │ (Python 3.11)│    └───────────────────┘     │
 │       ↑          └──────┬───────┘    ┌───────────────────┐     │
 │       │                 │       └───→│ Document          │     │

@@ -843,7 +843,7 @@ resource "google_apigee_product" "ic_test_ai" {
     "llm": {
         "provider": "azure_foundry",
         "configured": true,
-        "model": "gpt-4o"
+        "model": "gpt-5-nano"
     },
     "ocr": {
         "provider": "azure_document_intelligence",

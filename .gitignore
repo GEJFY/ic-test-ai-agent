@@ -79,7 +79,7 @@ platforms/aws/infrastructure/
 # -----------------------------------------------------------------------------
 # Claude Code
 # -----------------------------------------------------------------------------
-.claude/settings.local.json
+.claude/
 
 # -----------------------------------------------------------------------------
 # Logs and temporary files
@@ -93,6 +93,8 @@ logs/
 # Test outputs
 # -----------------------------------------------------------------------------
 SampleData/**/output/
+ic_audit_highlighted/
+test_highlighted_output/
 *.xlsm.bak
 test-results/
 **/highlighted/

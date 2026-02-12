@@ -88,7 +88,7 @@ azure_location        = "japaneast"
 azure_llm_config = {
   endpoint    = "https://your-project.japaneast.models.ai.azure.com"
   api_key     = "your-api-key"
-  model       = "gpt-4o"
+  model       = "gpt-5-nano"
 }
 ```
 
@@ -119,7 +119,7 @@ gcp_project_id = "your-project-id"
 gcp_region     = "asia-northeast1"
 
 gcp_llm_config = {
-  model = "gemini-2.5-flash"
+  model = "gemini-3-pro-preview"
 }
 
 gcp_container_image = "asia-northeast1-docker.pkg.dev/your-project/ic-test/app:latest"

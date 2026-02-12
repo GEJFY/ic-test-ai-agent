@@ -621,10 +621,10 @@ Bedrockのモデルを使用するには、事前にアクセス申請が必要�
 4. 左メニューの「Model access（モデルアクセス）」をクリック
 5. 「Manage model access（モデルアクセスを管理）」をクリック
 6. **Anthropic** セクションを見つけ、以下のモデルにチェック：
-   - `Claude 3 Haiku`（高速・低コスト）
-   - `Claude 3 Sonnet`（バランス型・Vision対応）
-   - `Claude Sonnet 4.5`（推奨・最新）
+   - `Claude Haiku 4.5`（高速・低コスト）
+   - `Claude Sonnet 4.5`（推奨・バランス型）
    - `Claude Opus 4.5`（高精度）
+   - `Claude Opus 4.6`（最新・最高性能）
 7. 「Request model access（モデルアクセスをリクエスト）」をクリック
 8. 利用規約に同意
 
@@ -642,8 +642,7 @@ Bedrockのモデルを使用するには、事前にアクセス申請が必要�
 | `global.anthropic.claude-opus-4-6-v1` | Claude Opus 4.6 | ハイエンド: 最高精度 |
 | `global.anthropic.claude-opus-4-5-20251101-v1:0` | Claude Opus 4.5 | 高精度モデル |
 | `global.anthropic.claude-haiku-4-5-v1` | Claude Haiku 4.5 | コスト重視: 高速・低コスト |
-| `anthropic.claude-3-sonnet-20240229-v1:0` | Claude 3 Sonnet | Vision（画像認識）対応 |
-| `anthropic.claude-3-haiku-20240307-v1:0` | Claude 3 Haiku | レガシー: 最低コスト |
+| `global.anthropic.claude-haiku-4-5-v1` | Claude Haiku 4.5 | 高速・低コスト |
 
 💡 **推論プロファイルIDについて**: `jp.*` や `global.*` で始まるIDは推論プロファイルIDです。
 On-demandスループットでは、モデルIDではなく推論プロファイルIDを使用する必要があります。
@@ -731,9 +730,9 @@ AWS_BEDROCK_MODEL_ID=jp.anthropic.claude-sonnet-4-5-20250929-v1:0
 
 | モデル | 入力コスト (1Kトークン) | 出力コスト (1Kトークン) |
 |--------|------------------------|------------------------|
-| Claude 3 Haiku | $0.00025 | $0.00125 |
+| Claude Haiku 4.5 | $0.0008 | $0.004 |
 | Claude Sonnet 4.5 | $0.003 | $0.015 |
-| Claude Opus 4.5 | $0.015 | $0.075 |
+| Claude Opus 4.6 | $0.015 | $0.075 |
 
 💡 **1000トークンは約750単語**（英語）、日本語では約500〜600文字程度です。
 内部統制テスト1件あたりの処理コストは、Claude Sonnet 4.5で約$0.01〜$0.05です。
@@ -1695,7 +1694,7 @@ AWSの無料枠（12か月間）：
 | X-Ray | 10万トレース/月 |
 
 ⚠️ **Bedrockは無料枠なし**: Bedrockのモデル呼び出しは最初から課金されます。
-テスト段階ではClaude 3 Haiku（最安）を使用することを推奨します。
+テスト段階ではClaude Haiku 4.5（最安）を使用することを推奨します。
 
 ### コスト見積もり（月間100リクエストの場合）
 
@@ -1704,15 +1703,16 @@ AWSの無料枠（12か月間）：
 | Lambda（100回 x 平均30秒 x 1024MB） | ~$0.05 |
 | API Gateway（100リクエスト） | ~$0.001 |
 | Bedrock - Claude Sonnet 4.5（100回） | ~$1.00〜$5.00 |
-| Bedrock - Claude 3 Haiku（100回） | ~$0.05〜$0.15 |
+| Bedrock - Claude Haiku 4.5（100回） | ~$0.10〜$0.30 |
 | CloudWatch Logs | ~$0.50 |
 | Secrets Manager（3シークレット） | ~$1.20 |
 | S3 | ~$0.01 |
 | **合計（Sonnet 4.5使用時）** | **~$3〜$7/月** |
-| **合計（Haiku使用時）** | **~$2〜$3/月** |
+| **合計（Haiku 4.5使用時）** | **~$2〜$3/月** |
 
 💡 **コスト最適化のヒント**:
-- 開発・テスト段階ではClaude 3 Haiku を使用
+
+- 開発・テスト段階ではClaude Haiku 4.5 を使用
 - 不要なCloudWatch Logsは保持期間を短縮（30日→7日）
 - 使わなくなった環境は `terraform destroy` で削除
 
