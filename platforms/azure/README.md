@@ -21,7 +21,7 @@
 |---------|------|-----------|
 | Azure Functions | APIホスティング | Consumption (Y1) または Premium |
 | Storage Account | Functions用ストレージ | Standard LRS |
-| Azure AI Foundry または Azure OpenAI | LLM処理 | GPT-4o |
+| Azure AI Foundry | LLM処理 | GPT-5 Nano |
 | Document Intelligence | OCR処理（オプション） | S0 |
 
 ### 非同期処理用（オプション）
@@ -43,13 +43,7 @@
 LLM_PROVIDER=AZURE_FOUNDRY
 AZURE_FOUNDRY_ENDPOINT=https://your-project.region.models.ai.azure.com
 AZURE_FOUNDRY_API_KEY=your-foundry-api-key
-AZURE_FOUNDRY_MODEL=gpt-4o
-
-# または Azure OpenAI Service
-# LLM_PROVIDER=AZURE
-# AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-# AZURE_OPENAI_API_KEY=your-azure-openai-api-key
-# AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o
+AZURE_FOUNDRY_MODEL=gpt-5-nano
 ```
 
 ### OCR設定（オプション）
@@ -188,7 +182,7 @@ az functionapp config appsettings set `
     LLM_PROVIDER=AZURE_FOUNDRY `
     AZURE_FOUNDRY_ENDPOINT=https://your-project.region.models.ai.azure.com `
     AZURE_FOUNDRY_API_KEY=your-api-key `
-    AZURE_FOUNDRY_MODEL=gpt-4o `
+    AZURE_FOUNDRY_MODEL=gpt-5-nano `
     OCR_PROVIDER=NONE
 ```
 
@@ -298,7 +292,7 @@ host.json を編集：
 | サービス | 使用量 | 月額（概算） |
 |---------|--------|-------------|
 | Azure Functions | 1,000回 × 60秒 | ~$0.50 |
-| Azure AI Foundry (GPT-4o) | 7.6M tokens | ~$30 |
+| Azure AI Foundry (GPT-5 Nano) | 7.6M tokens | ~$30 |
 | Document Intelligence | 2,000ページ | ~$3 |
 | Storage Account | 1GB | ~$0.02 |
 | **合計** | | **~$34/月** |
@@ -309,6 +303,5 @@ host.json を編集：
 
 - [Azure Functions 開発者ガイド](https://docs.microsoft.com/ja-jp/azure/azure-functions/)
 - [Azure AI Foundry ドキュメント](https://learn.microsoft.com/ja-jp/azure/ai-studio/)
-- [Azure OpenAI Service](https://learn.microsoft.com/ja-jp/azure/ai-services/openai/)
 - [Azure Document Intelligence](https://learn.microsoft.com/ja-jp/azure/ai-services/document-intelligence/)
 - [Azure Storage ドキュメント](https://docs.microsoft.com/ja-jp/azure/storage/)

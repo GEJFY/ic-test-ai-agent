@@ -549,10 +549,7 @@ Swagger UI（APIドキュメント画面）が表示されます。
 | --- | --- |
 | `AZURE_FOUNDRY_ENDPOINT` | Azure AI Foundry のエンドポイントURL |
 | `AZURE_FOUNDRY_API_KEY` | Azure AI Foundry のAPIキー |
-| `AZURE_FOUNDRY_MODEL` | 使用するモデル名（例: `gpt-5.2`） |
-| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI Service のエンドポイント |
-| `AZURE_OPENAI_API_KEY` | Azure OpenAI Service のAPIキー |
-| `AZURE_OPENAI_DEPLOYMENT_NAME` | デプロイメント名 |
+| `AZURE_FOUNDRY_MODEL` | 使用するモデル名（例: `gpt-5-nano`） |
 | `AZURE_DI_ENDPOINT` | Azure Document Intelligence のエンドポイント |
 | `AZURE_DI_KEY` | Azure Document Intelligence のキー |
 | `AZURE_STORAGE_CONNECTION_STRING` | Azure Storage の接続文字列（非同期ジョブ用） |

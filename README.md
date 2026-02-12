@@ -18,10 +18,9 @@
 
 | プロバイダー | LLMモデル | OCRサービス | 環境変数値 |
 |-------------|-----------|------------|-----------|
-| Azure AI Foundry | GPT-4o | Document Intelligence | `AZURE_FOUNDRY` |
-| AWS Bedrock | Claude Sonnet | Textract | `AWS` |
-| GCP Vertex AI | Gemini Pro | Document AI | `GCP` |
-| Azure OpenAI | GPT-4o (レガシー) | Document Intelligence | `AZURE` |
+| Azure AI Foundry | GPT-5.2 / GPT-5 Nano | Document Intelligence | `AZURE_FOUNDRY` |
+| AWS Bedrock | Claude Opus 4.6 / Sonnet 4.5 | Textract | `AWS` |
+| GCP Vertex AI | Gemini 3 Pro | Document AI | `GCP` |
 
 ## クイックスタート
 

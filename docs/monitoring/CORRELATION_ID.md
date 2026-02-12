@@ -182,7 +182,7 @@ sequenceDiagram
     participant Gateway as API Gateway<br/>(Azure Functions / Lambda / Cloud Functions)
     participant Backend as バックエンド<br/>(FastAPI)
     participant Core as コア処理<br/>(OCR / LLM)
-    participant External as 外部API<br/>(Azure OpenAI / Bedrock / Vertex AI)
+    participant External as 外部API<br/>(Azure AI Foundry / Bedrock / Vertex AI)
 
     Client->>Gateway: POST /api/analyze<br/>X-Correlation-ID: 20260209_1707484800_0001
 

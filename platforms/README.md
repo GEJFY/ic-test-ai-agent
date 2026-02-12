@@ -122,7 +122,6 @@
 | サービス | 必要なもの | 取得方法 |
 |---------|-----------|---------|
 | Azure AI Foundry | エンドポイントURL、APIキー | [Azure Portal](https://portal.azure.com/) → AI Foundry |
-| Azure OpenAI | エンドポイントURL、APIキー、デプロイメント名 | [Azure Portal](https://portal.azure.com/) → OpenAI |
 | GCP Vertex AI | プロジェクトID、サービスアカウント | [GCP Console](https://console.cloud.google.com/) |
 | AWS Bedrock | リージョン、IAM権限 | [AWS Console](https://console.aws.amazon.com/) |
 
@@ -373,7 +372,7 @@ pip install -r requirements.txt
 インストールされる主なパッケージ：
 - `azure-functions`: Azure Functions ランタイム
 - `langchain`: LLMフレームワーク
-- `langchain-openai`: Azure OpenAI 連携
+- `langchain-openai`: Azure AI Foundry 連携
 - `python-dotenv`: 環境変数読み込み
 
 #### ステップ 4: Azure Functions ランタイム設定
@@ -939,16 +938,6 @@ ollama pull llama3.1:8b
 | `AZURE_FOUNDRY_MODEL` | **必須** | モデル名 | `gpt-4o`, `gpt-4o-mini` |
 | `AZURE_FOUNDRY_API_VERSION` | 任意 | APIバージョン | `2024-08-01-preview` |
 
-### Azure OpenAI Service 設定
-
-`LLM_PROVIDER=AZURE` の場合に使用
-
-| 環境変数 | 必須 | 説明 | 例 |
-|---------|------|------|-----|
-| `AZURE_OPENAI_ENDPOINT` | **必須** | OpenAI エンドポイント | `https://your-resource.openai.azure.com/` |
-| `AZURE_OPENAI_API_KEY` | **必須** | APIキー | `xxxxxxxxxxxxxxxx` |
-| `AZURE_OPENAI_DEPLOYMENT_NAME` | **必須** | デプロイメント名 | `gpt-4o` |
-
 ### GCP Vertex AI 設定
 
 `LLM_PROVIDER=GCP` の場合に使用
@@ -1282,7 +1271,7 @@ curl -X POST http://localhost:7071/api/evaluate \
 
 | プラットフォーム | エンドポイント | ステータス | LLMモデル | 認証 |
 |----------------|--------------|----------|----------|------|
-| **Azure Functions** | `func-ic-test-evaluation.azurewebsites.net/api` | Active | Azure OpenAI GPT-4o | Azure AD |
+| **Azure Functions** | `func-ic-test-evaluation.azurewebsites.net/api` | Active | Azure AI Foundry GPT-5 Nano | Azure AD |
 | **GCP Cloud Functions** | `evaluate-a3nd27leoa-uc.a.run.app` | Active | Gemini 2.5 Flash (GA) | AllowUnauthenticated |
 | **AWS Lambda** | `rwk9844rq9.execute-api.ap-northeast-1.amazonaws.com` | Active | Claude Sonnet 4.5 (JP) | API Key |
 
@@ -1492,7 +1481,7 @@ curl https://rwk9844rq9.execute-api.ap-northeast-1.amazonaws.com/health
 | 言語 | Python | 3.11+ | バックエンド実装 |
 | LLMフレームワーク | LangChain | 1.2.9+ | LLM抽象化 |
 | ワークフロー | LangGraph | 1.0.8+ | セルフリフレクション |
-| Azure LLM | langchain-openai | 0.3.0+ | Azure OpenAI/Foundry (GPT-5.x) |
+| Azure LLM | langchain-openai | 0.3.0+ | Azure AI Foundry (GPT-5.x) |
 | GCP LLM | langchain-google-vertexai | 3.0.0+ | Vertex AI (Gemini 3.x) |
 | AWS LLM | langchain-aws | 0.3.0+ | Bedrock (Claude 4.x) |
 | Local LLM | langchain-ollama | 0.3.0+ | Ollama連携 |

@@ -92,7 +92,6 @@
     | プロバイダー | 環境変数値 | 説明 | 推奨用途 |
     |-------------|-----------|------|---------|
     | **Azure AI Foundry** | `AZURE_FOUNDRY` | Microsoft統合AIプラットフォーム | **推奨** - GPT-5.2 / GPT-5-nano利用 |
-    | Azure OpenAI | `AZURE` | Azure OpenAI Service | GPT-4o利用（レガシー） |
     | GCP Vertex AI | `GCP` | Google Cloud Gemini | Gemini 2.5 Pro / 3 Pro利用 |
     | AWS Bedrock | `AWS` | Amazon Bedrock | Claude Sonnet 4.5 / Opus 4.6利用 |
 
@@ -188,7 +187,7 @@
                                 ▼
     ┌─────────────────────────────────────────────────────────────────┐
     │                       LLM プロバイダー                          │
-    │  Azure AI Foundry / Azure OpenAI / GCP Vertex AI / AWS Bedrock │
+    │  Azure AI Foundry / GCP Vertex AI / AWS Bedrock                │
     └─────────────────────────────────────────────────────────────────┘
     ```
 
@@ -586,7 +585,6 @@
 
     | プロバイダー | 必須環境変数 |
     |-------------|-------------|
-    | `AZURE` | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT_NAME` |
     | `AZURE_FOUNDRY` | `AZURE_FOUNDRY_ENDPOINT`, `AZURE_FOUNDRY_API_KEY` |
     | `GCP` | `GCP_PROJECT_ID`, `GCP_LOCATION` |
     | `AWS` | `AWS_REGION` |
@@ -2912,10 +2910,10 @@
     │  └──────────────┘  └──────────────┘  └──────────────┘         │
     │                                                                 │
     │  【LLMプロバイダー層】                                          │
-    │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐          │
-    │  │  Azure   │ │  Azure   │ │   GCP    │ │   AWS    │          │
-    │  │  Foundry │ │  OpenAI  │ │  Vertex  │ │  Bedrock │          │
-    │  └──────────┘ └──────────┘ └──────────┘ └──────────┘          │
+    │  ┌──────────┐ ┌──────────┐ ┌──────────┐                        │
+    │  │  Azure   │ │   GCP    │ │   AWS    │                        │
+    │  │  Foundry │ │  Vertex  │ │  Bedrock │                        │
+    │  └──────────┘ └──────────┘ └──────────┘                        │
     │                                                                 │
     └─────────────────────────────────────────────────────────────────┘
     ```
@@ -2928,14 +2926,13 @@
     【LangChainの役割】
 
     従来のアプローチ:
-    アプリ ──直接呼び出し──▶ OpenAI API
-    アプリ ──直接呼び出し──▶ Azure OpenAI API  ← 個別実装が必要
-    アプリ ──直接呼び出し──▶ Vertex AI API
+    アプリ ──直接呼び出し──▶ Azure AI Foundry API
+    アプリ ──直接呼び出し──▶ Vertex AI API      ← 個別実装が必要
+    アプリ ──直接呼び出し──▶ Bedrock API
 
     LangChainを使用:
     アプリ ──統一インターフェース──▶ LangChain ──▶ 各種LLM
-                                            ├──▶ OpenAI
-                                            ├──▶ Azure OpenAI
+                                            ├──▶ Azure AI Foundry
                                             ├──▶ Vertex AI
                                             └──▶ Bedrock
     ```
