@@ -95,6 +95,9 @@ logs/
 SampleData/**/output/
 *.xlsm.bak
 test-results/
+**/highlighted/
+ic_audit_highlighted/
+test_highlighted_output/
 coverage/
 htmlcov/
 .coverage
