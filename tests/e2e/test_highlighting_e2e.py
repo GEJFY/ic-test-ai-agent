@@ -10,7 +10,7 @@ from pathlib import Path
 SRC_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src'))
 sys.path.append(SRC_PATH)
 
-from core.highlighting_service import HighlightingService
+from core.highlighting_service import HighlightingService, fitz, canvas
 from core.types import AuditResult, AuditContext, EvidenceFile
 
 # -----------------------------------------------------------------------------
@@ -34,23 +34,26 @@ async def test_highlighting_e2e_flow(temp_output_dir):
     PDFとExcelファイルが処理され、出力ファイルが生成されることを検証します。
     """
     # 1. モック入力ファイルの準備
-    # reportlabが利用可能な場合はダミーPDFを作成、そうでない場合はスキップ
-    pdf_content = ""
+    evidence_files = []
+    doc_ref_parts = []
+
+    # reportlabが利用可能な場合はダミーPDFを作成
     try:
-        from reportlab.pdfgen import canvas
+        from reportlab.pdfgen import canvas as rl_canvas
         pdf_path = os.path.join(temp_output_dir, "input.pdf")
-        c = canvas.Canvas(pdf_path)
+        c = rl_canvas.Canvas(pdf_path)
         c.drawString(100, 750, "Audit Evidence Here")
         c.save()
         with open(pdf_path, "rb") as f:
             pdf_content = base64.b64encode(f.read()).decode()
+        evidence_files.append(
+            EvidenceFile("input.pdf", ".pdf", "application/pdf", pdf_content)
+        )
+        doc_ref_parts.append("[input.pdf] : Audit Evidence")
     except ImportError:
-        # reportlabがない場合はPDF生成をスキップ
-        password = None
         pass
 
     # openpyxlが利用可能な場合はダミーExcelを作成
-    xlsx_content = ""
     try:
         import openpyxl
         xlsx_path = os.path.join(temp_output_dir, "input.xlsx")
@@ -60,11 +63,24 @@ async def test_highlighting_e2e_flow(temp_output_dir):
         wb.save(xlsx_path)
         with open(xlsx_path, "rb") as f:
             xlsx_content = base64.b64encode(f.read()).decode()
+        evidence_files.append(
+            EvidenceFile("input.xlsx", ".xlsx",
+                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                         xlsx_content)
+        )
+        doc_ref_parts.append("[input.xlsx] : Evidence Data")
     except ImportError:
-         pass
+        pass
 
-    # ダミーテキストを作成
+    # ダミーテキスト（常に利用可能）
     txt_content = base64.b64encode(b"Log file contains Evidence.").decode()
+    evidence_files.append(
+        EvidenceFile("input.txt", ".txt", "text/plain", txt_content)
+    )
+    doc_ref_parts.append("[input.txt] : Evidence")
+
+    if not evidence_files:
+        pytest.skip("テスト用ファイルを作成できません（依存ライブラリ不足）")
 
     # 2. コンテキストと結果の準備
     context = AuditContext(
@@ -72,19 +88,15 @@ async def test_highlighting_e2e_flow(temp_output_dir):
         control_description="Ctrl",
         test_procedure="Test",
         evidence_link=os.path.abspath(temp_output_dir),
-        evidence_files=[
-            EvidenceFile("input.pdf", ".pdf", "application/pdf", pdf_content),
-            EvidenceFile("input.xlsx", ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsx_content),
-            EvidenceFile("input.txt", ".txt", "text/plain", txt_content)
-        ]
+        evidence_files=evidence_files
     )
 
     audit_result = AuditResult(
         item_id="E2E-TEST",
         evaluation_result=True,
         judgment_basis="OK",
-        document_reference="[input.pdf] : Audit Evidence\n[input.xlsx] : Evidence Data\n[input.txt] : Evidence",
-        file_name="input.pdf",
+        document_reference="\n".join(doc_ref_parts),
+        file_name=evidence_files[0].file_name,
         evidence_files_info=[]
     )
 
@@ -93,7 +105,17 @@ async def test_highlighting_e2e_flow(temp_output_dir):
     results = await service.highlight_evidence(audit_result, context)
 
     # 4. 出力の検証
-    assert len(results) >= 1  # ライブラリが不足していても少なくともテキストは動作するはず
+    # ライブラリが不足している場合、PDF/Excelハイライトはスキップされる可能性がある
+    # テキストファイルのハイライト（PDF変換）もreportlab依存のため、
+    # 全ライブラリ不足時はresultsが空になりうる
+    has_reportlab = canvas is not None
+    has_fitz = fitz is not None
+
+    if has_reportlab or has_fitz:
+        assert len(results) >= 1
+    else:
+        # 依存ライブラリがない場合はExcelのみ成功する可能性がある
+        pass
 
     # ファイルの存在確認（サーバー側一時ディレクトリに出力される）
     for res in results:

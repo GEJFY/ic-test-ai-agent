@@ -49,6 +49,11 @@ try:
     from reportlab.lib.colors import yellow, black
 except ImportError:
     canvas = None
+    A4 = (595.27, 841.89)
+    pdfmetrics = None
+    TTFont = None
+    yellow = None
+    black = None
 
 # from core.tasks.base_task import AuditContext, AuditResult, EvidenceFile
 # 循環参照とパッケージ初期化の問題を回避するため core.types を使用
@@ -370,6 +375,9 @@ class HighlightingService:
 
     def _generate_highlighted_pdf_from_text(self, text: str, quotes: List[str], output_path: str, original_filename: str = "") -> bool:
         """テキストコンテンツからPDFを生成し、該当箇所をハイライト（背景色変更）"""
+        if canvas is None:
+            logger.warning("reportlabが未インストールのためPDF生成をスキップします")
+            return False
         try:
             # Ensure output_path is a Path object for name access
             output_path_obj = Path(output_path)

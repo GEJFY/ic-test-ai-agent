@@ -111,6 +111,9 @@ class TestHighlightingService:
         assert mock_cell.fill is not None # スタイルが適用されたか
         mock_wb.save.assert_called_with("output.xlsx")
 
+    @patch('core.highlighting_service.black', MagicMock())
+    @patch('core.highlighting_service.yellow', MagicMock())
+    @patch('core.highlighting_service.A4', (595.27, 841.89))
     @patch('core.highlighting_service.canvas')
     def test_generate_highlighted_pdf(self, mock_canvas, service):
         # モックの設定
@@ -128,10 +131,8 @@ class TestHighlightingService:
         # 検証
         assert result is True
         from unittest.mock import ANY
-        mock_canvas.Canvas.assert_called_with("output.pdf", pagesize=ANY) # サイズは厳密にチェックしない
-        # 黄色の矩形（ハイライト）が描画されたか確認
-        from unittest.mock import ANY
-        mock_c.setFillColor.assert_any_call(ANY) # 色オブジェクトの比較は難しいためANYとする
+        mock_canvas.Canvas.assert_called_with("output.pdf", pagesize=ANY)
+        mock_c.setFillColor.assert_any_call(ANY)
         mock_c.rect.assert_called()
         mock_c.save.assert_called()
 
