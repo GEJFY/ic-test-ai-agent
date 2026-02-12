@@ -301,7 +301,7 @@ code .env  # VS Code
 LLM_PROVIDER=AZURE_FOUNDRY
 AZURE_FOUNDRY_ENDPOINT=https://your-project.region.models.ai.azure.com
 AZURE_FOUNDRY_API_KEY=your-api-key-here
-AZURE_FOUNDRY_MODEL=gpt-4o
+AZURE_FOUNDRY_MODEL=gpt-5-nano
 
 # OCR設定（PDFのテキスト抽出のみの場合は NONE でOK）
 OCR_PROVIDER=NONE
@@ -477,7 +477,7 @@ az functionapp config appsettings set \
     LLM_PROVIDER=AZURE_FOUNDRY \
     AZURE_FOUNDRY_ENDPOINT=https://your-project.region.models.ai.azure.com \
     AZURE_FOUNDRY_API_KEY=your-api-key \
-    AZURE_FOUNDRY_MODEL=gpt-4o \
+    AZURE_FOUNDRY_MODEL=gpt-5-nano \
     OCR_PROVIDER=NONE
 ```
 
@@ -935,7 +935,7 @@ ollama pull llama3.1:8b
 |---------|------|------|-----|
 | `AZURE_FOUNDRY_ENDPOINT` | **必須** | AI Foundry エンドポイント | `https://your-project.region.models.ai.azure.com` |
 | `AZURE_FOUNDRY_API_KEY` | **必須** | APIキー | `xxxxxxxxxxxxxxxx` |
-| `AZURE_FOUNDRY_MODEL` | **必須** | モデル名 | `gpt-4o`, `gpt-4o-mini` |
+| `AZURE_FOUNDRY_MODEL` | **必須** | モデル名 | `gpt-5-nano`, `gpt-5.2` |
 | `AZURE_FOUNDRY_API_VERSION` | 任意 | APIバージョン | `2024-08-01-preview` |
 
 ### GCP Vertex AI 設定
@@ -946,7 +946,7 @@ ollama pull llama3.1:8b
 |---------|------|------|-----|
 | `GCP_PROJECT_ID` | **必須** | GCPプロジェクトID | `my-project-123456` |
 | `GCP_LOCATION` | 任意 | リージョン | `us-central1` |
-| `GCP_MODEL_NAME` | 任意 | モデル名 | `gemini-1.5-pro` |
+| `GCP_MODEL_NAME` | 任意 | モデル名 | `gemini-3-pro-preview` |
 
 > **認証**: `GOOGLE_APPLICATION_CREDENTIALS` 環境変数にサービスアカウントキーのパスを設定するか、
 > Application Default Credentials を使用してください。
@@ -958,7 +958,7 @@ ollama pull llama3.1:8b
 | 環境変数 | 必須 | 説明 | 例 |
 |---------|------|------|-----|
 | `AWS_REGION` | **必須** | AWSリージョン | `us-east-1`, `ap-northeast-1` |
-| `AWS_BEDROCK_MODEL_ID` | 任意 | モデルID | `anthropic.claude-3-sonnet-20240229-v1:0` |
+| `AWS_BEDROCK_MODEL_ID` | 任意 | モデルID | `jp.anthropic.claude-sonnet-4-5-20250929-v1:0` |
 | `AWS_ACCESS_KEY_ID` | 条件付き | アクセスキー | Lambda では IAM ロール使用 |
 | `AWS_SECRET_ACCESS_KEY` | 条件付き | シークレットキー | Lambda では IAM ロール使用 |
 
@@ -1254,7 +1254,7 @@ curl -X POST http://localhost:7071/api/evaluate \
 
 | 構成 | 月額目安（1000リクエスト） | 備考 |
 |-----|-------------------------|------|
-| Azure Functions + GPT-4o | $50-100 | LLMコストが主 |
+| Azure Functions + GPT-5 Nano | $50-100 | LLMコストが主 |
 | GCP Cloud Functions + Gemini | $30-80 | Gemini は比較的安価 |
 | AWS Lambda + Claude | $50-120 | Claude は高品質だがコスト高め |
 | 任意 + Tesseract | $10-50 | OCRコスト削減 |
@@ -1272,7 +1272,7 @@ curl -X POST http://localhost:7071/api/evaluate \
 | プラットフォーム | エンドポイント | ステータス | LLMモデル | 認証 |
 |----------------|--------------|----------|----------|------|
 | **Azure Functions** | `func-ic-test-evaluation.azurewebsites.net/api` | Active | Azure AI Foundry GPT-5 Nano | Azure AD |
-| **GCP Cloud Functions** | `evaluate-a3nd27leoa-uc.a.run.app` | Active | Gemini 2.5 Flash (GA) | AllowUnauthenticated |
+| **GCP Cloud Functions** | `evaluate-a3nd27leoa-uc.a.run.app` | Active | Gemini 3 Pro | AllowUnauthenticated |
 | **AWS Lambda** | `rwk9844rq9.execute-api.ap-northeast-1.amazonaws.com` | Active | Claude Sonnet 4.5 (JP) | API Key |
 
 ### モデル設定（llm_factory.py）- 2026年2月最新
@@ -1322,7 +1322,7 @@ curl -X POST http://localhost:7071/api/evaluate \
 
 #### GCP Vertex AI (Gemini)
 
-Gemini 2.5 Flash (GA) は追加設定なしで利用可能です。
+Gemini 3 Pro / 2.5 Flash (GA) は追加設定なしで利用可能です。
 
 1. [Vertex AI API](https://console.cloud.google.com/apis/library/aiplatform.googleapis.com?project=ic-test-ai-agent) が有効であることを確認
 2. サービスアカウントに「Vertex AI User」ロールがあることを確認

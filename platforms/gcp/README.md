@@ -21,7 +21,7 @@
 | サービス | 用途 | SKU/プラン |
 |---------|------|-----------|
 | Cloud Functions | APIホスティング | 1024MB+ メモリ推奨 |
-| Vertex AI | LLM処理 | Gemini 1.5 Pro |
+| Vertex AI | LLM処理 | Gemini 3 Pro |
 | Document AI | OCR処理（オプション） | 従量課金 |
 
 ### 非同期処理用（オプション）
@@ -45,8 +45,8 @@ GCP_PROJECT_ID=your-project-id
 GCP_LOCATION=us-central1
 
 # モデル設定（オプション）
-# デフォルト: gemini-1.5-pro
-GCP_MODEL_NAME=gemini-1.5-pro
+# デフォルト: gemini-3-pro-preview
+GCP_MODEL_NAME=gemini-3-pro-preview
 ```
 
 ### OCR設定（オプション）
@@ -338,7 +338,7 @@ gcloud functions deploy evaluate `
 | サービス | 使用量 | 月額（概算） |
 |---------|--------|-------------|
 | Cloud Functions | 1,000回 × 60秒 × 1GB | ~$1 |
-| Vertex AI (Gemini 1.5 Pro) | 7.6M tokens | ~$25 |
+| Vertex AI (Gemini 3 Pro) | 7.6M tokens | ~$25 |
 | Document AI | 2,000ページ | ~$3 |
 | Firestore | 10,000 reads/writes | ~$0.10 |
 | Cloud Tasks | 10,000 タスク | ~$0.01 |

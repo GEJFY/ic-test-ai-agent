@@ -51,8 +51,8 @@ OCR_PROVIDER=AWS  # または NONE
 ### Bedrock モデル設定（オプション）
 
 ```bash
-# デフォルト: anthropic.claude-3-5-sonnet-20241022-v2:0
-AWS_BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0
+# デフォルト: jp.anthropic.claude-sonnet-4-5-20250929-v1:0
+AWS_BEDROCK_MODEL_ID=jp.anthropic.claude-sonnet-4-5-20250929-v1:0
 ```
 
 ### 非同期処理設定（オプション）

@@ -244,7 +244,7 @@ gcloud billing accounts list
 **対策**:
 - ログ保持期間を30日→7日に短縮
 - サンプリング率を10%→5%に削減
-- LLMモデルをGPT-4o→GPT-4o-miniに変更
+- LLMモデルをGPT-5.2→GPT-5 Nanoに変更（コスト削減）
 
 ---
 

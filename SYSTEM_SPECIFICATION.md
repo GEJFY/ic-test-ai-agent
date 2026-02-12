@@ -961,7 +961,7 @@
     # Azure AI Foundry設定
     AZURE_FOUNDRY_ENDPOINT=https://your-project.openai.azure.com/
     AZURE_FOUNDRY_API_KEY=your-api-key-here
-    AZURE_FOUNDRY_MODEL=gpt-4o
+    AZURE_FOUNDRY_MODEL=gpt-5-nano
     AZURE_FOUNDRY_API_VERSION=2024-02-15-preview
 
     # ==================================================
@@ -1059,7 +1059,7 @@
             LLM_PROVIDER=AZURE_FOUNDRY `
             AZURE_FOUNDRY_ENDPOINT=https://your-project.openai.azure.com/ `
             AZURE_FOUNDRY_API_KEY=your-api-key `
-            AZURE_FOUNDRY_MODEL=gpt-4o
+            AZURE_FOUNDRY_MODEL=gpt-5-nano
     ```
 
     #### ステップ3: デプロイ
@@ -2396,7 +2396,7 @@
     | `global.anthropic.claude-opus-4-6-v1` | 最高性能、グローバル推論 | 約9秒 |
     | `global.anthropic.claude-opus-4-5-20251101-v1:0` | 高性能モデル | 約7秒 |
     | `jp.anthropic.claude-sonnet-4-5-20250929-v1:0` | 日本リージョン、バランス型 | 約1.6秒 |
-    | `anthropic.claude-3-haiku-20240307-v1:0` | 高速・低コスト | 約0.5秒 |
+    | `anthropic.claude-haiku-4-5-20251001-v1:0` | 高速・低コスト | 約0.5秒 |
 
     **環境変数設定**
 

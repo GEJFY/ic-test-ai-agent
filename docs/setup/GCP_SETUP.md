@@ -12,7 +12,7 @@
 4. [IAMとサービスアカウント](#4-iamとサービスアカウント)
 5. [必要なAPIの有効化](#5-必要なapiの有効化)
 6. [Cloud Functions](#6-cloud-functions)
-7. [Vertex AI (Gemini Pro)](#7-vertex-ai-gemini-pro)
+7. [Vertex AI (Gemini 3 Pro)](#7-vertex-ai-gemini-3-pro)
 8. [Document AI](#8-document-ai)
 9. [Apigee](#9-apigee)
 10. [Secret Manager](#10-secret-manager)
@@ -411,7 +411,7 @@ Operation "operations/acat.xxxxx" finished successfully.
 | `cloudfunctions.googleapis.com` | Cloud Functions | バックエンドAPI（評価エンドポイント） |
 | `cloudbuild.googleapis.com` | Cloud Build | Cloud Functionsのビルド・デプロイ |
 | `run.googleapis.com` | Cloud Run | Cloud Functions Gen2のベース |
-| `aiplatform.googleapis.com` | Vertex AI | Gemini Proによるテスト評価 |
+| `aiplatform.googleapis.com` | Vertex AI | Gemini 3 Proによるテスト評価 |
 | `documentai.googleapis.com` | Document AI | PDF・画像からのOCRテキスト抽出 |
 | `secretmanager.googleapis.com` | Secret Manager | APIキーの安全な管理 |
 | `logging.googleapis.com` | Cloud Logging | ログの記録・検索 |
@@ -600,15 +600,15 @@ curl -s "${FUNCTION_URL}/health" | python -m json.tool
 
 ---
 
-## 7. Vertex AI (Gemini Pro)
+## 7. Vertex AI (Gemini 3 Pro)
 
 ### 📖 Vertex AI とは
 
 Vertex AIは、GoogleのマネージドAI/MLプラットフォームです。GeminiモデルをはじめとするGoogleの最先端AIモデルにAPI経由でアクセスできます。モデルのトレーニングやデプロイ、推論（予測）をすべてVertex AI上で行えます。
 
-### 📖 Gemini Pro モデル
+### 📖 Gemini 3 Pro モデル
 
-Gemini Proは、Googleが開発した大規模言語モデル（LLM）です。テキスト理解、コード生成、推論に優れ、日本語にも対応しています。
+Gemini 3 Proは、Googleが開発した最新の大規模言語モデル（LLM）です。テキスト理解、コード生成、推論に優れ、日本語にも対応しています。
 
 本システムで使用可能なGeminiモデル:
 
@@ -632,11 +632,11 @@ pip install langchain-google-vertexai google-cloud-aiplatform
 # test_vertex_ai.py - ローカルテスト用スクリプト
 from langchain_google_vertexai import ChatVertexAI
 
-# Gemini 2.5 Flash（GA版、動作確認済み）で接続テスト
+# Gemini 3 Pro Preview で接続テスト（globalリージョン必須）
 llm = ChatVertexAI(
     project="ic-test-ai-xxxxxx",  # あなたのプロジェクトIDに置き換え
-    location="asia-northeast1",    # 東京リージョン
-    model_name="gemini-2.5-flash",
+    location="global",             # Gemini 3 Pro はglobalリージョン必須
+    model_name="gemini-3-pro-preview",
     temperature=0.0
 )
 
@@ -1123,7 +1123,7 @@ timestamp>="2026-02-11T11:00:00Z"
 ```
 [クライアントリクエスト]
   └── [Cloud Functions: evaluate]  ← ルートスパン
-       ├── [Vertex AI: gemini-pro invocation]  ← AI推論スパン
+       ├── [Vertex AI: gemini-3-pro invocation]  ← AI推論スパン
        ├── [Document AI: OCR processing]  ← OCR処理スパン
        └── [Secret Manager: get secret]  ← シークレット取得スパン
 ```
@@ -1540,7 +1540,7 @@ curl -s "${FUNCTION_URL%/evaluate}/config" | python -m json.tool
 ```json
 {
     "llm_provider": "GCP",
-    "llm_model": "gemini-2.5-flash",
+    "llm_model": "gemini-3-pro-preview",
     "ocr_provider": "GCP",
     "region": "asia-northeast1"
 }
@@ -1643,7 +1643,7 @@ python scripts/validate_deployment.py --platform gcp
 | サービス | 想定使用量 | 月額見積もり |
 |---------|-----------|------------|
 | Cloud Functions | 3,000回/月 | ¥0（無料枠内） |
-| Vertex AI (Gemini 2.5 Flash) | 100回/月 | 約¥100〜¥200 |
+| Vertex AI (Gemini 3 Pro) | 100回/月 | 約¥100〜¥200 |
 | Document AI | 50ページ/月 | 約¥50 |
 | Cloud Logging | 1GB/月 | ¥0（無料枠内） |
 | Cloud Trace | 1,000スパン/月 | ¥0（無料枠内） |
@@ -1672,7 +1672,7 @@ gcloud billing budgets list --billing-account=$(gcloud billing accounts list --f
 ### コスト最適化のヒント
 
 1. **Cloud Functionsの最小インスタンスを0にする**: 使わない時はインスタンスが起動しないため課金されません（Terraform設定済み）。
-2. **Gemini 2.5 Flash Liteを使用する**: 高精度が不要な場合は、軽量モデルでコストを削減できます。
+2. **Gemini 2.5 Flash / Flash Liteを使用する**: 高精度が不要な場合は、軽量モデルでコストを削減できます。
 3. **Cloud Traceのサンプリングレートを下げる**: デフォルトの10%で十分です。
 4. **Cloud Storageのライフサイクルルール**: 90日後に自動削除（Terraform設定済み）。
 5. **Apigee評価版を活用**: 開発段階では無料の評価版を使用しましょう。

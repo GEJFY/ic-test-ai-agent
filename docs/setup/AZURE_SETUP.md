@@ -292,7 +292,7 @@ Azureサブスクリプション
   └── リソースグループ: rg-ic-test-ai-prod
         ├── Azure Functions（APIバックエンド）
         ├── Storage Account（データ保存）
-        ├── Azure AI Foundry（GPT-4o）
+        ├── Azure AI Foundry（GPT-5 Nano）
         ├── Document Intelligence（文書OCR）
         ├── API Management（API Gateway）
         ├── Key Vault（シークレット管理）
@@ -387,7 +387,7 @@ Azure Functionsは**イベント駆動**のサーバーレスコンピューテ�
     ├── HTTP POST /evaluate ──────→ │                              │
     │                               ├── トリガー起動               │
     │                               ├── リクエスト解析             │
-    │                               ├── GPT-4o呼び出し ─────────→ │
+    │                               ├── GPT-5 Nano呼び出し ──────→ │
     │                               │ ←──── 評価結果 ─────────────┤
     │                               ├── レスポンス生成             │
     │ ←────── 評価結果JSON ─────────┤                              │
@@ -461,10 +461,10 @@ func-test-project/
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "LLM_PROVIDER": "AZURE",
+    "LLM_PROVIDER": "AZURE_FOUNDRY",
     "AZURE_FOUNDRY_API_KEY": "<後で設定>",
     "AZURE_FOUNDRY_ENDPOINT": "<後で設定>",
-    "AZURE_FOUNDRY_DEPLOYMENT_NAME": "gpt-4o"
+    "AZURE_FOUNDRY_MODEL": "gpt-5-nano"
   }
 }
 ```
@@ -1721,7 +1721,7 @@ curl -H "Ocp-Apim-Subscription-Key: $SUB_KEY" "$APIM_URL/api/health"
   "llm": {
     "provider": "AZURE",
     "configured": true,
-    "model": "gpt-4o"
+    "model": "gpt-5-nano"
   },
   "ocr": {
     "provider": "AZURE",
@@ -1792,7 +1792,7 @@ curl -H "Ocp-Apim-Subscription-Key: $SUB_KEY" "$APIM_URL/api/config"
     "status": {
       "provider": "AZURE",
       "configured": true,
-      "model": "gpt-4o"
+      "model": "gpt-5-nano"
     }
   },
   "ocr": {
@@ -1831,7 +1831,7 @@ Azureの無料枠と、本プロジェクトの各サービスのコストを把
 | Application Insights | **月5GBまで** | $2.30/GB |
 | Storage Account | **5GB (LRS)** | $0.018/GB/月 |
 | Key Vault | **月1万トランザクション** | $0.03/1万トランザクション |
-| Azure AI Foundry (GPT-4o) | なし | 入力$2.50/出力$10.00 per 100万トークン |
+| Azure AI Foundry (GPT-5 Nano) | なし | 入力$2.50/出力$10.00 per 100万トークン |
 | Document Intelligence | **月500ページ (F0)** | $1.50/1000ページ (S0) |
 
 ### コスト見積もり（月間）
@@ -1845,7 +1845,7 @@ Azureの無料枠と、本プロジェクトの各サービスのコストを把
 | Application Insights | 1GB/月 | **無料** |
 | Storage Account | 1GB | **$0.02** |
 | Key Vault | 1000回/月 | **無料** |
-| GPT-4o | 50万トークン | **約$4** |
+| GPT-5 Nano | 50万トークン | **約$4** |
 | Document Intelligence | 100ページ | **無料 (F0)** |
 | **合計** | | **約$4~5/月（約600~750円）** |
 
@@ -1856,7 +1856,7 @@ Azureの無料枠と、本プロジェクトの各サービスのコストを把
 1. **Consumptionプランを使う**: Functions、APIMともに従量課金で無駄がない
 2. **Application Insightsのサンプリング**: 本番環境ではサンプリング率を10~20%に設定
 3. **Log Analytics保持期間**: 30日（無料枠）を超えないよう設定
-4. **GPT-4o-miniの活用**: 単純な評価にはGPT-4o-mini（1/15のコスト）を使用
+4. **GPT-5 Nanoの活用**: 単純な評価にはGPT-5 Nano（高速・低コスト）を使用
 5. **リソースの停止/削除**: テスト後は不要なリソースを削除
 
 ### 予算アラートの設定
@@ -1902,7 +1902,7 @@ az group delete --name rg-ic-test-ai-prod --yes --no-wait
 | 1 | Azure CLIによるクラウドリソース管理 | セクション3 |
 | 2 | リソースグループによるリソースの論理的管理 | セクション4 |
 | 3 | サーバーレスアーキテクチャ（Azure Functions） | セクション5 |
-| 4 | AIサービスの設定と利用（GPT-4o） | セクション6 |
+| 4 | AIサービスの設定と利用（GPT-5 Nano） | セクション6 |
 | 5 | 文書OCR処理（Document Intelligence） | セクション7 |
 | 6 | API Gatewayの構築と認証（APIM） | セクション8 |
 | 7 | シークレット管理のベストプラクティス（Key Vault） | セクション9 |
@@ -1921,7 +1921,7 @@ az group delete --name rg-ic-test-ai-prod --yes --no-wait
 │                                                                 │
 │  ┌──────────┐    ┌──────────────┐    ┌───────────────────┐     │
 │  │  APIM    │───→│ Azure        │───→│ Azure AI Foundry  │     │
-│  │ (Gateway)│    │ Functions    │    │ (GPT-4o)          │     │
+│  │ (Gateway)│    │ Functions    │    │ (GPT-5 Nano)      │     │
 │  └──────────┘    │ (Python 3.11)│    └───────────────────┘     │
 │       ↑          └──────┬───────┘    ┌───────────────────┐     │
 │       │                 │       └───→│ Document          │     │

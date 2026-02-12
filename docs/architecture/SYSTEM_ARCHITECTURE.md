@@ -238,8 +238,8 @@ platforms/
 
 | サービス | Azure | AWS | GCP |
 |---------|-------|-----|-----|
-| **LLM (テキスト)** | Azure AI Foundry (GPT-4o) | Bedrock (Claude) | Vertex AI (Gemini) |
-| **LLM (画像)** | Azure AI Foundry (GPT-4o Vision) | Bedrock (Claude Vision) | Vertex AI (Gemini Vision) |
+| **LLM (テキスト)** | Azure AI Foundry (GPT-5.2) | Bedrock (Claude Opus 4.6) | Vertex AI (Gemini 3 Pro) |
+| **LLM (画像)** | Azure AI Foundry (GPT-5 Nano Vision) | Bedrock (Claude Sonnet 4.5 Vision) | Vertex AI (Gemini 3 Pro Vision) |
 | **OCR** | Document Intelligence | Textract | Document AI |
 
 **ファクトリーパターン:**
