@@ -529,13 +529,13 @@ Layersを使うと、コードとライブラリを分離でき、デプロイ�
 デプロイ前にローカルでLambda関数をテストできます。
 
 ```bash
-# AWS SAM CLIのインストール
+# AWS SAM CLIのインストール（オプション - SAMテンプレート使用時のみ）
 pip install aws-sam-cli
 
 # ローカルでLambda関数を実行
-sam local invoke "IcTestAiFunction" \
-  --event events/test-event.json \
-  --template infrastructure/aws/template.yaml
+# ※ 本プロジェクトはTerraformベースのため、SAMテンプレートは含まれていません。
+# ローカルテストにはpytestを使用してください。
+python -m pytest tests/ -v
 ```
 
 ### Lambda関数の手動デプロイ

@@ -615,7 +615,7 @@ az cognitiveservices account create `
 リソースを作成しただけではモデルは使えません。次に、モデルを**デプロイ**します。
 
 ```powershell
-# GPT-5.2モデルをデプロイ（GPT-5 Nanoを推奨）
+# GPT-5 Nanoモデルをデプロイ（コスト効率重視の推奨モデル）
 az cognitiveservices account deployment create `
   --name ic-test-ai-foundry `
   --resource-group rg-ic-test-ai-prod `
@@ -690,6 +690,14 @@ pip install openai
 python test_foundry.py
 ```
 
+期待される出力例:
+```
+内部統制テストの目的は、組織内の業務プロセスに設計された統制活動が、
+実際に有効に機能しているかを検証することです。具体的には...
+```
+
+✅ **確認ポイント**: GPT-5 Nanoからの応答が日本語で返ってくれば、Azure AI Foundryの設定は成功です。
+
 ### 環境変数の設定
 
 以下の環境変数をFunction Appまたはローカル開発環境に設定します。
@@ -707,8 +715,10 @@ GPT-5シリーズの料金はトークン数に基づきます。
 
 | モデル | 入力トークン | 出力トークン |
 |--------|------------|------------|
-| GPT-5.2 | $2.00 / 100万トークン | $8.00 / 100万トークン |
+| GPT-5.2 | $2.50 / 100万トークン | $10.00 / 100万トークン |
 | GPT-5 Nano | $0.10 / 100万トークン | $0.40 / 100万トークン |
+
+💡 **ヒント**: 内部統制テスト1件あたり約2,000~5,000トークンを使用します。GPT-5 Nanoで1000件の評価で約$1~$3（約150~450円）が目安です。
 
 ---
 
@@ -1831,7 +1841,7 @@ Azureの無料枠と、本プロジェクトの各サービスのコストを把
 | Application Insights | **月5GBまで** | $2.30/GB |
 | Storage Account | **5GB (LRS)** | $0.018/GB/月 |
 | Key Vault | **月1万トランザクション** | $0.03/1万トランザクション |
-| Azure AI Foundry (GPT-5 Nano) | なし | 入力$2.50/出力$10.00 per 100万トークン |
+| Azure AI Foundry (GPT-5 Nano) | なし | 入力$0.10/出力$0.40 per 100万トークン |
 | Document Intelligence | **月500ページ (F0)** | $1.50/1000ページ (S0) |
 
 ### コスト見積もり（月間）
@@ -1845,7 +1855,7 @@ Azureの無料枠と、本プロジェクトの各サービスのコストを把
 | Application Insights | 1GB/月 | **無料** |
 | Storage Account | 1GB | **$0.02** |
 | Key Vault | 1000回/月 | **無料** |
-| GPT-5 Nano | 50万トークン | **約$4** |
+| GPT-5 Nano | 50万トークン | **約$0.25** |
 | Document Intelligence | 100ページ | **無料 (F0)** |
 | **合計** | | **約$4~5/月（約600~750円）** |
 
@@ -1938,7 +1948,7 @@ az group delete --name rg-ic-test-ai-prod --yes --no-wait
 ### 次に読むべきドキュメント
 
 1. **運用ガイド**: `docs/operations/DEPLOYMENT_GUIDE.md` - CI/CDパイプラインの構築
-2. **API仕様**: `docs/api/` - 各エンドポイントの詳細仕様
+2. **API Gateway設計**: `docs/architecture/API_GATEWAY_DESIGN.md` - APIM/API Gateway/Apigee設計
 3. **監視ダッシュボード**: Application Insightsでのダッシュボード作成方法
 
 ### 参考リンク（公式ドキュメント）

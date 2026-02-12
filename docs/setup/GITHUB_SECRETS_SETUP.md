@@ -18,9 +18,9 @@
 | Secret名 | 説明 | 取得方法 |
 |---------|------|---------|
 | `AZURE_CREDENTIALS` | サービスプリンシパル認証情報（JSON形式） | 下記「Azure認証情報の作成」参照 |
-| `AZURE_RESOURCE_GROUP` | リソースグループ名 | 例: `ic-test-rg` |
-| `AZURE_FUNCTION_APP_NAME` | Function App名 | 例: `ic-test-functions` |
-| `AZURE_APIM_ENDPOINT` | APIM エンドポイント | 例: `https://ic-test-apim.azure-api.net/api` |
+| `AZURE_RESOURCE_GROUP` | リソースグループ名 | 例: `rg-ic-test-ai-prod` |
+| `AZURE_FUNCTION_APP_NAME` | Function App名 | 例: `func-ic-test-ai-prod` |
+| `AZURE_APIM_ENDPOINT` | APIM エンドポイント | 例: `https://apim-ic-test-ai-prod.azure-api.net/api` |
 | `AZURE_APIM_SUBSCRIPTION_KEY` | APIM サブスクリプションキー | APIMポータルから取得 |
 
 #### Azure認証情報の作成
@@ -30,7 +30,7 @@
 az ad sp create-for-rbac \
   --name "ic-test-github-actions" \
   --role contributor \
-  --scopes /subscriptions/{subscription-id}/resourceGroups/ic-test-rg \
+  --scopes /subscriptions/{subscription-id}/resourceGroups/rg-ic-test-ai-prod \
   --sdk-auth
 
 # 出力されたJSON全体をAZURE_CREDENTIALSに設定
@@ -60,7 +60,7 @@ az ad sp create-for-rbac \
 |---------|------|---------|
 | `AWS_ACCESS_KEY_ID` | アクセスキーID | IAMユーザー作成時に取得 |
 | `AWS_SECRET_ACCESS_KEY` | シークレットアクセスキー | IAMユーザー作成時に取得 |
-| `AWS_LAMBDA_FUNCTION_NAME` | Lambda関数名 | 例: `ic-test-evaluator` |
+| `AWS_LAMBDA_FUNCTION_NAME` | Lambda関数名 | 例: `ic-test-ai-prod-evaluate` |
 | `AWS_API_GATEWAY_ENDPOINT` | API Gateway エンドポイント | 例: `https://xxxxx.execute-api.ap-northeast-1.amazonaws.com/prod` |
 | `AWS_API_KEY` | API Key | API Gatewayコンソールから取得 |
 

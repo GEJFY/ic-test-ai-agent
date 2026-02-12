@@ -500,7 +500,7 @@ python -m pytest tests/unit/ -v
 ```
 tests/unit/test_tasks.py::test_xxx PASSED
 ...
-467 passed in X.XXs
+792 passed in X.XXs
 ```
 
 ### Cloud Functionsへのデプロイ
