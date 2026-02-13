@@ -4,12 +4,12 @@ test_azure_e2e.py - Azure全体フローのエンドツーエンドテスト
 ================================================================================
 
 【概要】
-VBA → APIM → Azure Functions → Azure AI Foundry の完全フローをテストします。
+VBA → APIM → Azure Container Apps → Azure AI Foundry の完全フローをテストします。
 実際のAzure環境へのデプロイが必要です。
 
 【前提条件】
 1. Azure環境にリソースがデプロイ済み
-   - Azure Functions
+   - Azure Container Apps (FastAPI/Docker)
    - APIM (API Management)
    - Application Insights
    - Key Vault
@@ -34,39 +34,6 @@ import time
 import uuid
 import os
 from typing import Dict, Any
-
-
-# ================================================================================
-# Pytest設定
-# ================================================================================
-
-def pytest_addoption(parser):
-    """
-    E2Eテスト用のコマンドラインオプション追加
-    """
-    parser.addoption(
-        "--e2e",
-        action="store_true",
-        default=False,
-        help="Run E2E tests (requires deployed Azure environment)"
-    )
-
-
-def pytest_configure(config):
-    config.addinivalue_line("markers", "e2e: mark test as end-to-end test")
-
-
-def pytest_collection_modifyitems(config, items):
-    """
-    --e2eオプションなしでE2Eテストをスキップ
-    """
-    if config.getoption("--e2e"):
-        return
-
-    skip_e2e = pytest.mark.skip(reason="need --e2e option to run")
-    for item in items:
-        if "e2e" in item.keywords:
-            item.add_marker(skip_e2e)
 
 
 # ================================================================================
@@ -143,7 +110,7 @@ def test_azure_e2e_evaluate_with_correlation_id(
     test_item: Dict[str, Any]
 ):
     """
-    Azure E2E: VBA模擬 → APIM → Functions → AI Foundry
+    Azure E2E: VBA模擬 → APIM → Container Apps → AI Foundry
     相関IDが全ログに記録されることを確認
     """
     # 1. VBA模擬リクエスト送信

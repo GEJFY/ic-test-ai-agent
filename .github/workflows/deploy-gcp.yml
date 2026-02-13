@@ -4,8 +4,9 @@ on:
   push:
     branches: [main]
     paths:
-      - 'platforms/gcp/**'
+      - 'Dockerfile'
       - 'src/**'
+      - 'platforms/local/**'
       - 'infrastructure/gcp/**'
   workflow_dispatch:
     inputs:
@@ -19,6 +20,7 @@ on:
 env:
   PYTHON_VERSION: '3.11'
   GCP_REGION: 'asia-northeast1'
+  DOCKER_IMAGE_NAME: ic-test-ai-agent
 
 jobs:
   test:
@@ -62,40 +64,48 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.0
+          terraform_wrapper: false
 
       - name: Deploy Infrastructure
         working-directory: ./infrastructure/gcp/terraform
         run: |
           terraform init
-          terraform plan -out=tfplan
+          terraform plan -out=tfplan \
+            -var="container_image_tag=${{ github.sha }}"
           terraform apply -auto-approve tfplan
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      # デプロイパッケージ作成: main.py + requirements.txt + src/*（フラット）
-      # GCPはsrcの中身（core/, infrastructure/）をルートに配置
-      - name: Prepare deployment package
+      - name: Get deployment outputs
+        id: deploy-info
+        working-directory: ./infrastructure/gcp/terraform
         run: |
-          mkdir -p deploy-package
-          cp platforms/gcp/main.py deploy-package/
-          cp platforms/gcp/requirements.txt deploy-package/
-          cp platforms/gcp/.gcloudignore deploy-package/ 2>/dev/null || true
-          cp -r src/* deploy-package/
+          AR_REPO=$(terraform output -raw artifact_registry_url)
+          CLOUD_RUN_URL=$(terraform output -raw cloud_run_service_url)
 
-      - name: Deploy Cloud Functions
+          echo "ar-repo=${AR_REPO}" >> $GITHUB_OUTPUT
+          echo "cloud-run-url=${CLOUD_RUN_URL}" >> $GITHUB_OUTPUT
+
+      # DockerイメージをビルドしてArtifact Registryにプッシュ
+      - name: Auth Docker to Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev
+
+      - name: Build and Push Docker Image
         run: |
-          gcloud functions deploy ic-test-evaluator \
-            --gen2 \
-            --runtime=python311 \
-            --region=${{ env.GCP_REGION }} \
-            --source=./deploy-package \
-            --entry-point=evaluate \
-            --trigger-http \
-            --allow-unauthenticated=false \
-            --set-env-vars="PLATFORM=gcp" \
-            --service-account=${{ secrets.GCP_FUNCTION_SERVICE_ACCOUNT }}
+          AR_REPO=${{ steps.deploy-info.outputs.ar-repo }}
+          docker build -t ${AR_REPO}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }} .
+          docker build -t ${AR_REPO}/${{ env.DOCKER_IMAGE_NAME }}:latest .
+          docker push ${AR_REPO}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
+          docker push ${AR_REPO}/${{ env.DOCKER_IMAGE_NAME }}:latest
+
+      # Cloud Runのイメージを更新
+      - name: Deploy to Cloud Run
+        working-directory: ./infrastructure/gcp/terraform
+        run: |
+          SERVICE_NAME=$(terraform output -raw cloud_run_service_name)
+          AR_REPO=${{ steps.deploy-info.outputs.ar-repo }}
+          gcloud run deploy ${SERVICE_NAME} \
+            --image ${AR_REPO}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }} \
+            --region ${{ env.GCP_REGION }} \
+            --platform managed
 
   validate:
     runs-on: ubuntu-latest

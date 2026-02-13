@@ -191,10 +191,12 @@ class SecurityAuditor:
             )
 
         # プラットフォーム層でのエラーハンドリング確認
+        # コンテナベースデプロイ（FastAPI/Uvicorn共通イメージ）に移行済み
+        # Azure Container Apps / AWS App Runner / GCP Cloud Run
         platform_handlers = [
-            self.root_dir / "platforms" / "azure" / "function_app.py",
-            self.root_dir / "platforms" / "aws" / "lambda_handler.py",
-            self.root_dir / "platforms" / "gcp" / "main.py"
+            self.root_dir / "platforms" / "azure" / "app.py",
+            self.root_dir / "platforms" / "aws" / "app.py",
+            self.root_dir / "platforms" / "gcp" / "app.py"
         ]
 
         for handler_path in platform_handlers:
@@ -203,11 +205,15 @@ class SecurityAuditor:
 
                 # try-exceptブロックの存在確認
                 if "try:" in content and "except" in content:
-                    print(f"  ✓ {handler_path.name}: try-exceptブロックあり")
+                    print(f"  ✓ {handler_path.name} ({handler_path.parent.name}): try-exceptブロックあり")
                 else:
                     self.warnings.append(
-                        f"⚠️  {handler_path.name}: try-exceptブロックが見つかりません"
+                        f"⚠️  {handler_path.parent.name}/{handler_path.name}: try-exceptブロックが見つかりません"
                     )
+            else:
+                self.warnings.append(
+                    f"⚠️  {handler_path.parent.name}/{handler_path.name}: コンテナエントリポイントが見つかりません"
+                )
 
         print()
 
@@ -256,57 +262,45 @@ class SecurityAuditor:
         """CORS設定チェック"""
         print(f"[5/5] CORS設定チェック")
 
-        # Azure Functions
-        azure_function_app = self.root_dir / "platforms" / "azure" / "function_app.py"
-        if azure_function_app.exists():
-            content = azure_function_app.read_text(encoding="utf-8")
+        # コンテナベースデプロイ（FastAPI/Uvicorn共通イメージ）のCORS設定確認
+        # Azure Container Apps / AWS App Runner / GCP Cloud Run
+        platform_cors_checks = [
+            ("azure", self.root_dir / "platforms" / "azure" / "app.py", "Azure (Container Apps)"),
+            ("aws", self.root_dir / "platforms" / "aws" / "app.py", "AWS (App Runner)"),
+            ("gcp", self.root_dir / "platforms" / "gcp" / "app.py", "GCP (Cloud Run)"),
+        ]
 
-            if "Access-Control-Allow-Origin" in content:
-                print(f"  ✓ Azure: CORS設定あり")
-
-                # ワイルドカード使用の警告
+        # 共通Dockerfileやsrc内のFastAPIミドルウェア設定もチェック
+        common_app = self.root_dir / "src" / "app.py"
+        if common_app.exists():
+            content = common_app.read_text(encoding="utf-8")
+            if "CORSMiddleware" in content or "Access-Control-Allow-Origin" in content:
+                print(f"  ✓ 共通FastAPIアプリ: CORS設定あり")
                 if '"*"' in content or "'*'" in content:
                     self.warnings.append(
-                        "⚠️  Azure: CORSでワイルドカード(*)が使用されています（本番環境では制限推奨）"
+                        "⚠️  共通FastAPIアプリ: CORSでワイルドカード(*)が使用されています（本番環境では制限推奨）"
                     )
             else:
                 self.info.append(
-                    "ℹ️  Azure: CORS設定が見つかりません（必要に応じて設定）"
+                    "ℹ️  共通FastAPIアプリ: CORS設定が見つかりません（必要に応じて設定）"
                 )
 
-        # AWS Lambda
-        aws_lambda_handler = self.root_dir / "platforms" / "aws" / "lambda_handler.py"
-        if aws_lambda_handler.exists():
-            content = aws_lambda_handler.read_text(encoding="utf-8")
+        for platform_name, app_path, display_name in platform_cors_checks:
+            if app_path.exists():
+                content = app_path.read_text(encoding="utf-8")
 
-            if "Access-Control-Allow-Origin" in content:
-                print(f"  ✓ AWS: CORS設定あり")
+                if "CORSMiddleware" in content or "Access-Control-Allow-Origin" in content:
+                    print(f"  ✓ {display_name}: CORS設定あり")
 
-                if '"*"' in content or "'*'" in content:
-                    self.warnings.append(
-                        "⚠️  AWS: CORSでワイルドカード(*)が使用されています（本番環境では制限推奨）"
+                    # ワイルドカード使用の警告
+                    if '"*"' in content or "'*'" in content:
+                        self.warnings.append(
+                            f"⚠️  {display_name}: CORSでワイルドカード(*)が使用されています（本番環境では制限推奨）"
+                        )
+                else:
+                    self.info.append(
+                        f"ℹ️  {display_name}: CORS設定が見つかりません（必要に応じて設定）"
                     )
-            else:
-                self.info.append(
-                    "ℹ️  AWS: CORS設定が見つかりません（必要に応じて設定）"
-                )
-
-        # GCP Cloud Functions
-        gcp_main = self.root_dir / "platforms" / "gcp" / "main.py"
-        if gcp_main.exists():
-            content = gcp_main.read_text(encoding="utf-8")
-
-            if "Access-Control-Allow-Origin" in content:
-                print(f"  ✓ GCP: CORS設定あり")
-
-                if '"*"' in content or "'*'" in content:
-                    self.warnings.append(
-                        "⚠️  GCP: CORSでワイルドカード(*)が使用されています（本番環境では制限推奨）"
-                    )
-            else:
-                self.info.append(
-                    "ℹ️  GCP: CORS設定が見つかりません（必要に応じて設定）"
-                )
 
         print()
 

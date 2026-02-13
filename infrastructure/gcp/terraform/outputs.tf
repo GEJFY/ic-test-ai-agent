@@ -6,7 +6,7 @@
 # デプロイ完了後に必要な情報を出力します。
 #
 # 【出力内容】
-# - Cloud FunctionsエンドポイントURL（VBA/PowerShell設定用）
+# - Cloud RunエンドポイントURL（VBA/PowerShell設定用）
 # - ApigeeエンドポイントURL（有効な場合）
 # - Cloud Monitoring ダッシュボードURL
 # - Cloud Trace URL
@@ -38,17 +38,17 @@ output "region" {
 }
 
 # ------------------------------------------------------------------------------
-# Cloud Functions
+# Cloud Run
 # ------------------------------------------------------------------------------
 
-output "cloud_functions_endpoint" {
-  description = "Cloud FunctionsエンドポイントURL（VBA/PowerShellに設定）"
-  value       = "${google_cloudfunctions2_function.evaluate.service_config[0].uri}/evaluate"
+output "cloud_run_endpoint" {
+  description = "Cloud RunエンドポイントURL（VBA/PowerShellに設定）"
+  value       = "${google_cloud_run_v2_service.ic_test_ai.uri}/evaluate"
 }
 
-output "cloud_functions_console_url" {
-  description = "Cloud Functions管理コンソールURL"
-  value       = "https://console.cloud.google.com/functions/details/${var.region}/${google_cloudfunctions2_function.evaluate.name}?project=${var.project_id}"
+output "cloud_run_console_url" {
+  description = "Cloud Run管理コンソールURL"
+  value       = "https://console.cloud.google.com/run/detail/${var.region}/${google_cloud_run_v2_service.ic_test_ai.name}?project=${var.project_id}"
 }
 
 # ------------------------------------------------------------------------------
@@ -57,7 +57,7 @@ output "cloud_functions_console_url" {
 
 output "apigee_endpoint" {
   description = "ApigeeエンドポイントURL（有効な場合）"
-  value       = var.enable_apigee ? (length(google_apigee_envgroup.prod) > 0 ? "https://${google_apigee_envgroup.prod[0].hostnames[0]}/api/evaluate" : "N/A") : "Apigee disabled - use Cloud Functions URI"
+  value       = var.enable_apigee ? (length(google_apigee_envgroup.prod) > 0 ? "https://${google_apigee_envgroup.prod[0].hostnames[0]}/api/evaluate" : "N/A") : "Apigee disabled - use Cloud Run URI"
 }
 
 output "apigee_console_url" {
@@ -83,20 +83,8 @@ output "secret_manager_console_url" {
 # Cloud Monitoring / Logging / Trace
 # ------------------------------------------------------------------------------
 
-output "cloud_logging_url" {
-  description = "Cloud Logging URL（Cloud Functions）"
-  value       = "https://console.cloud.google.com/logs/query;query=resource.type%3D%22cloud_function%22%0Aresource.labels.function_name%3D%22${google_cloudfunctions2_function.evaluate.name}%22;project=${var.project_id}"
-}
-
-output "cloud_trace_url" {
-  description = "Cloud Trace URL"
-  value       = var.enable_cloud_trace ? "https://console.cloud.google.com/traces/list?project=${var.project_id}" : "Cloud Trace disabled"
-}
-
-output "cloud_monitoring_dashboard_url" {
-  description = "Cloud Monitoringダッシュボード URL"
-  value       = "https://console.cloud.google.com/monitoring/dashboards/custom/${google_monitoring_dashboard.ic_test_ai.id}?project=${var.project_id}"
-}
+# Note: cloud_logging_url, cloud_trace_url, cloud_monitoring_dashboard_url
+# は cloud-logging.tf で定義されています。
 
 # ------------------------------------------------------------------------------
 # デプロイ後の手順
@@ -116,46 +104,31 @@ output "post_deployment_steps" {
    gcloud secrets versions add ${google_secret_manager_secret.document_ai_api_key.secret_id} \
      --data-file=- <<< "<実際のAPIキー>"
 
-2. Cloud Functionsにコードをデプロイ:
-   cd platforms/gcp
+2. Artifact RegistryにDockerイメージをプッシュ:
+   gcloud auth configure-docker ${var.region}-docker.pkg.dev
+   docker build -t ${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.ic_test_ai.repository_id}/ic-test-ai-agent:latest .
+   docker push ${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.ic_test_ai.repository_id}/ic-test-ai-agent:latest
 
-   # デプロイパッケージ作成
-   mkdir -p package
-   cp -r ../../src package/
-   cp main.py package/
-   cp requirements.txt package/
-   cd package
-   zip -r ../function-source.zip .
-   cd ..
+3. Cloud Runを更新:
+   gcloud run deploy ${google_cloud_run_v2_service.ic_test_ai.name} \
+     --image ${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.ic_test_ai.repository_id}/ic-test-ai-agent:latest \
+     --region ${var.region} \
+     --platform managed
 
-   # Cloud Storageにアップロード
-   gcloud storage cp function-source.zip gs://${google_storage_bucket.function_source.name}/
+4. VBA/PowerShellのエンドポイントを更新:
+   ${var.enable_apigee ? "- Apigee経由: terraform output apigee_endpoint" : "- Cloud Run直接: ${google_cloud_run_v2_service.ic_test_ai.uri}/evaluate"}
 
-   # Cloud Functions更新
-   gcloud functions deploy ${google_cloudfunctions2_function.evaluate.name} \
-     --gen2 \
-     --region=${var.region} \
-     --source=gs://${google_storage_bucket.function_source.name}/function-source.zip \
-     --runtime=python311 \
-     --entry-point=evaluate
-
-   # クリーンアップ
-   rm -rf package function-source.zip
-
-3. VBA/PowerShellのエンドポイントを更新:
-   ${var.enable_apigee ? "- Apigee経由: terraform output apigee_endpoint" : "- Cloud Functions直接: ${google_cloudfunctions2_function.evaluate.service_config[0].uri}/evaluate"}
-
-4. 相関IDフローを確認:
+5. 相関IDフローを確認:
    Cloud Loggingで以下のクエリを実行:
 
-   resource.type="cloud_function"
-   resource.labels.function_name="${google_cloudfunctions2_function.evaluate.name}"
+   resource.type="cloud_run_revision"
+   resource.labels.service_name="${google_cloud_run_v2_service.ic_test_ai.name}"
    jsonPayload.correlation_id="<X-Correlation-IDヘッダーの値>"
 
-5. Cloud Traceで依存関係を確認:
+6. Cloud Traceで依存関係を確認:
    ${var.enable_cloud_trace ? "https://console.cloud.google.com/traces/list?project=${var.project_id}" : "Cloud Traceが無効です"}
 
-${var.enable_apigee ? "\n6. Apigee APIプロキシを手動で設定:\n   - Apigee Console → API Proxies → Create\n   - ターゲット: ${google_cloudfunctions2_function.evaluate.service_config[0].uri}\n   - ポリシー: VerifyAPIKey, AssignMessage(相関ID), Quota" : ""}
+${var.enable_apigee ? "\n7. Apigee APIプロキシを手動で設定:\n   - Apigee Console → API Proxies → Create\n   - ターゲット: ${google_cloud_run_v2_service.ic_test_ai.uri}\n   - ポリシー: VerifyAPIKey, AssignMessage(相関ID), Quota" : ""}
 
 ========================================
 EOT

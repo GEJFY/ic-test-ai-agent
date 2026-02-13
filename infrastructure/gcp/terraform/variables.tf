@@ -61,31 +61,37 @@ variable "labels" {
 }
 
 # ------------------------------------------------------------------------------
-# Cloud Functions設定
+# Cloud Run設定
 # ------------------------------------------------------------------------------
 
-variable "function_runtime" {
-  description = "Cloud Functions実行環境"
+variable "container_cpu" {
+  description = "Cloud Run CPU（例: 1 = 1 vCPU）"
   type        = string
-  default     = "python311"
+  default     = "1"
 }
 
-variable "function_timeout" {
-  description = "Cloud Functions実行タイムアウト（秒）"
+variable "container_memory" {
+  description = "Cloud Run メモリ（例: 512Mi, 1Gi）"
+  type        = string
+  default     = "1Gi"
+}
+
+variable "container_timeout" {
+  description = "Cloud Run リクエストタイムアウト（秒）"
   type        = number
   default     = 540
 }
 
-variable "function_memory" {
-  description = "Cloud Functionsメモリサイズ（MB）"
-  type        = number
-  default     = 1024
-}
-
-variable "function_max_instances" {
-  description = "Cloud Functions最大インスタンス数"
+variable "container_max_instances" {
+  description = "Cloud Run 最大インスタンス数"
   type        = number
   default     = 10
+}
+
+variable "container_image_tag" {
+  description = "Dockerイメージタグ（CDワークフローから上書き）"
+  type        = string
+  default     = "latest"
 }
 
 # ------------------------------------------------------------------------------
@@ -149,16 +155,6 @@ variable "enable_cloud_trace" {
   description = "Cloud Traceトレーシングを有効化"
   type        = bool
   default     = true
-}
-
-# ------------------------------------------------------------------------------
-# Cloud Storage設定
-# ------------------------------------------------------------------------------
-
-variable "storage_lifecycle_age" {
-  description = "Cloud Storageオブジェクトの自動削除日数"
-  type        = number
-  default     = 90
 }
 
 # ------------------------------------------------------------------------------

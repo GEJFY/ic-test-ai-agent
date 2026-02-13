@@ -1,5 +1,5 @@
 # deploy.ps1
-# GCP Cloud Functions deploy script
+# GCP Cloud Run deploy script (Docker)
 
 param(
     [Parameter(Mandatory=$true)]
@@ -9,22 +9,13 @@ param(
     [string]$Region = "asia-northeast1",
 
     [Parameter(Mandatory=$false)]
-    [string]$FunctionName = "evaluate",
+    [string]$ServiceName = "ic-test-ai-prod-api",
 
     [Parameter(Mandatory=$false)]
-    [int]$MemoryMB = 1024,
+    [string]$ImageTag = "latest",
 
     [Parameter(Mandatory=$false)]
-    [int]$TimeoutSeconds = 540,
-
-    [Parameter(Mandatory=$false)]
-    [switch]$AllowUnauthenticated = $false,
-
-    [Parameter(Mandatory=$false)]
-    [switch]$SkipEnvSetup = $false,
-
-    [Parameter(Mandatory=$false)]
-    [switch]$DeployAll = $false
+    [switch]$AllowUnauthenticated = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,15 +23,17 @@ $ErrorActionPreference = "Stop"
 # Configuration
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
-$SrcDir = Join-Path $ProjectRoot "src"
-$DeployDir = Join-Path $ScriptDir ".deploy"
+$RepoName = "ic-test-ai-prod"
+$ImageName = "ic-test-ai-agent"
+$FullImageName = "${Region}-docker.pkg.dev/${ProjectId}/${RepoName}/${ImageName}:${ImageTag}"
 
 Write-Host "=============================================="
-Write-Host "GCP Cloud Functions Deploy Script"
+Write-Host "GCP Cloud Run Deploy Script (Docker)"
 Write-Host "=============================================="
 Write-Host "Project ID: $ProjectId"
 Write-Host "Region: $Region"
-Write-Host "Function Name: $FunctionName"
+Write-Host "Service Name: $ServiceName"
+Write-Host "Image: $FullImageName"
 Write-Host "Project Root: $ProjectRoot"
 Write-Host ""
 
@@ -66,8 +59,8 @@ gcloud config set project $ProjectId 2>$null
 Write-Host "[2/5] Enabling APIs..."
 
 $apis = @(
-    "cloudfunctions.googleapis.com",
-    "cloudbuild.googleapis.com",
+    "run.googleapis.com",
+    "artifactregistry.googleapis.com",
     "aiplatform.googleapis.com"
 )
 
@@ -76,92 +69,57 @@ foreach ($api in $apis) {
     Write-Host "      Enabled: $api"
 }
 
-# 3. Create deploy package
-Write-Host "[3/5] Creating deploy package..."
+# 3. Build Docker image
+Write-Host "[3/5] Building Docker image..."
 
-if (Test-Path $DeployDir) {
-    Remove-Item -Path $DeployDir -Recurse -Force
+Push-Location $ProjectRoot
+
+# Auth Docker to Artifact Registry
+gcloud auth configure-docker "${Region}-docker.pkg.dev" --quiet
+
+docker build -t $FullImageName .
+if ($LASTEXITCODE -ne 0) {
+    Pop-Location
+    Write-Error "Docker build failed."
+    exit 1
 }
 
-New-Item -ItemType Directory -Path $DeployDir -Force | Out-Null
+docker tag $FullImageName "${Region}-docker.pkg.dev/${ProjectId}/${RepoName}/${ImageName}:latest"
+Write-Host "      Build complete"
 
-$platformFiles = @("main.py", "requirements.txt", ".gcloudignore")
+# 4. Push to Artifact Registry
+Write-Host "[4/5] Pushing to Artifact Registry..."
 
-foreach ($file in $platformFiles) {
-    $sourcePath = Join-Path $ScriptDir $file
-    if (Test-Path $sourcePath) {
-        Copy-Item -Path $sourcePath -Destination $DeployDir
-        Write-Host "      Copied: $file"
-    }
+docker push $FullImageName
+docker push "${Region}-docker.pkg.dev/${ProjectId}/${RepoName}/${ImageName}:latest"
+
+if ($LASTEXITCODE -ne 0) {
+    Pop-Location
+    Write-Error "Artifact Registry push failed."
+    exit 1
 }
 
-# Copy contents of src/ (not the src folder itself) so core/ and infrastructure/ are at root level
-Get-ChildItem -Path $SrcDir | ForEach-Object {
-    Copy-Item -Path $_.FullName -Destination $DeployDir -Recurse
-}
-Write-Host "      Copied: src/* (core/, infrastructure/)"
+Pop-Location
+Write-Host "      Push complete"
 
-Get-ChildItem -Path $DeployDir -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-Get-ChildItem -Path $DeployDir -Recurse -File -Filter "*.pyc" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
-
-Write-Host "      Package ready"
-
-# 4. Deploy to Cloud Functions
-Write-Host "[4/5] Deploying to Cloud Functions..."
+# 5. Deploy to Cloud Run
+Write-Host "[5/5] Deploying to Cloud Run..."
 
 $authFlag = if ($AllowUnauthenticated) { "--allow-unauthenticated" } else { "--no-allow-unauthenticated" }
-$envVars = "LLM_PROVIDER=GCP,GCP_PROJECT_ID=$ProjectId,OCR_PROVIDER=NONE"
 
-$functions = @(
-    @{Name="evaluate"; EntryPoint="evaluate"; Methods="POST"},
-    @{Name="health"; EntryPoint="health"; Methods="GET"},
-    @{Name="config"; EntryPoint="config_status"; Methods="GET"}
-)
+gcloud run deploy $ServiceName `
+    --image $FullImageName `
+    --region $Region `
+    --platform managed `
+    $authFlag `
+    --quiet
 
-if (-not $DeployAll) {
-    $functions = @(@{Name=$FunctionName; EntryPoint=$FunctionName; Methods="POST,GET"})
-}
-
-foreach ($func in $functions) {
-    Write-Host "      Deploying: $($func.Name)..."
-
-    Push-Location $DeployDir
-
-    $deployArgs = @(
-        "functions", "deploy", $func.Name,
-        "--gen2",
-        "--runtime", "python311",
-        "--trigger-http",
-        $authFlag,
-        "--entry-point", $func.EntryPoint,
-        "--region", $Region,
-        "--timeout", "${TimeoutSeconds}s",
-        "--memory", "${MemoryMB}MB",
-        "--set-env-vars", $envVars,
-        "--source", ".",
-        "--quiet"
-    )
-
-    & gcloud @deployArgs
-
-    if ($LASTEXITCODE -ne 0) {
-        Pop-Location
-        Write-Error "Deploy failed: $($func.Name)"
-        exit 1
-    }
-
-    Write-Host "      Done: $($func.Name)"
-    Pop-Location
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Cloud Run deployment failed."
+    exit 1
 }
 
 Write-Host "      Deploy complete!"
-
-# 5. Cleanup
-Write-Host "[5/5] Cleanup..."
-if (Test-Path $DeployDir) {
-    Remove-Item -Path $DeployDir -Recurse -Force
-}
-Write-Host "      Done"
 
 # Complete
 Write-Host ""
@@ -170,19 +128,16 @@ Write-Host "Deploy Complete!"
 Write-Host "=============================================="
 Write-Host ""
 
-Write-Host "Endpoints:"
-foreach ($func in $functions) {
-    $url = gcloud functions describe $func.Name --region $Region --format="value(serviceConfig.uri)" 2>$null
-    if ($url) {
-        Write-Host "  $($func.Name): $url"
-    } else {
-        Write-Host "  $($func.Name): https://$Region-$ProjectId.cloudfunctions.net/$($func.Name)"
-    }
+$url = gcloud run services describe $ServiceName --region $Region --format="value(status.url)" 2>$null
+if ($url) {
+    Write-Host "Endpoints:"
+    Write-Host "  Health:   $url/health"
+    Write-Host "  Evaluate: $url/evaluate"
+    Write-Host ""
 }
 
-Write-Host ""
 Write-Host "Next steps:"
 Write-Host "  1. Verify Vertex AI model access"
-Write-Host "  2. Check environment variables in GCP Console"
+Write-Host "  2. Check environment variables in Cloud Run Console"
 Write-Host "  3. Verify IAM permissions (Vertex AI User role)"
 Write-Host ""

@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
-test_platform_gcp.py - GCP Cloud Functions エントリポイントのユニットテスト
+test_platform_gcp.py - GCP Cloud Run エントリポイントのユニットテスト
 ================================================================================
 
 【テスト対象】
-- platforms/gcp/main.py のエンドポイント関数
+- platforms/local/main.py のFastAPI/Uvicornエンドポイント（GCP Cloud Run用Dockerイメージ）
 
 ================================================================================
 """
@@ -17,37 +17,25 @@ import os
 from unittest.mock import patch, MagicMock, AsyncMock
 
 _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_gcp_dir = os.path.join(_project_root, "platforms", "gcp")
+_local_dir = os.path.join(_project_root, "platforms", "local")
 
 
-def _setup_gcp_mocks():
-    """GCP依存モジュール (functions_framework, flask) をモック化"""
-    mock_ff = MagicMock()
-    mock_ff.http = lambda f: f  # デコレーターをパススルー
-
-    mock_flask = MagicMock()
-    mock_flask.Request = MagicMock
-    mock_flask.make_response = MagicMock(side_effect=lambda body, status: MagicMock(
-        data=body, status_code=status, headers={}
-    ))
-
-    return {
-        "functions_framework": mock_ff,
-        "flask": mock_flask,
-    }
-
-
-def _import_gcp_main():
-    """GCP main モジュールをインポート（モック付き）"""
-    if _gcp_dir not in sys.path:
-        sys.path.insert(0, _gcp_dir)
+def _import_fastapi_app():
+    """FastAPIアプリ（Docker共通イメージ）をインポート"""
+    if _local_dir not in sys.path:
+        sys.path.insert(0, _local_dir)
     if "main" in sys.modules:
         del sys.modules["main"]
 
-    mocks = _setup_gcp_mocks()
-    with patch.dict("sys.modules", mocks):
-        import main
-        return main
+    import main
+    return main
+
+
+def _get_test_client():
+    """FastAPI TestClientを取得"""
+    from fastapi.testclient import TestClient
+    app_module = _import_fastapi_app()
+    return TestClient(app_module.app)
 
 
 # =============================================================================
@@ -55,44 +43,39 @@ def _import_gcp_main():
 # =============================================================================
 
 class TestGCPEvaluate:
-    """GCP evaluate 関数のテスト"""
+    """GCP Cloud Run evaluate 関数のテスト"""
 
     def test_evaluate_post_success(self):
         """POST /evaluate 正常系"""
-        gcp = _import_gcp_main()
-
-        mock_request = MagicMock()
-        mock_request.method = "POST"
-        mock_request.get_data.return_value = json.dumps({
-            "items": [{"ID": "CLC-01"}]
-        }).encode()
+        client = _get_test_client()
 
         with patch("core.handlers.parse_request_body", return_value=([{"ID": "CLC-01"}], None)), \
-             patch.object(gcp, "run_async", return_value=[{"ID": "CLC-01", "evaluationResult": True}]):
-            result = gcp.evaluate(mock_request)
-            assert result.status_code == 200
+             patch("core.handlers.handle_evaluate", new_callable=AsyncMock,
+                   return_value=[{"ID": "CLC-01", "evaluationResult": True}]):
+            response = client.post(
+                "/evaluate",
+                json={"items": [{"ID": "CLC-01"}]},
+                headers={"Content-Type": "application/json"}
+            )
+            assert response.status_code == 200
 
     def test_evaluate_method_not_allowed(self):
         """GET /evaluate は 405"""
-        gcp = _import_gcp_main()
-
-        mock_request = MagicMock()
-        mock_request.method = "GET"
-
-        result = gcp.evaluate(mock_request)
-        assert result.status_code == 405
+        client = _get_test_client()
+        response = client.get("/evaluate")
+        assert response.status_code == 405
 
     def test_evaluate_parse_error(self):
         """リクエスト解析エラー"""
-        gcp = _import_gcp_main()
-
-        mock_request = MagicMock()
-        mock_request.method = "POST"
-        mock_request.get_data.return_value = b"invalid"
+        client = _get_test_client()
 
         with patch("core.handlers.parse_request_body", return_value=(None, "Invalid JSON")):
-            result = gcp.evaluate(mock_request)
-            assert result.status_code == 400
+            response = client.post(
+                "/evaluate",
+                content=b"invalid",
+                headers={"Content-Type": "application/json"}
+            )
+            assert response.status_code == 400
 
 
 # =============================================================================
@@ -100,18 +83,17 @@ class TestGCPEvaluate:
 # =============================================================================
 
 class TestGCPHealth:
-    """GCP health 関数のテスト"""
+    """GCP Cloud Run health 関数のテスト"""
 
     def test_health(self):
         """GET /health"""
-        gcp = _import_gcp_main()
-        mock_request = MagicMock()
+        client = _get_test_client()
 
         with patch("core.handlers.handle_health", return_value={"status": "healthy"}):
-            result = gcp.health(mock_request)
-            assert result.status_code == 200
-            body = json.loads(result.data)
-            assert body["platform"] == "GCP Cloud Functions"
+            response = client.get("/health")
+            assert response.status_code == 200
+            body = response.json()
+            assert body["platform"] == "Local (FastAPI + Ollama)"
 
 
 # =============================================================================
@@ -119,18 +101,17 @@ class TestGCPHealth:
 # =============================================================================
 
 class TestGCPConfig:
-    """GCP config_status 関数のテスト"""
+    """GCP Cloud Run config_status 関数のテスト"""
 
     def test_config(self):
         """GET /config"""
-        gcp = _import_gcp_main()
-        mock_request = MagicMock()
+        client = _get_test_client()
 
         with patch("core.handlers.handle_config", return_value={"llm": "configured"}):
-            result = gcp.config_status(mock_request)
-            assert result.status_code == 200
-            body = json.loads(result.data)
-            assert body["platform"]["name"] == "GCP Cloud Functions"
+            response = client.get("/config")
+            assert response.status_code == 200
+            body = response.json()
+            assert body["platform"]["name"] == "Local Server"
 
 
 # =============================================================================
@@ -138,30 +119,27 @@ class TestGCPConfig:
 # =============================================================================
 
 class TestGCPEvaluateSubmit:
-    """GCP evaluate_submit 関数のテスト"""
+    """GCP Cloud Run evaluate_submit 関数のテスト"""
 
     def test_submit_success(self):
         """POST /evaluate/submit 正常系"""
-        gcp = _import_gcp_main()
-
-        mock_request = MagicMock()
-        mock_request.method = "POST"
-        mock_request.get_data.return_value = json.dumps({"items": [{"ID": "CLC-01"}]}).encode()
-        mock_request.headers = {"X-Tenant-ID": "tenant-a"}
+        client = _get_test_client()
 
         with patch("core.handlers.parse_request_body", return_value=([{"ID": "CLC-01"}], None)), \
-             patch.object(gcp, "run_async", return_value={"job_id": "job-123", "status": "pending"}):
-            result = gcp.evaluate_submit(mock_request)
-            assert result.status_code == 202
+             patch("core.async_handlers.handle_submit", new_callable=AsyncMock,
+                   return_value={"job_id": "job-123", "status": "pending"}):
+            response = client.post(
+                "/evaluate/submit",
+                json={"items": [{"ID": "CLC-01"}]},
+                headers={"Content-Type": "application/json", "X-Tenant-ID": "tenant-a"}
+            )
+            assert response.status_code == 202
 
     def test_submit_method_not_allowed(self):
         """GET は 405"""
-        gcp = _import_gcp_main()
-        mock_request = MagicMock()
-        mock_request.method = "GET"
-
-        result = gcp.evaluate_submit(mock_request)
-        assert result.status_code == 405
+        client = _get_test_client()
+        response = client.get("/evaluate/submit")
+        assert response.status_code == 405
 
 
 # =============================================================================
@@ -169,33 +147,23 @@ class TestGCPEvaluateSubmit:
 # =============================================================================
 
 class TestGCPEvaluateStatus:
-    """GCP evaluate_status 関数のテスト"""
+    """GCP Cloud Run evaluate_status 関数のテスト"""
 
     def test_status_from_path(self):
         """パスからjob_id取得"""
-        gcp = _import_gcp_main()
+        client = _get_test_client()
 
-        mock_request = MagicMock()
-        mock_request.path = "/evaluate/status/job-123"
-        mock_request.args = {}
-
-        with patch.object(gcp, "run_async", return_value={"status": "running", "progress": 50}):
-            result = gcp.evaluate_status(mock_request)
-            assert result.status_code == 200
+        with patch("core.async_handlers.handle_status", new_callable=AsyncMock,
+                    return_value={"status": "running", "progress": 50}):
+            response = client.get("/evaluate/status/job-123")
+            assert response.status_code == 200
 
     def test_status_missing_job_id(self):
         """job_id 未指定"""
-        gcp = _import_gcp_main()
-
-        mock_request = MagicMock()
-        mock_request.path = "/evaluate/status/"
-        mock_request.args = MagicMock()
-        mock_request.args.get.return_value = None
-        # path.split("/")[-1] returns "" when path ends with /
-        # and "/status/" is in path => job_id = ""
-
-        result = gcp.evaluate_status(mock_request)
-        assert result.status_code == 400
+        client = _get_test_client()
+        # FastAPIルーティングでは /evaluate/status/ はjob_idパラメータなしで404
+        response = client.get("/evaluate/status/")
+        assert response.status_code in [400, 404, 422]
 
 
 # =============================================================================
@@ -203,31 +171,22 @@ class TestGCPEvaluateStatus:
 # =============================================================================
 
 class TestGCPEvaluateResults:
-    """GCP evaluate_results 関数のテスト"""
+    """GCP Cloud Run evaluate_results 関数のテスト"""
 
     def test_results_completed(self):
         """完了ジョブの結果取得"""
-        gcp = _import_gcp_main()
+        client = _get_test_client()
 
-        mock_request = MagicMock()
-        mock_request.path = "/evaluate/results/job-123"
-        mock_request.args = {}
-
-        with patch.object(gcp, "run_async", return_value={
-            "status": "completed",
-            "results": [{"ID": "CLC-01"}]
-        }):
-            result = gcp.evaluate_results(mock_request)
-            assert result.status_code == 200
+        with patch("core.async_handlers.handle_results", new_callable=AsyncMock,
+                    return_value={"status": "completed", "results": [{"ID": "CLC-01"}]}):
+            response = client.get("/evaluate/results/job-123")
+            assert response.status_code == 200
 
     def test_results_not_found(self):
         """ジョブ未発見"""
-        gcp = _import_gcp_main()
+        client = _get_test_client()
 
-        mock_request = MagicMock()
-        mock_request.path = "/evaluate/results/nonexistent"
-        mock_request.args = {}
-
-        with patch.object(gcp, "run_async", return_value={"status": "not_found"}):
-            result = gcp.evaluate_results(mock_request)
-            assert result.status_code == 404
+        with patch("core.async_handlers.handle_results", new_callable=AsyncMock,
+                    return_value={"status": "not_found"}):
+            response = client.get("/evaluate/results/nonexistent")
+            assert response.status_code == 404

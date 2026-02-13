@@ -4,19 +4,20 @@ test_api_gateway_backends.py - API Gateway→Backend統合テスト
 ================================================================================
 
 【概要】
-APIM/API Gateway/Apigee → Azure Functions/Lambda/Cloud Functions の統合をテストします。
+APIM/API Gateway/Apigee → Azure Container Apps/App Runner/Cloud Run の統合をテストします。
+全プラットフォームが同一のDockerイメージ（FastAPI/Uvicorn）を使用します。
 実際のクラウド環境へのデプロイが必要です。
 
 【前提条件】
-1. Azure APIM + Azure Functions
+1. Azure APIM + Azure Container Apps
    - AZURE_APIM_ENDPOINT
    - AZURE_APIM_SUBSCRIPTION_KEY
 
-2. AWS API Gateway + Lambda
+2. AWS API Gateway + App Runner
    - AWS_API_GATEWAY_ENDPOINT
    - AWS_API_KEY
 
-3. GCP Apigee + Cloud Functions
+3. GCP Apigee + Cloud Run
    - GCP_APIGEE_ENDPOINT
    - GCP_API_KEY
 

@@ -4,8 +4,9 @@ on:
   push:
     branches: [main]
     paths:
-      - 'platforms/azure/**'
+      - 'Dockerfile'
       - 'src/**'
+      - 'platforms/local/**'
       - 'infrastructure/azure/**'
   workflow_dispatch:
     inputs:
@@ -18,6 +19,7 @@ on:
 
 env:
   PYTHON_VERSION: '3.11'
+  DOCKER_IMAGE_NAME: ic-test-ai-agent
 
 jobs:
   test:
@@ -55,21 +57,34 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy Infrastructure
-        id: deploy-infra
-        uses: azure/arm-deploy@v2
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
-          resourceGroupName: ${{ secrets.AZURE_RESOURCE_GROUP }}
-          template: ./infrastructure/azure/bicep/main.bicep
-          parameters: ./infrastructure/azure/bicep/parameters.json
+          terraform_version: 1.6.0
+          terraform_wrapper: false
 
-      # Bicepデプロイ出力からAPIMエンドポイントとサブスクリプションキーを自動取得
-      - name: Get APIM endpoint and subscription key
-        id: apim-info
+      - name: Deploy Infrastructure
+        working-directory: ./infrastructure/azure/terraform
         run: |
-          APIM_NAME="${{ steps.deploy-infra.outputs.apimName }}"
-          GATEWAY_URL="${{ steps.deploy-infra.outputs.apimGatewayUrl }}"
+          terraform init
+          terraform plan -out=tfplan \
+            -var="resource_group_name=${{ secrets.AZURE_RESOURCE_GROUP }}"
+          terraform apply -auto-approve tfplan
+
+      # Terraformデプロイ出力からリソース名・APIM情報を自動取得
+      - name: Get deployment outputs
+        id: apim-info
+        working-directory: ./infrastructure/azure/terraform
+        run: |
+          APIM_NAME=$(terraform output -raw apim_name)
+          GATEWAY_URL=$(terraform output -raw apim_gateway_url)
+          ACR_NAME=$(terraform output -raw acr_name)
+          CONTAINER_APP_NAME=$(terraform output -raw container_app_name)
           RG_NAME="${{ secrets.AZURE_RESOURCE_GROUP }}"
+
+          # ACR・Container App名
+          echo "acr-name=${ACR_NAME}" >> $GITHUB_OUTPUT
+          echo "container-app-name=${CONTAINER_APP_NAME}" >> $GITHUB_OUTPUT
 
           # APIMエンドポイント（API pathは /api）
           APIM_ENDPOINT="${GATEWAY_URL}/api"
@@ -84,26 +99,27 @@ jobs:
           echo "::add-mask::${KEY}"
           echo "apim-subscription-key=${KEY}" >> $GITHUB_OUTPUT
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
+      # Dockerイメージをビルド・ACRにプッシュ
+      - name: Login to ACR
+        run: az acr login --name ${{ steps.apim-info.outputs.acr-name }}
 
-      # デプロイパッケージ作成: platforms/azure/ + 共有src/
-      - name: Prepare deployment package
+      - name: Build and Push Docker Image
         run: |
-          mkdir -p deploy-package
-          cp platforms/azure/function_app.py deploy-package/
-          cp platforms/azure/host.json deploy-package/
-          cp platforms/azure/requirements.txt deploy-package/
-          cp platforms/azure/.funcignore deploy-package/ 2>/dev/null || true
-          cp -r src deploy-package/src
-          cd deploy-package
-          pip install -r requirements.txt -t .python_packages/lib/site-packages
+          ACR_SERVER=${{ steps.apim-info.outputs.acr-name }}.azurecr.io
+          IMAGE_TAG=${{ github.sha }}
+          docker build -t ${ACR_SERVER}/${{ env.DOCKER_IMAGE_NAME }}:${IMAGE_TAG} .
+          docker build -t ${ACR_SERVER}/${{ env.DOCKER_IMAGE_NAME }}:latest .
+          docker push ${ACR_SERVER}/${{ env.DOCKER_IMAGE_NAME }}:${IMAGE_TAG}
+          docker push ${ACR_SERVER}/${{ env.DOCKER_IMAGE_NAME }}:latest
 
-      - uses: Azure/functions-action@v1
-        with:
-          app-name: ${{ secrets.AZURE_FUNCTION_APP_NAME }}
-          package: ./deploy-package
+      # Container Appのイメージを更新
+      - name: Deploy to Container Apps
+        run: |
+          ACR_SERVER=${{ steps.apim-info.outputs.acr-name }}.azurecr.io
+          az containerapp update \
+            --name ${{ steps.apim-info.outputs.container-app-name }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --image ${ACR_SERVER}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
 
   validate:
     runs-on: ubuntu-latest

@@ -10,15 +10,15 @@
 # 評価版期間外は課金されるため、enable_apigee = false で無効化できます。
 #
 # 【代替案】
-# Apigee不使用の場合、Cloud Functionsに直接アクセスします。
-# その場合、相関ID管理・レート制限はCloud Functions内で実装します。
+# Apigee不使用の場合、Cloud Runに直接アクセスします。
+# その場合、相関ID管理・レート制限はCloud Run内で実装します。
 #
 # 【機能】
 # - API Key認証
 # - レート制限
 # - 相関ID管理（X-Correlation-IDヘッダー）
 # - Cloud Logging統合
-# - Cloud Functionsへのルーティング
+# - Cloud Runへのルーティング
 #
 # ==============================================================================
 
@@ -68,7 +68,7 @@ resource "google_apigee_envgroup_attachment" "prod" {
 }
 
 # ------------------------------------------------------------------------------
-# Apigee APIプロキシ（Cloud Functions統合）
+# Apigee APIプロキシ（Cloud Run統合）
 # ------------------------------------------------------------------------------
 
 # Note: Apigee APIプロキシはXML/YAMLで定義し、手動またはCI/CDでデプロイします。
@@ -76,7 +76,7 @@ resource "google_apigee_envgroup_attachment" "prod" {
 
 # サンプルプロキシ構成:
 # - ベースパス: /api
-# - ターゲット: Cloud Functions URI
+# - ターゲット: Cloud Run URL
 # - ポリシー:
 #   1. VerifyAPIKey（API Key検証）
 #   2. AssignMessage（相関ID設定）
@@ -142,7 +142,7 @@ resource "google_apigee_developer_app" "ic_test_ai" {
 # 代替: Cloud Load Balancingベースのエンドポイント（Apigee不使用時）
 # ------------------------------------------------------------------------------
 
-# Apigeeが無効な場合、Cloud Functionsに直接アクセス可能にする
+# Apigeeが無効な場合、Cloud Runに直接アクセス可能にする
 # または、Cloud Armor + Cloud Load Balancerでレート制限を実装
 
 # ------------------------------------------------------------------------------
@@ -161,10 +161,10 @@ output "apigee_environment_name" {
 
 output "apigee_api_endpoint" {
   description = "ApigeeエンドポイントURL（カスタムドメイン設定後）"
-  value       = var.enable_apigee ? "https://${google_apigee_envgroup.prod[0].hostnames[0]}/api/evaluate" : "N/A (Apigee disabled - use Cloud Functions URI directly)"
+  value       = var.enable_apigee ? "https://${google_apigee_envgroup.prod[0].hostnames[0]}/api/evaluate" : "N/A (Apigee disabled - use Cloud Run URL directly)"
 }
 
-output "cloud_functions_direct_url" {
-  description = "Cloud Functions直接URL（Apigee不使用時）"
-  value       = "${google_cloudfunctions2_function.evaluate.service_config[0].uri}/evaluate"
+output "cloud_run_direct_url" {
+  description = "Cloud Run直接URL（Apigee不使用時）"
+  value       = "${google_cloud_run_v2_service.ic_test_ai.uri}/evaluate"
 }

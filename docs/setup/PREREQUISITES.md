@@ -747,9 +747,9 @@ Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 | プラットフォーム | ガイド | 主なサービス |
 | --- | --- | --- |
-| Azure | [AZURE_SETUP.md](./AZURE_SETUP.md) | Azure Functions, Azure AI Foundry, APIM |
-| AWS | [AWS_SETUP.md](./AWS_SETUP.md) | Lambda, API Gateway, Bedrock |
-| GCP | [GCP_SETUP.md](./GCP_SETUP.md) | Cloud Functions, Vertex AI, Apigee |
+| Azure | [AZURE_SETUP.md](./AZURE_SETUP.md) | Container Apps, Azure AI Foundry, APIM |
+| AWS | [AWS_SETUP.md](./AWS_SETUP.md) | App Runner, API Gateway, Bedrock |
+| GCP | [GCP_SETUP.md](./GCP_SETUP.md) | Cloud Run, Vertex AI, Apigee |
 
 クライアント（Excel VBA / PowerShell）の設定は以下を参照してください。
 

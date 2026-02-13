@@ -2,7 +2,12 @@
 """
 ワンコマンドデプロイメントスクリプト
 
-全プラットフォーム（Azure, AWS, GCP）への自動デプロイメントを実行します。
+全プラットフォーム（Azure Container Apps, AWS App Runner, GCP Cloud Run）への
+コンテナベースの自動デプロイメントを実行します。
+共通のDockerイメージ（FastAPI/Uvicorn）をビルドし、各クラウドのレジストリにプッシュします。
+- Azure: ACR (Azure Container Registry) → Container Apps
+- AWS: ECR (Elastic Container Registry) → App Runner
+- GCP: Artifact Registry → Cloud Run
 """
 
 import argparse
@@ -304,61 +309,260 @@ class Deployer:
         return True
 
     def _deploy_application(self) -> bool:
-        """アプリケーションデプロイ"""
+        """アプリケーションデプロイ（Dockerイメージのビルド・プッシュ・デプロイ）"""
         print("📦 [4/5] アプリケーションデプロイ\n")
 
+        # 共通Dockerイメージのビルド
+        if not self._build_docker_image():
+            return False
+
         if self.platform == "azure":
-            return self._deploy_azure_functions()
+            return self._deploy_azure_container_apps()
         elif self.platform == "aws":
-            return self._deploy_aws_lambda()
+            return self._deploy_aws_app_runner()
         elif self.platform == "gcp":
-            return self._deploy_gcp_functions()
+            return self._deploy_gcp_cloud_run()
 
         return False
 
-    def _deploy_azure_functions(self) -> bool:
-        """Azure Functionsデプロイ"""
+    def _build_docker_image(self) -> bool:
+        """共通Dockerイメージのビルド"""
+        image_tag = f"ic-test-agent:{self.environment}-{int(time.time())}"
+        self._image_tag = image_tag
+
         if self.dry_run:
-            print("  [DRY RUN] Azure Functionsデプロイをスキップします")
+            print(f"  [DRY RUN] Dockerイメージビルドをスキップします")
             print(f"  実行予定コマンド:")
-            print(f"    cd platforms/azure")
-            print(f"    func azure functionapp publish ic-test-{self.environment}-functions")
+            print(f"    docker build -t {image_tag} .")
             print()
             return True
 
-        # TODO: 実際のデプロイ処理
-        print("  ✅ Azure Functionsデプロイ完了\n")
+        print(f"  Dockerイメージビルド中: {image_tag}")
+        result = subprocess.run(
+            ["docker", "build", "-t", image_tag, "."],
+            cwd=self.project_root,
+            capture_output=True,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            print(f"  ❌ Dockerイメージビルド失敗: {result.stderr}")
+            return False
+
+        print(f"  ✅ Dockerイメージビルド完了: {image_tag}\n")
         return True
 
-    def _deploy_aws_lambda(self) -> bool:
-        """AWS Lambdaデプロイ"""
+    def _deploy_azure_container_apps(self) -> bool:
+        """Azure Container Apps デプロイ（ACR経由）"""
+        acr_name = f"ictestacr{self.environment}"
+        acr_image = f"{acr_name}.azurecr.io/ic-test-agent:{self.environment}"
+        container_app_name = f"ic-test-{self.environment}-app"
+        resource_group = f"ic-test-{self.environment}-rg"
+
         if self.dry_run:
-            print("  [DRY RUN] AWS Lambdaデプロイをスキップします")
+            print("  [DRY RUN] Azure Container Appsデプロイをスキップします")
             print(f"  実行予定コマンド:")
-            print(f"    cd platforms/aws")
-            print(f"    zip -r lambda_function.zip .")
-            print(f"    aws lambda update-function-code --function-name ic-test-{self.environment}-evaluator")
+            print(f"    az acr login --name {acr_name}")
+            print(f"    docker tag {self._image_tag} {acr_image}")
+            print(f"    docker push {acr_image}")
+            print(f"    az containerapp update \\")
+            print(f"      --name {container_app_name} \\")
+            print(f"      --resource-group {resource_group} \\")
+            print(f"      --image {acr_image}")
             print()
             return True
 
-        # TODO: 実際のデプロイ処理
-        print("  ✅ AWS Lambdaデプロイ完了\n")
+        # ACRログイン
+        print(f"  ACRログイン中: {acr_name}")
+        result = subprocess.run(
+            ["az", "acr", "login", "--name", acr_name],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"  ❌ ACRログイン失敗: {result.stderr}")
+            return False
+
+        # イメージタグ付け
+        print(f"  イメージタグ付け: {acr_image}")
+        result = subprocess.run(
+            ["docker", "tag", self._image_tag, acr_image],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"  ❌ イメージタグ付け失敗: {result.stderr}")
+            return False
+
+        # イメージプッシュ
+        print(f"  イメージプッシュ中: {acr_image}")
+        result = subprocess.run(
+            ["docker", "push", acr_image],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"  ❌ イメージプッシュ失敗: {result.stderr}")
+            return False
+
+        # Container Appsアップデート
+        print(f"  Container Appsアップデート中: {container_app_name}")
+        result = subprocess.run(
+            [
+                "az", "containerapp", "update",
+                "--name", container_app_name,
+                "--resource-group", resource_group,
+                "--image", acr_image,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"  ❌ Container Appsアップデート失敗: {result.stderr}")
+            return False
+
+        print("  ✅ Azure Container Appsデプロイ完了\n")
         return True
 
-    def _deploy_gcp_functions(self) -> bool:
-        """GCP Cloud Functionsデプロイ"""
+    def _deploy_aws_app_runner(self) -> bool:
+        """AWS App Runner デプロイ（ECR経由）"""
+        aws_region = os.getenv("AWS_REGION", "ap-northeast-1")
+        aws_account_id = os.getenv("AWS_ACCOUNT_ID", "")
+        ecr_repo = f"{aws_account_id}.dkr.ecr.{aws_region}.amazonaws.com/ic-test-agent"
+        ecr_image = f"{ecr_repo}:{self.environment}"
+        service_name = f"ic-test-{self.environment}-app"
+
         if self.dry_run:
-            print("  [DRY RUN] GCP Cloud Functionsデプロイをスキップします")
+            print("  [DRY RUN] AWS App Runnerデプロイをスキップします")
             print(f"  実行予定コマンド:")
-            print(f"    gcloud functions deploy ic-test-{self.environment}-evaluator \\")
-            print(f"      --runtime python311 \\")
-            print(f"      --trigger-http \\")
-            print(f"      --source platforms/gcp")
+            print(f"    aws ecr get-login-password --region {aws_region} | docker login --username AWS --password-stdin {ecr_repo}")
+            print(f"    docker tag {self._image_tag} {ecr_image}")
+            print(f"    docker push {ecr_image}")
+            print(f"    aws apprunner update-service \\")
+            print(f"      --service-arn <service-arn> \\")
+            print(f"      --source-configuration ImageRepository={{ImageIdentifier={ecr_image}}}")
             print()
             return True
 
-        # TODO: 実際のデプロイ処理
-        print("  ✅ GCP Cloud Functionsデプロイ完了\n")
+        # ECRログイン
+        print(f"  ECRログイン中: {aws_region}")
+        login_password = subprocess.run(
+            ["aws", "ecr", "get-login-password", "--region", aws_region],
+            capture_output=True,
+            text=True,
+        )
+        if login_password.returncode != 0:
+            print(f"  ❌ ECRログインパスワード取得失敗: {login_password.stderr}")
+            return False
+
+        result = subprocess.run(
+            ["docker", "login", "--username", "AWS", "--password-stdin", ecr_repo],
+            input=login_password.stdout,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"  ❌ ECRログイン失敗: {result.stderr}")
+            return False
+
+        # イメージタグ付け
+        print(f"  イメージタグ付け: {ecr_image}")
+        result = subprocess.run(
+            ["docker", "tag", self._image_tag, ecr_image],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"  ❌ イメージタグ付け失敗: {result.stderr}")
+            return False
+
+        # イメージプッシュ
+        print(f"  イメージプッシュ中: {ecr_image}")
+        result = subprocess.run(
+            ["docker", "push", ecr_image],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"  ❌ イメージプッシュ失敗: {result.stderr}")
+            return False
+
+        # App Runnerサービスアップデート（デプロイメントはECRトリガーで自動）
+        print(f"  App Runnerサービス: {service_name} - ECRプッシュにより自動デプロイ")
+        print("  ✅ AWS App Runnerデプロイ完了\n")
+        return True
+
+    def _deploy_gcp_cloud_run(self) -> bool:
+        """GCP Cloud Run デプロイ（Artifact Registry経由）"""
+        gcp_project = os.getenv("GCP_PROJECT_ID", "")
+        gcp_region = os.getenv("GCP_REGION", "asia-northeast1")
+        ar_image = f"{gcp_region}-docker.pkg.dev/{gcp_project}/ic-test-agent/app:{self.environment}"
+        service_name = f"ic-test-{self.environment}-app"
+
+        if self.dry_run:
+            print("  [DRY RUN] GCP Cloud Runデプロイをスキップします")
+            print(f"  実行予定コマンド:")
+            print(f"    gcloud auth configure-docker {gcp_region}-docker.pkg.dev")
+            print(f"    docker tag {self._image_tag} {ar_image}")
+            print(f"    docker push {ar_image}")
+            print(f"    gcloud run deploy {service_name} \\")
+            print(f"      --image {ar_image} \\")
+            print(f"      --region {gcp_region} \\")
+            print(f"      --platform managed")
+            print()
+            return True
+
+        # Artifact Registry認証設定
+        print(f"  Artifact Registry認証設定中: {gcp_region}")
+        result = subprocess.run(
+            ["gcloud", "auth", "configure-docker", f"{gcp_region}-docker.pkg.dev", "--quiet"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"  ❌ Artifact Registry認証設定失敗: {result.stderr}")
+            return False
+
+        # イメージタグ付け
+        print(f"  イメージタグ付け: {ar_image}")
+        result = subprocess.run(
+            ["docker", "tag", self._image_tag, ar_image],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"  ❌ イメージタグ付け失敗: {result.stderr}")
+            return False
+
+        # イメージプッシュ
+        print(f"  イメージプッシュ中: {ar_image}")
+        result = subprocess.run(
+            ["docker", "push", ar_image],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"  ❌ イメージプッシュ失敗: {result.stderr}")
+            return False
+
+        # Cloud Runデプロイ
+        print(f"  Cloud Runデプロイ中: {service_name}")
+        result = subprocess.run(
+            [
+                "gcloud", "run", "deploy", service_name,
+                "--image", ar_image,
+                "--region", gcp_region,
+                "--platform", "managed",
+                "--quiet",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"  ❌ Cloud Runデプロイ失敗: {result.stderr}")
+            return False
+
+        print("  ✅ GCP Cloud Runデプロイ完了\n")
         return True
 
     def _validate_deployment(self) -> bool:

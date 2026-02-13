@@ -5,7 +5,7 @@ test_api_gateway_integration.py - AWS API Gateway統合テスト
 
 【概要】
 AWS API Gateway層の統合テストです。
-モック環境でAPI Gateway→Lambda Functionsの連携を検証します。
+モック環境でAPI Gateway→App Runner (FastAPI/Docker)の連携を検証します。
 
 【テスト項目】
 1. 相関ID伝播（X-Correlation-IDヘッダー）
@@ -58,8 +58,8 @@ def test_request_body():
 
 
 @pytest.fixture
-def mock_lambda_response():
-    """モックLambdaレスポンス"""
+def mock_backend_response():
+    """モックバックエンド（App Runner）レスポンス"""
     return [
         {
             "ID": "001",
@@ -76,15 +76,15 @@ def mock_lambda_response():
 # テスト1: 相関ID伝播
 # =============================================================================
 
-def test_correlation_id_propagation(api_gateway_config, test_request_body, mock_lambda_response):
-    """相関IDがAPI Gateway→Lambda→Responseで正しく伝播することを検証"""
+def test_correlation_id_propagation(api_gateway_config, test_request_body, mock_backend_response):
+    """相関IDがAPI Gateway→App Runner→Responseで正しく伝播することを検証"""
 
     correlation_id = str(uuid.uuid4())
 
     with patch('requests.post') as mock_post:
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = mock_lambda_response
+        mock_response.json.return_value = mock_backend_response
         mock_response.headers = {
             "X-Correlation-ID": correlation_id,
             "Content-Type": "application/json",
@@ -108,12 +108,12 @@ def test_correlation_id_propagation(api_gateway_config, test_request_body, mock_
         assert "X-Correlation-ID" in response.headers
         assert response.headers["X-Correlation-ID"] == correlation_id
 
-        # 検証2: Lambda呼び出し時に相関IDが転送された
+        # 検証2: App Runner呼び出し時に相関IDが転送された
         call_args = mock_post.call_args
         assert "X-Correlation-ID" in call_args.kwargs.get("headers", {})
 
 
-def test_correlation_id_auto_generation(api_gateway_config, test_request_body, mock_lambda_response):
+def test_correlation_id_auto_generation(api_gateway_config, test_request_body, mock_backend_response):
     """相関IDが未指定の場合、API Gatewayで自動生成されることを検証"""
 
     auto_correlation_id = str(uuid.uuid4())
@@ -121,7 +121,7 @@ def test_correlation_id_auto_generation(api_gateway_config, test_request_body, m
     with patch('requests.post') as mock_post:
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = mock_lambda_response
+        mock_response.json.return_value = mock_backend_response
         mock_response.headers = {
             "X-Correlation-ID": auto_correlation_id,
             "Content-Type": "application/json"
@@ -147,13 +147,13 @@ def test_correlation_id_auto_generation(api_gateway_config, test_request_body, m
 # テスト2: API Key認証
 # =============================================================================
 
-def test_valid_api_key(api_gateway_config, test_request_body, mock_lambda_response):
+def test_valid_api_key(api_gateway_config, test_request_body, mock_backend_response):
     """有効なAPI Keyで認証成功することを検証"""
 
     with patch('requests.post') as mock_post:
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = mock_lambda_response
+        mock_response.json.return_value = mock_backend_response
         mock_response.headers = {"X-Correlation-ID": str(uuid.uuid4())}
         mock_post.return_value = mock_response
 
@@ -261,8 +261,8 @@ def test_throttling_limit_exceeded(api_gateway_config, test_request_body):
 # テスト4: エラーハンドリング
 # =============================================================================
 
-def test_lambda_error_handling(api_gateway_config, test_request_body):
-    """Lambdaエラー時の適切なエラーレスポンスを検証"""
+def test_backend_error_handling(api_gateway_config, test_request_body):
+    """バックエンド（App Runner）エラー時の適切なエラーレスポンスを検証"""
 
     correlation_id = str(uuid.uuid4())
 
@@ -303,8 +303,8 @@ def test_lambda_error_handling(api_gateway_config, test_request_body):
         assert "traceback" not in error_data
 
 
-def test_lambda_timeout(api_gateway_config, test_request_body):
-    """Lambdaタイムアウト時の504 Gateway Timeoutを検証"""
+def test_backend_timeout(api_gateway_config, test_request_body):
+    """バックエンド（App Runner）タイムアウト時の504 Gateway Timeoutを検証"""
 
     with patch('requests.post') as mock_post:
         mock_response = Mock()
@@ -367,13 +367,13 @@ def test_cors_preflight(api_gateway_config):
         assert "X-Api-Key" in response.headers["Access-Control-Allow-Headers"]
 
 
-def test_cors_actual_request(api_gateway_config, test_request_body, mock_lambda_response):
+def test_cors_actual_request(api_gateway_config, test_request_body, mock_backend_response):
     """実際のリクエストでCORSヘッダーが返ることを検証"""
 
     with patch('requests.post') as mock_post:
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = mock_lambda_response
+        mock_response.json.return_value = mock_backend_response
         mock_response.headers = {
             "Access-Control-Allow-Origin": "*",
             "X-Correlation-ID": str(uuid.uuid4())
@@ -400,7 +400,7 @@ def test_cors_actual_request(api_gateway_config, test_request_body, mock_lambda_
 # テスト6: X-Ray統合
 # =============================================================================
 
-def test_xray_trace_id_propagation(api_gateway_config, test_request_body, mock_lambda_response):
+def test_xray_trace_id_propagation(api_gateway_config, test_request_body, mock_backend_response):
     """X-RayトレースIDが正しく伝播することを検証"""
 
     correlation_id = str(uuid.uuid4())
@@ -408,7 +408,7 @@ def test_xray_trace_id_propagation(api_gateway_config, test_request_body, mock_l
     with patch('requests.post') as mock_post:
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = mock_lambda_response
+        mock_response.json.return_value = mock_backend_response
         mock_response.headers = {
             "X-Correlation-ID": correlation_id,
             "X-Amzn-Trace-Id": "Root=1-67891234-abcdef0123456789abcdef01"

@@ -12,7 +12,7 @@
 2. [AWSとは](#2-awsとは)
 3. [AWS CLIのセットアップ](#3-aws-cliのセットアップ)
 4. [IAM（Identity and Access Management）](#4-iamidentity-and-access-management)
-5. [AWS Lambda](#5-aws-lambda)
+5. [AWS App Runner](#5-aws-app-runner)
 6. [Amazon Bedrock](#6-amazon-bedrock)
 7. [Amazon Textract](#7-amazon-textract)
 8. [API Gateway](#8-api-gateway)
@@ -50,7 +50,7 @@
 | AWSサービス | 役割 |
 |-------------|------|
 | **IAM** | アクセス制御・権限管理 |
-| **Lambda** | バックエンドAPI処理（サーバーレス） |
+| **App Runner** | バックエンドAPI処理（コンテナ） |
 | **Bedrock** | AI/LLM（Claude Sonnet）による評価 |
 | **Textract** | 書類のOCR（文字認識） |
 | **API Gateway** | REST APIエンドポイント公開 |
@@ -94,7 +94,7 @@
 
 | カテゴリ | 代表サービス | 説明 |
 |---------|-------------|------|
-| コンピューティング | EC2, Lambda | サーバー・関数実行 |
+| コンピューティング | EC2, App Runner | サーバー・コンテナ実行 |
 | ストレージ | S3 | ファイル保存 |
 | データベース | DynamoDB, RDS | データ管理 |
 | AI/ML | Bedrock, Textract | AI・機械学習 |
@@ -106,7 +106,7 @@
 
 - **スケーラビリティ**: 利用量に応じて自動でリソースが増減する
 - **従量課金**: 使った分だけ料金が発生（初期費用不要）
-- **マネージドサービス**: サーバー管理はAWSが行う（特にLambda）
+- **マネージドサービス**: サーバー管理はAWSが行う（特にApp Runner）
 - **セキュリティ**: エンタープライズ級のセキュリティ基盤
 - **Bedrock**: Claude Sonnetなどの最新AIモデルをAPIで利用可能
 
@@ -121,7 +121,7 @@
 7. サポートプランは **「ベーシック（無料）」** を選択
 
 💡 **無料枠について**: AWSは新規アカウント作成から12か月間、多くのサービスで無料枠を提供しています。
-Lambda は毎月100万リクエスト＋40万GB秒まで無料です。
+App Runner は自動スケーリング対応のコンテナ実行サービスで、従量課金制です。
 
 ⚠️ **注意**: ルートアカウント（最初に作成したアカウント）は日常作業には使わず、
 後述のIAMユーザーを作成して使用してください。ルートアカウントの漏洩は全リソースへの不正アクセスにつながります。
@@ -305,12 +305,12 @@ aws sts get-caller-identity
 ```
 
 - **IAMユーザー**: 人間がAWSにログインするためのアカウント
-- **IAMロール**: AWSサービス（Lambda等）がAWSリソースにアクセスするための権限セット
+- **IAMロール**: AWSサービス（App Runner等）がAWSリソースにアクセスするための権限セット
 - **IAMポリシー**: 「何のサービスの」「何の操作を」「許可/拒否する」かを定義するJSONドキュメント
 
-### Lambda実行ロール作成
+### App Runnerインスタンスロール作成
 
-Lambda関数がAWSの他のサービス（Bedrock、Textract等）にアクセスするためのIAMロールを作成します。
+App Runnerサービスが他のAWSサービス（Bedrock、Textract等）にアクセスするためのIAMロールを作成します。
 
 💡 **Terraformで自動作成される場合**: 後述のTerraformデプロイを使う場合、このロールは自動的に作成されます。
 ここでは手動で作成する方法を学習目的で説明しています。
@@ -334,7 +334,11 @@ Lambda関数がAWSの他のサービス（Bedrock、Textract等）にアクセ�
     {
       "Effect": "Allow",
       "Principal": {
-        "Service": "lambda.amazonaws.com"
+        "Service": [
+          "apprunner.amazonaws.com",
+          "build.apprunner.amazonaws.com",
+          "tasks.apprunner.amazonaws.com"
+        ]
       },
       "Action": "sts:AssumeRole"
     }
@@ -342,24 +346,24 @@ Lambda関数がAWSの他のサービス（Bedrock、Textract等）にアクセ�
 }
 ```
 
-💡 **解説**: この信頼ポリシーは「Lambda サービスがこのロールを引き受けることを許可する」という意味です。
-`Principal.Service` に `lambda.amazonaws.com` を指定することで、Lambda関数だけがこのロールを使えるようになります。
+💡 **解説**: この信頼ポリシーは「App Runner サービスがこのロールを引き受けることを許可する」という意味です。
+`Principal.Service` に `tasks.apprunner.amazonaws.com` を指定することで、App Runnerのタスクがこのロールを使えるようになります。
 
 #### IAMロール作成
 
 ```bash
 aws iam create-role \
-  --role-name ic-test-ai-prod-lambda-execution-role \
+  --role-name ic-test-ai-prod-apprunner-instance-role \
   --assume-role-policy-document file://trust-policy.json \
-  --description "内部統制テスト評価AI Lambda実行ロール"
+  --description "内部統制テスト評価AI App Runnerインスタンスロール"
 ```
 
 期待される出力：
 ```json
 {
     "Role": {
-        "RoleName": "ic-test-ai-prod-lambda-execution-role",
-        "Arn": "arn:aws:iam::123456789012:role/ic-test-ai-prod-lambda-execution-role",
+        "RoleName": "ic-test-ai-prod-apprunner-instance-role",
+        "Arn": "arn:aws:iam::123456789012:role/ic-test-ai-prod-apprunner-instance-role",
         ...
     }
 }
@@ -367,17 +371,12 @@ aws iam create-role \
 
 ### 必要なポリシーのアタッチ
 
-Lambda関数に必要な権限をロールに追加します。
+App Runnerサービスに必要な権限をロールに追加します。
 
 ```bash
-# 1. Lambda基本実行ポリシー（CloudWatch Logsへのログ書き込み権限）
+# 1. X-Rayトレーシング権限
 aws iam attach-role-policy \
-  --role-name ic-test-ai-prod-lambda-execution-role \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-
-# 2. X-Rayトレーシング権限
-aws iam attach-role-policy \
-  --role-name ic-test-ai-prod-lambda-execution-role \
+  --role-name ic-test-ai-prod-apprunner-instance-role \
   --policy-arn arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
 ```
 
@@ -391,8 +390,8 @@ Bedrock と Textract のアクセス権限はカスタムポリシーとして�
 ```bash
 # Bedrock呼び出しポリシー
 aws iam put-role-policy \
-  --role-name ic-test-ai-prod-lambda-execution-role \
-  --policy-name ic-test-ai-prod-lambda-bedrock \
+  --role-name ic-test-ai-prod-apprunner-instance-role \
+  --policy-name ic-test-ai-prod-apprunner-bedrock \
   --policy-document '{
     "Version": "2012-10-17",
     "Statement": [
@@ -409,8 +408,8 @@ aws iam put-role-policy \
 
 # Textract呼び出しポリシー
 aws iam put-role-policy \
-  --role-name ic-test-ai-prod-lambda-execution-role \
-  --policy-name ic-test-ai-prod-lambda-textract \
+  --role-name ic-test-ai-prod-apprunner-instance-role \
+  --policy-name ic-test-ai-prod-apprunner-textract \
   --policy-document '{
     "Version": "2012-10-17",
     "Statement": [
@@ -428,15 +427,14 @@ aws iam put-role-policy \
 
 ### ポリシー一覧と最小権限の原則
 
-本プロジェクトのLambda関数に必要なポリシーの全一覧：
+本プロジェクトのApp Runnerサービスに必要なポリシーの全一覧：
 
 | ポリシー | 種類 | 目的 |
 |---------|------|------|
-| `AWSLambdaBasicExecutionRole` | AWS管理 | CloudWatch Logsへのログ出力 |
 | `AWSXRayDaemonWriteAccess` | AWS管理 | X-Rayトレースデータの送信 |
-| `lambda-bedrock`（カスタム） | インライン | Bedrockモデル呼び出し |
-| `lambda-textract`（カスタム） | インライン | Textract OCR呼び出し |
-| `lambda-secrets-read`（カスタム） | カスタム管理 | Secrets Managerからの読み取り |
+| `apprunner-bedrock`（カスタム） | インライン | Bedrockモデル呼び出し |
+| `apprunner-textract`（カスタム） | インライン | Textract OCR呼び出し |
+| `apprunner-secrets-read`（カスタム） | カスタム管理 | Secrets Managerからの読み取り |
 
 ⚠️ **最小権限の原則**: セキュリティのベストプラクティスとして、必要最低限の権限だけを付与してください。
 `AdministratorAccess` や `*`（全リソース）の指定は、開発段階以外では避けるべきです。
@@ -446,21 +444,21 @@ aws iam put-role-policy \
 
 ```bash
 aws iam list-attached-role-policies \
-  --role-name ic-test-ai-prod-lambda-execution-role
+  --role-name ic-test-ai-prod-apprunner-instance-role
 ```
 
 ```bash
 aws iam list-role-policies \
-  --role-name ic-test-ai-prod-lambda-execution-role
+  --role-name ic-test-ai-prod-apprunner-instance-role
 ```
 
 ---
 
-## 5. AWS Lambda
+## 5. AWS App Runner
 
-### サーバーレスとLambdaの仕組み
+### コンテナサービスとApp Runnerの仕組み
 
-**AWS Lambda** は「サーバーレス」コンピューティングサービスです。
+**AWS App Runner** は、コンテナ化されたWebアプリケーションを簡単にデプロイ・実行できるマネージドサービスです。
 
 **従来のサーバー方式**:
 ```
@@ -468,125 +466,163 @@ aws iam list-role-policies \
 （サーバーが無くても料金が発生）
 ```
 
-**Lambda方式**:
+**App Runner方式**:
 ```
-リクエスト → [コード実行] → レスポンス → [自動停止]
-（実行した時間分だけ料金が発生）
+Dockerイメージ → [App Runner] → HTTPS URL自動発行
+（自動スケーリング・ロードバランシング込み）
 ```
 
-Lambdaの特徴：
+App Runnerの特徴：
 - **サーバー管理不要**: OS、パッチ適用、スケーリングをAWSが自動管理
-- **従量課金**: 実行回数と実行時間に対して課金（アイドル時は無料）
-- **自動スケーリング**: リクエスト数に応じて自動で並列実行数が増減
-- **最大実行時間**: 1回の実行は最大15分まで（本プロジェクトは540秒=9分に設定）
+- **Dockerイメージ対応**: ECRからコンテナイメージをデプロイ
+- **自動HTTPS**: SSL/TLS証明書が自動発行される
+- **自動スケーリング**: リクエスト数に応じてコンテナインスタンスが増減
+- **ヘルスチェック**: 自動的にコンテナのヘルスを監視
 
-💡 **コールドスタートとは**: Lambda関数が一定時間呼ばれないと、実行環境が破棄されます。
-次にリクエストが来ると環境の再構築が必要になり、初回の応答が数秒遅くなります。
-これを「コールドスタート」と呼びます。Python 3.11ランタイムは比較的コールドスタートが短いです。
+💡 **App RunnerとECSの違い**: App RunnerはECS/Fargateよりもシンプルで、VPCやロードバランサーの設定が不要です。
+Web APIのデプロイに最適化されており、本プロジェクトのようなFastAPIアプリケーションに適しています。
 
-### Lambda関数の設定（本プロジェクト）
+### App Runnerサービスの設定（本プロジェクト）
 
-本プロジェクトのTerraform設定に基づくLambda関数のパラメータ：
+本プロジェクトのTerraform設定に基づくApp Runnerサービスのパラメータ：
 
 | パラメータ | 値 | 説明 |
 |-----------|-----|------|
-| 関数名 | `ic-test-ai-prod-evaluate` | 内部統制テスト評価関数 |
-| ランタイム | `python3.11` | Python 3.11 |
-| タイムアウト | `540秒`（9分） | AI処理に十分な時間 |
-| メモリ | `1024MB` | Bedrock呼び出しに必要 |
-| トレーシング | `Active`（X-Ray有効） | 分散トレーシング有効 |
-| ハンドラ | `lambda_handler.handler` | エントリーポイント |
+| サービス名 | `ic-test-ai-prod` | 内部統制テスト評価サービス |
+| コンテナポート | `8000` | FastAPIデフォルトポート |
+| CPU | `1 vCPU` | コンテナCPU割り当て |
+| メモリ | `2 GB` | Bedrock呼び出しに十分なメモリ |
+| ヘルスチェック | `/api/health` | HTTPヘルスチェックパス |
+| イメージソース | ECR | Amazon ECRからDockerイメージをプル |
 
-### Lambda関数のデプロイパッケージ作成
+### Dockerイメージのビルドとプッシュ
 
-Lambda関数にデプロイするPythonコードをパッケージ化します。
+App Runnerにデプロイするには、DockerイメージをビルドしてECR（Elastic Container Registry）にプッシュします。
 
 ```bash
 # プロジェクトルートに移動
 cd ic-test-ai-agent
 
-# デプロイ用ディレクトリを作成
-mkdir -p build/lambda
+# Dockerイメージをビルド
+docker build -t ic-test-ai-agent .
 
-# ソースコードをコピー
-cp -r src/ build/lambda/
-cp platforms/aws/lambda_handler.py build/lambda/
+# ローカルでテスト実行
+docker run -p 8000:8000 --env-file .env ic-test-ai-agent
 
-# 依存関係をインストール（Lambda Layer用）
-pip install -r requirements.txt -t build/lambda/python/
-
-# ZIPファイルを作成
-cd build/lambda
-zip -r ../../lambda-deployment.zip .
-cd ../..
+# 別ターミナルからヘルスチェック
+curl http://localhost:8000/api/health
 ```
 
-💡 **Lambda Layers について**: 依存ライブラリが大きい場合は、Lambda Layers として別パッケージにすることもできます。
-Layersを使うと、コードとライブラリを分離でき、デプロイが高速になります。
+💡 **Dockerfile について**: プロジェクトルートにDockerfileが含まれています。
+`platforms/local/main.py` をエントリーポイントとするFastAPIアプリケーションとしてビルドされます。
 
-### ローカルテスト（SAM CLI）
-
-デプロイ前にローカルでLambda関数をテストできます。
+### ECRリポジトリの作成とプッシュ
 
 ```bash
-# AWS SAM CLIのインストール（オプション - SAMテンプレート使用時のみ）
-pip install aws-sam-cli
+# ECRリポジトリを作成
+aws ecr create-repository \
+  --repository-name ic-test-ai-agent \
+  --region ap-northeast-1
 
-# ローカルでLambda関数を実行
-# ※ 本プロジェクトはTerraformベースのため、SAMテンプレートは含まれていません。
-# ローカルテストにはpytestを使用してください。
+# ECRにログイン
+aws ecr get-login-password --region ap-northeast-1 | \
+  docker login --username AWS --password-stdin \
+  123456789012.dkr.ecr.ap-northeast-1.amazonaws.com
+
+# イメージにタグを付与
+docker tag ic-test-ai-agent:latest \
+  123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/ic-test-ai-agent:latest
+
+# ECRにプッシュ
+docker push \
+  123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/ic-test-ai-agent:latest
+```
+
+### ローカルテスト
+
+デプロイ前にローカルでコンテナをテストします。
+
+```bash
+# Dockerコンテナをローカルで実行
+docker run -p 8000:8000 --env-file .env ic-test-ai-agent
+
+# または、pytestでユニットテストを実行
 python -m pytest tests/ -v
 ```
 
-### Lambda関数の手動デプロイ
+### App Runnerサービスの手動作成
 
-⚠️ **Terraformを使う場合は不要**: 後述のTerraformデプロイ（セクション12）では、Lambda関数が自動作成されます。
+⚠️ **Terraformを使う場合は不要**: 後述のTerraformデプロイ（セクション12）では、App Runnerサービスが自動作成されます。
 ここでは学習目的で手動デプロイの方法を説明しています。
 
 ```bash
-# S3にデプロイパッケージをアップロード
-aws s3 cp lambda-deployment.zip \
-  s3://ic-test-ai-prod-lambda-deployments-123456789012/lambda-deployment.zip
-
-# Lambda関数のコードを更新
-aws lambda update-function-code \
-  --function-name ic-test-ai-prod-evaluate \
-  --s3-bucket ic-test-ai-prod-lambda-deployments-123456789012 \
-  --s3-key lambda-deployment.zip
+# App Runnerサービスを作成
+aws apprunner create-service \
+  --service-name ic-test-ai-prod \
+  --source-configuration '{
+    "AuthenticationConfiguration": {
+      "AccessRoleArn": "arn:aws:iam::123456789012:role/ic-test-ai-prod-apprunner-access-role"
+    },
+    "ImageRepository": {
+      "ImageIdentifier": "123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/ic-test-ai-agent:latest",
+      "ImageRepositoryType": "ECR",
+      "ImageConfiguration": {
+        "Port": "8000",
+        "RuntimeEnvironmentVariables": {
+          "LLM_PROVIDER": "AWS",
+          "OCR_PROVIDER": "AWS",
+          "AWS_REGION_NAME": "ap-northeast-1"
+        }
+      }
+    }
+  }' \
+  --instance-configuration '{
+    "Cpu": "1024",
+    "Memory": "2048",
+    "InstanceRoleArn": "arn:aws:iam::123456789012:role/ic-test-ai-prod-apprunner-instance-role"
+  }' \
+  --health-check-configuration '{
+    "Protocol": "HTTP",
+    "Path": "/api/health",
+    "Interval": 10,
+    "Timeout": 5,
+    "HealthyThreshold": 1,
+    "UnhealthyThreshold": 5
+  }'
 ```
 
 期待される出力：
 ```json
 {
-    "FunctionName": "ic-test-ai-prod-evaluate",
-    "Runtime": "python3.11",
-    "CodeSize": 12345678,
-    "LastModified": "2026-02-11T10:00:00.000+0000",
-    ...
+    "Service": {
+        "ServiceName": "ic-test-ai-prod",
+        "ServiceUrl": "xxxxxxxx.ap-northeast-1.awsapprunner.com",
+        "Status": "OPERATION_IN_PROGRESS",
+        ...
+    }
 }
 ```
 
 ### テスト実行
 
 ```bash
-# Lambda関数を直接テスト実行
-aws lambda invoke \
-  --function-name ic-test-ai-prod-evaluate \
-  --payload '{"httpMethod": "GET", "path": "/health"}' \
-  --cli-binary-format raw-in-base64-out \
-  response.json
+# App RunnerサービスのURLを取得
+SERVICE_URL=$(aws apprunner describe-service \
+  --service-arn <サービスARN> \
+  --query "Service.ServiceUrl" \
+  --output text)
 
-# レスポンスを確認
-cat response.json
+# ヘルスチェック
+curl -s "https://$SERVICE_URL/api/health" | python -m json.tool
 ```
 
 ✅ **確認ポイント**:
-- `StatusCode` が `200` であること
-- `response.json` にヘルスチェック結果が含まれていること
+- ステータスコードが `200` であること
+- ヘルスチェック結果が `"status": "healthy"` を含むこと
 
 ### 環境変数設定
 
-Lambda関数の環境変数は、Terraform設定（`lambda.tf`）で以下のように定義されています：
+App Runnerサービスの環境変数は、Terraform設定（`app-runner.tf`）で以下のように定義されています：
 
 | 環境変数 | 値 | 説明 |
 |---------|-----|------|
@@ -594,7 +630,7 @@ Lambda関数の環境変数は、Terraform設定（`lambda.tf`）で以下のよ
 | `OCR_PROVIDER` | `AWS` | Textract使用を指定 |
 | `AWS_REGION_NAME` | `ap-northeast-1` | 東京リージョン |
 | `DEBUG` | `false` | デバッグモード |
-| `FUNCTION_TIMEOUT_SECONDS` | `540` | タイムアウト |
+| `PORT` | `8000` | FastAPIリスンポート |
 
 ---
 
@@ -823,11 +859,11 @@ python textract_test.py
 ### API Gatewayとは
 
 **Amazon API Gateway** は、REST/HTTP APIを作成・公開・管理するためのサービスです。
-外部からのHTTPリクエストを受け取り、Lambda関数に転送する「入り口」の役割を果たします。
+外部からのHTTPリクエストを受け取り、App Runnerサービスに転送する「入り口」の役割を果たします。
 
 ```
-クライアント → [API Gateway] → [Lambda] → [Bedrock/Textract]
-  (VBA/        (認証・制限)   (処理)     (AI/OCR)
+クライアント → [API Gateway] → [App Runner] → [Bedrock/Textract]
+  (VBA/        (認証・制限)   (コンテナ)     (AI/OCR)
    PowerShell)
 ```
 
@@ -894,7 +930,7 @@ aws apigateway create-resource \
   --path-part "evaluate"
 ```
 
-### Lambda統合設定
+### App Runner統合設定
 
 ```bash
 # /evaluate リソースIDを取得
@@ -911,19 +947,20 @@ aws apigateway put-method \
   --authorization-type NONE \
   --api-key-required
 
-# Lambda統合を設定（AWS_PROXY = Lambdaプロキシ統合）
+# App Runnerへの HTTP統合を設定
+SERVICE_URL="https://xxxxxxxx.ap-northeast-1.awsapprunner.com"
 aws apigateway put-integration \
   --rest-api-id $API_ID \
   --resource-id $EVAL_ID \
   --http-method POST \
-  --type AWS_PROXY \
+  --type HTTP_PROXY \
   --integration-http-method POST \
-  --uri "arn:aws:apigateway:ap-northeast-1:lambda:path/2015-03-31/functions/arn:aws:lambda:ap-northeast-1:123456789012:function:ic-test-ai-prod-evaluate/invocations"
+  --uri "$SERVICE_URL/api/evaluate"
 ```
 
-💡 **Lambdaプロキシ統合（AWS_PROXY）とは**: API Gatewayが受け取ったHTTPリクエスト全体を
-そのままLambda関数に渡す方式です。Lambda側でリクエストの解析とレスポンスの構築を行います。
-設定がシンプルで、最も広く使われている統合方式です。
+💡 **HTTPプロキシ統合（HTTP_PROXY）とは**: API Gatewayが受け取ったHTTPリクエスト全体を
+そのままバックエンド（App Runner）に転送する方式です。App Runner側でリクエストの処理を行います。
+設定がシンプルで、コンテナベースのバックエンドに適しています。
 
 ### ステージ作成とデプロイ
 
@@ -1034,7 +1071,7 @@ aws secretsmanager create-secret \
   --region ap-northeast-1
 ```
 
-💡 **Bedrock/Textractの認証について**: Lambda関数はIAMロールによってBedrock/Textractにアクセスします。
+💡 **Bedrock/Textractの認証について**: App RunnerサービスはIAMインスタンスロールによってBedrock/Textractにアクセスします。
 そのため、API Keyをシークレットに保存する必要は通常ありません。
 Secrets Managerは主に、外部サービス（OpenAI等）のAPIキー管理に使用します。
 
@@ -1070,11 +1107,11 @@ secret = response['SecretString']
 print(f"シークレット取得成功: {secret[:10]}...")
 ```
 
-### Lambda関数からのアクセス設定
+### App Runnerサービスからのアクセス設定
 
-Lambda関数からSecrets Managerにアクセスするには、IAMポリシーが必要です。
-本プロジェクトのTerraformでは、`lambda_secrets_read` ポリシーが自動作成され、
-以下の権限がLambda実行ロールに付与されます：
+App RunnerサービスからSecrets Managerにアクセスするには、IAMポリシーが必要です。
+本プロジェクトのTerraformでは、`apprunner_secrets_read` ポリシーが自動作成され、
+以下の権限がApp Runnerインスタンスロールに付与されます：
 
 ```json
 {
@@ -1097,7 +1134,7 @@ Lambda関数からSecrets Managerにアクセスするには、IAMポリシー�
 ```
 
 ⚠️ **最小権限**: `Resource` に具体的なシークレットARNを指定することで、
-Lambda関数がアクセスできるシークレットを限定しています。`"Resource": "*"` は避けてください。
+App Runnerサービスがアクセスできるシークレットを限定しています。`"Resource": "*"` は避けてください。
 
 ### 登録すべきシークレット一覧
 
@@ -1136,20 +1173,20 @@ aws secretsmanager list-secrets \
 Terraformで以下のリソースが自動作成されます：
 
 **ロググループ**:
-- `/aws/lambda/ic-test-ai-prod-evaluate` - Lambda関数ログ（保持期間: 30日）
+- `/aws/apprunner/ic-test-ai-prod` - App Runnerサービスログ（保持期間: 30日）
 - `/aws/apigateway/ic-test-ai-prod-api` - API Gatewayアクセスログ（保持期間: 30日）
 
 **アラーム**:
 | アラーム名 | 監視対象 | 閾値 |
 |-----------|---------|------|
-| `lambda-errors` | Lambdaエラー数 | 5分間で10回以上 |
-| `lambda-throttles` | Lambdaスロットリング | 5分間で5回以上 |
-| `lambda-duration` | Lambda実行時間 | 平均3分以上 |
+| `apprunner-errors` | App Runnerエラー数 | 5分間で10回以上 |
+| `apprunner-5xx` | App Runner 5xxエラー | 5分間で5回以上 |
+| `apprunner-latency` | App Runnerレスポンスタイム | 平均3分以上 |
 | `api-gateway-4xx` | API 4xxエラー | 5分間で20回以上 |
 | `api-gateway-5xx` | API 5xxエラー | 5分間で5回以上 |
 
 **ダッシュボード**:
-`ic-test-ai-prod-dashboard` にLambdaとAPI Gatewayのメトリクスが一覧表示されます。
+`ic-test-ai-prod-dashboard` にApp RunnerとAPI Gatewayのメトリクスが一覧表示されます。
 
 ### X-Rayとは
 
@@ -1157,8 +1194,8 @@ Terraformで以下のリソースが自動作成されます：
 APIリクエストがどのサービスを経由し、各ステップで何秒かかったかを可視化します。
 
 ```
-リクエスト → API Gateway (50ms) → Lambda (2500ms) → Bedrock (2000ms)
-                                                   → Textract (800ms)
+リクエスト → API Gateway (50ms) → App Runner (2500ms) → Bedrock (2000ms)
+                                                      → Textract (800ms)
 ```
 
 X-Rayを使うと：
@@ -1166,22 +1203,25 @@ X-Rayを使うと：
 - **エラー追跡**: どのステップでエラーが発生したか特定できる
 - **サービスマップ**: サービス間の依存関係を可視化
 
-### Lambda関数のX-Ray有効化
+### App RunnerのX-Ray有効化
 
-Terraformでは `tracing_config.mode = "Active"` で自動有効化されます。
+Terraformでは App Runner の observability configuration で自動有効化されます。
 手動で有効化する場合：
 
 ```bash
-aws lambda update-function-configuration \
-  --function-name ic-test-ai-prod-evaluate \
-  --tracing-config Mode=Active
+aws apprunner update-service \
+  --service-arn <サービスARN> \
+  --observability-configuration '{
+    "ObservabilityEnabled": true,
+    "ObservabilityConfigurationArn": "<X-Ray設定ARN>"
+  }'
 ```
 
-期待される出力（一部）：
+期待されるステータス：
 ```json
 {
-    "TracingConfig": {
-        "Mode": "Active"
+    "Service": {
+        "Status": "OPERATION_IN_PROGRESS"
     }
 }
 ```
@@ -1193,7 +1233,7 @@ CloudWatch Logs Insightsを使って、ログを検索・分析できます。
 ```bash
 # AWS CLIからCloudWatch Logs Insightsクエリを実行
 aws logs start-query \
-  --log-group-name "/aws/lambda/ic-test-ai-prod-evaluate" \
+  --log-group-name "/aws/apprunner/ic-test-ai-prod" \
   --start-time $(date -d '1 hour ago' +%s) \
   --end-time $(date +%s) \
   --query-string 'fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 20'
@@ -1213,21 +1253,19 @@ fields @timestamp, @message, correlation_id
 | filter correlation_id like /your-correlation-id-here/
 | sort @timestamp asc
 
-# Lambda実行時間の統計
-stats avg(duration), max(duration), min(duration), count(*) as invocations
+# リクエスト処理時間の統計
+stats avg(duration), max(duration), min(duration), count(*) as requests
 by bin(5m) as time_window
 
-# コールドスタートの検出
+# コンテナ起動ログの検出
 fields @timestamp, @message
-| filter @message like /REPORT/
-| parse @message "Init Duration: * ms" as initDuration
-| filter ispresent(initDuration)
+| filter @message like /Starting/
 | sort @timestamp desc
 ```
 
 💡 **コンソールからの確認方法**:
 1. AWS Console → CloudWatch → Log Insights
-2. ロググループで `/aws/lambda/ic-test-ai-prod-evaluate` を選択
+2. ロググループで `/aws/apprunner/ic-test-ai-prod` を選択
 3. 上記クエリをコピー&ペーストして「Run query」
 
 ### X-Rayサービスマップの見方
@@ -1237,7 +1275,7 @@ fields @timestamp, @message
 3. サービスマップが表示される
 
 サービスマップの読み方：
-- **ノード**: 各サービス（API Gateway、Lambda、Bedrock等）
+- **ノード**: 各サービス（API Gateway、App Runner、Bedrock等）
 - **エッジ**: サービス間のリクエストフロー
 - **色**: 緑=正常、黄=4xxエラー、赤=5xxエラー
 - **レイテンシ**: 各ノードの平均応答時間
@@ -1264,7 +1302,7 @@ terraform output xray_service_map_url
 - **オブジェクト**: バケット内のファイル
 - **キー**: オブジェクトの識別名（ファイルパスに相当）
 
-本プロジェクトでは、Lambda関数のデプロイパッケージをS3に保存します。
+本プロジェクトでは、証跡ファイルやジョブ結果の保存にS3を使用します。
 
 ### バケット作成
 
@@ -1385,7 +1423,7 @@ terraform --version
 infrastructure/aws/terraform/
 ├── backend.tf          # Terraformバックエンド設定（State管理）
 ├── variables.tf        # 変数定義（プロジェクト名、リージョン等）
-├── lambda.tf           # Lambda関数 + IAMロール + S3バケット
+├── app-runner.tf       # App Runnerサービス + IAMロール + ECR
 ├── api-gateway.tf      # API Gateway + API Key + Usage Plan
 ├── secrets-manager.tf  # Secrets Manager + IAMポリシー
 ├── cloudwatch.tf       # CloudWatch Alarms + Dashboard + X-Ray
@@ -1398,9 +1436,9 @@ infrastructure/aws/terraform/
 |---------|-------------------|
 | `backend.tf` | Terraform設定（プロバイダーバージョン、State保存先） |
 | `variables.tf` | 設定パラメータ定義（デフォルト値含む） |
-| `lambda.tf` | Lambda関数、IAMロール、S3バケット、CloudWatch Logs |
+| `app-runner.tf` | App Runnerサービス、IAMロール、ECR、CloudWatch Logs |
 | `api-gateway.tf` | REST API、リソース、メソッド、ステージ、API Key |
-| `secrets-manager.tf` | シークレット3種 + Lambda読み取りポリシー |
+| `secrets-manager.tf` | シークレット3種 + App Runner読み取りポリシー |
 | `cloudwatch.tf` | アラーム5種 + ダッシュボード + X-Rayサンプリングルール |
 | `outputs.tf` | デプロイ後の重要情報（URL、ARN等） |
 
@@ -1455,12 +1493,10 @@ Terraform used the selected providers to generate the following execution plan.
       ...
     }
 
-  # aws_lambda_function.ic_test_ai will be created
-  + resource "aws_lambda_function" "ic_test_ai" {
-      + function_name = "ic-test-ai-prod-evaluate"
-      + runtime       = "python3.11"
-      + memory_size   = 1024
-      + timeout       = 540
+  # aws_apprunner_service.ic_test_ai will be created
+  + resource "aws_apprunner_service" "ic_test_ai" {
+      + service_name = "ic-test-ai-prod"
+      + status       = "RUNNING"
       ...
     }
 
@@ -1493,7 +1529,7 @@ Outputs:
 api_gateway_endpoint = "https://abc123def4.execute-api.ap-northeast-1.amazonaws.com/prod/evaluate"
 api_key = <sensitive>
 cloudwatch_dashboard_url = "https://console.aws.amazon.com/cloudwatch/..."
-lambda_function_name = "ic-test-ai-prod-evaluate"
+apprunner_service_url = "https://xxxxxxxx.ap-northeast-1.awsapprunner.com"
 xray_service_map_url = "https://console.aws.amazon.com/xray/..."
 ```
 
@@ -1516,8 +1552,8 @@ terraform output api_gateway_endpoint
 |--------|------|
 | `api_gateway_endpoint` | VBA/PowerShellに設定するAPIエンドポイント |
 | `api_key` | VBA/PowerShellに設定するAPI Key |
-| `lambda_function_name` | コードデプロイ時に指定する関数名 |
-| `s3_bucket_name` | デプロイパッケージのアップロード先 |
+| `apprunner_service_url` | App RunnerサービスのURL |
+| `ecr_repository_url` | Dockerイメージのプッシュ先 |
 | `cloudwatch_dashboard_url` | 監視ダッシュボードのURL |
 
 ### Terraform State管理（S3バックエンド）
@@ -1643,7 +1679,7 @@ curl -s -X POST "$API_URL/evaluate" \
 
 # CloudWatch Logsで相関IDを検索
 aws logs start-query \
-  --log-group-name "/aws/lambda/ic-test-ai-prod-evaluate" \
+  --log-group-name "/aws/apprunner/ic-test-ai-prod" \
   --start-time $(date -d '10 minutes ago' +%s) \
   --end-time $(date +%s) \
   --query-string "fields @timestamp, @message | filter @message like /$CORR_ID/ | sort @timestamp asc"
@@ -1657,8 +1693,8 @@ aws logs start-query \
 ### CloudWatchでログ確認
 
 ```bash
-# Lambda関数の最新ログを確認
-aws logs tail "/aws/lambda/ic-test-ai-prod-evaluate" \
+# App Runnerサービスの最新ログを確認
+aws logs tail "/aws/apprunner/ic-test-ai-prod" \
   --since 10m \
   --format short
 ```
@@ -1670,11 +1706,11 @@ CloudWatch Logsコンソールで直接ログを確認できます。
 
 | 問題 | 確認ポイント | 解決方法 |
 |------|------------|----------|
-| 502 Bad Gateway | Lambda関数のデプロイパッケージ | S3のZIPファイルを確認、`lambda_handler.handler`が正しいか確認 |
+| 502 Bad Gateway | App Runnerコンテナエラー | コンテナログを確認、Dockerイメージが正しいか確認 |
 | 403 Forbidden | API Key | `x-api-key` ヘッダーの値を確認 |
-| 504 Gateway Timeout | Lambda タイムアウト | タイムアウト値を確認（540秒で十分か） |
-| Internal Server Error | Lambda実行エラー | CloudWatch Logsを確認 |
-| Bedrockアクセスエラー | IAMポリシー | Bedrockポリシーがアタッチされているか確認 |
+| 504 Gateway Timeout | App Runner タイムアウト | ヘルスチェック設定とリクエストタイムアウトを確認 |
+| Internal Server Error | App Runner実行エラー | CloudWatch Logsを確認 |
+| Bedrockアクセスエラー | IAMポリシー | Bedrockポリシーがインスタンスロールにアタッチされているか確認 |
 
 ---
 
@@ -1686,7 +1722,7 @@ AWSの無料枠（12か月間）：
 
 | サービス | 無料枠 |
 |---------|--------|
-| Lambda | 100万リクエスト/月 + 40万GB秒 |
+| App Runner | 自動一時停止で未使用時は最小課金 |
 | API Gateway | 100万API呼び出し/月（12か月間） |
 | CloudWatch | 基本モニタリング無料、ログ5GB/月 |
 | S3 | 5GB標準ストレージ |
@@ -1700,15 +1736,15 @@ AWSの無料枠（12か月間）：
 
 | サービス | 概算コスト |
 |---------|-----------|
-| Lambda（100回 x 平均30秒 x 1024MB） | ~$0.05 |
+| App Runner（1 vCPU, 2GB, 低トラフィック） | ~$5.00 |
 | API Gateway（100リクエスト） | ~$0.001 |
 | Bedrock - Claude Sonnet 4.5（100回） | ~$1.00〜$5.00 |
 | Bedrock - Claude Haiku 4.5（100回） | ~$0.10〜$0.30 |
 | CloudWatch Logs | ~$0.50 |
 | Secrets Manager（3シークレット） | ~$1.20 |
 | S3 | ~$0.01 |
-| **合計（Sonnet 4.5使用時）** | **~$3〜$7/月** |
-| **合計（Haiku 4.5使用時）** | **~$2〜$3/月** |
+| **合計（Sonnet 4.5使用時）** | **~$8〜$12/月** |
+| **合計（Haiku 4.5使用時）** | **~$7〜$8/月** |
 
 💡 **コスト最適化のヒント**:
 
@@ -1781,7 +1817,7 @@ terraform output -raw api_key
 - [AWS公式ドキュメント](https://docs.aws.amazon.com/)
 - [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/)
 - [Amazon Bedrock ドキュメント](https://docs.aws.amazon.com/bedrock/)
-- [AWS Lambda ドキュメント](https://docs.aws.amazon.com/lambda/)
+- [AWS App Runner ドキュメント](https://docs.aws.amazon.com/apprunner/)
 - [API Gateway ドキュメント](https://docs.aws.amazon.com/apigateway/)
 - [本プロジェクト Deployment Guide](../operations/DEPLOYMENT_GUIDE.md)
 - [本プロジェクト AWS Terraform README](../../infrastructure/aws/README.md)

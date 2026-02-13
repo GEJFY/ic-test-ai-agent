@@ -57,7 +57,7 @@
 │   └────────┬────────┘                                                       │
 │            ▼                                                                │
 │   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐        │
-│   │ Azure Functions │───▶│ Azure AI Foundry│    │ Azure Document  │        │
+│   │ Container Apps  │───▶│ Azure AI Foundry│    │ Azure Document  │        │
 │   │ (API ホスト)    │    │ (LLM処理)       │    │ Intelligence    │        │
 │   └─────────────────┘    └─────────────────┘    │ (OCR処理)       │        │
 │           │                                      └─────────────────┘        │
@@ -114,7 +114,7 @@
 
 | リソース | Azure サービス名 | SKU/プラン | 用途 |
 |---------|-----------------|-----------|------|
-| APIホスティング | Azure Functions | Consumption / Premium | REST API エンドポイント |
+| APIホスティング | Azure Container Apps | Consumption | REST API エンドポイント（Docker + FastAPI） |
 | LLM処理 | Azure AI Foundry | Standard | AI評価（GPT-5.2等） |
 | OCR処理 | Azure Document Intelligence | S0 | PDF・画像からのテキスト抽出 |
 | ファイル保存 | Azure Storage Account | Standard LRS | 一時ファイル、ログ |
@@ -143,7 +143,7 @@
 
 | リソース | Azure サービス名 | SKU/プラン | 用途 |
 |---------|-----------------|-----------|------|
-| APM・ログ収集 | Application Insights | Basic / Standard | Functions 監視、トレース |
+| APM・ログ収集 | Application Insights | Basic / Standard | Container Apps 監視、トレース |
 | ログ分析 | Log Analytics Workspace | 従量課金 | 統合ログ保存・クエリ |
 | メトリクス・アラート | Azure Monitor | 従量課金 | アラート通知 |
 | 診断ログ | Diagnostic Settings | - | AI Foundry/DI のログ収集 |
@@ -163,50 +163,50 @@ Base64エンコードしてクライアントに返却します。
 
 | 処理 | ライブラリ | 対象 | コスト影響 |
 |-----|-----------|------|-----------|
-| PDFハイライト | PyMuPDF (fitz) | PDF証跡の引用箇所にハイライト注釈追加 | Functions実行時間 +5-15秒/ファイル |
-| Excelハイライト | openpyxl | Excelセルの該当箇所を黄色背景 | Functions実行時間 +3-10秒/ファイル |
-| テキスト→PDFハイライト | reportlab | テキスト/CSV等をPDF化しハイライト | Functions実行時間 +5-10秒/ファイル |
+| PDFハイライト | PyMuPDF (fitz) | PDF証跡の引用箇所にハイライト注釈追加 | コンテナ実行時間 +5-15秒/ファイル |
+| Excelハイライト | openpyxl | Excelセルの該当箇所を黄色背景 | コンテナ実行時間 +3-10秒/ファイル |
+| テキスト→PDFハイライト | reportlab | テキスト/CSV等をPDF化しハイライト | コンテナ実行時間 +5-10秒/ファイル |
 | ハイライト済みファイル保存 | azure-data-tables / azure-storage-blob | Blob Storageに一時保存（Table 64KB制限回避） | Blob Storage操作 +2回/ファイル |
 
-> **コスト影響:** 1件あたり約10-25秒の追加実行時間（Consumption Plan無料枠内）。
+> **コスト影響:** 1件あたり約10-25秒の追加実行時間（Container Apps Consumption Plan内）。
 > Blob Storageへのハイライト済みファイル保存は一時的（ジョブ取得後は不要）で、容量・操作コストは軽微。
 
 ---
 
 ## 4. 詳細コスト見積もり
 
-### 4.1 Azure Functions
+### 4.1 Azure Container Apps
 
 #### 4.1.1 Consumption Plan（従量課金）
 
 | 項目 | 単価 | 無料枠 |
 |-----|------|-------|
-| 実行回数 | ¥0.028 / 100万回 | 100万回/月 |
-| 実行時間 | ¥0.0000224 / GB-秒 | 40万GB-秒/月 |
-| ストレージ | ¥3.36 / GB/月 | 最初の1GB無料 |
+| vCPU | ¥0.0000342 / vCPU-秒 | 月間18万vCPU-秒 |
+| メモリ | ¥0.00000427 / GiB-秒 | 月間36万GiB-秒 |
+| リクエスト | ¥0.028 / 100万回 | 月間200万リクエスト |
 
 **計算例:**
 ```
 PoC（1,200件/3ヶ月）:
-  実行回数: 1,200 × 2 × 3スプリント = 7,200回 → 無料枠内（100万回/月）
-  実行時間: 7,200回 × 60秒 × 0.5GB = 216,000 GB-秒 → 無料枠内（40万GB-秒/月）
-  PoC合計: ¥0
+  リクエスト: 7,200回 → 無料枠内（200万回/月）
+  vCPU: 7,200回 × 60秒 × 0.5vCPU = 216,000 vCPU-秒 → 無料枠内（18万vCPU-秒/月）
+  PoC合計: ¥0（ほぼ無料枠内）
 
 本番（1,800件/年間）:
-  実行回数: 9,000回/年（月平均750回） → 無料枠内
-  実行時間: 9,000回 × 60秒 × 0.5GB = 270,000 GB-秒/年 → 無料枠内
+  リクエスト: 9,000回/年（月平均750回） → 無料枠内
+  vCPU: 9,000回 × 60秒 × 0.5vCPU = 270,000 vCPU-秒/年 → 無料枠内
   年額: ¥0
 ```
 
-#### 4.1.2 Premium Plan（EP1）
+#### 4.1.2 Dedicated Plan（常時稼働）
 
 | 項目 | 月額（東日本リージョン） |
 |-----|------------------------|
 | vCPU | ¥18,340 / vCPU |
 | メモリ | ¥1,306 / GB |
-| EP1（1vCPU, 3.5GB）| 約 ¥22,910/月 |
+| 1vCPU, 2GB | 約 ¥21,000/月 |
 
-**推奨ケース:** 月10,000項目以上、または常時稼働が必要な場合
+**推奨ケース:** 月10,000項目以上、コールドスタートを回避したい場合
 
 ---
 
@@ -419,7 +419,7 @@ API呼び出し: 1,000項目 × 5回/件 = 5,000回 → 無料枠内
 **計算例:**
 ```
 シークレット数: 5-8個（LLM/OCR/Storage APIキー等）
-月間操作: ～500回（Functions起動時の読み取り）
+月間操作: ～500回（Container Apps起動時の読み取り）
 月額: 約 ¥50（最小課金単位による）
 ```
 
@@ -437,7 +437,7 @@ API呼び出し: 1,000項目 × 5回/件 = 5,000回 → 無料枠内
 
 | リソース | 構成 | 使用量 | PoC合計（JPY） |
 |---------|-----|--------|--------------|
-| Azure Functions | Consumption Plan | 6,000回 | ¥0 |
+| Azure Container Apps | Consumption Plan | 6,000回 | ¥0 |
 | Azure AI Foundry (GPT-5.2) | Standard | 入力42M + 出力4.8M tokens | ¥21,400 |
 | Document Intelligence | S0 / Layout | 9,600ページ | ¥14,592 |
 | Storage（Blob+Table+Queue） | Standard LRS | 3GB + 操作 | ¥300 |
@@ -450,7 +450,7 @@ API呼び出し: 1,000項目 × 5回/件 = 5,000回 → 無料枠内
 
 | リソース | 構成 | 年間使用量 | 年額（JPY） |
 |---------|-----|-----------|------------|
-| Azure Functions | Consumption Plan | 9,000回/年 | ¥0 |
+| Azure Container Apps | Consumption Plan | 9,000回/年 | ¥0 |
 | Azure AI Foundry (GPT-5.2) | Standard | 入力63M + 出力7.2M tokens | ¥32,080 |
 | Document Intelligence | S0 / Layout | 14,400ページ | ¥21,888 |
 | Storage（Blob+Table+Queue） | Standard LRS | 3.5GB + 操作 | ¥1,500 |
@@ -481,7 +481,7 @@ API呼び出し: 1,000項目 × 5回/件 = 5,000回 → 無料枠内
 |-----|------------|------|
 | Azure サブスクリプション設定 | 1時間 | 既存サブスクリプション利用可 |
 | リソースグループ作成 | 0.5時間 | |
-| Azure Functions デプロイ | 2時間 | ARM/Bicep テンプレート利用可 |
+| Azure Container Apps デプロイ | 2時間 | Docker + Bicep テンプレート利用可 |
 | Azure AI Foundry 設定 | 1-2時間 | Model Catalogからデプロイ |
 | Document Intelligence 設定 | 1時間 | |
 | Storage Account 設定 | 0.5時間 | |
@@ -494,8 +494,8 @@ API呼び出し: 1,000項目 × 5回/件 = 5,000回 → 無料枠内
 
 | サービス | SLA |
 |---------|-----|
-| Azure Functions (Consumption) | 99.95% |
-| Azure Functions (Premium) | 99.95% |
+| Azure Container Apps (Consumption) | 99.95% |
+| Azure Container Apps (Dedicated) | 99.95% |
 | Azure AI Foundry | 99.9% |
 | Azure Document Intelligence | 99.9% |
 | Azure Storage | 99.9% (LRS) |
@@ -540,7 +540,7 @@ MAX_JUDGMENT_REVISIONS=1
 
 ## 付録B: 参考リンク
 
-- [Azure Functions 価格](https://azure.microsoft.com/ja-jp/pricing/details/functions/)
+- [Azure Container Apps 価格](https://azure.microsoft.com/ja-jp/pricing/details/container-apps/)
 - [Azure AI Foundry 価格](https://azure.microsoft.com/ja-jp/pricing/details/cognitive-services/openai-service/)
 - [Azure Document Intelligence 価格](https://azure.microsoft.com/ja-jp/pricing/details/ai-document-intelligence/)
 - [Azure Storage 価格](https://azure.microsoft.com/ja-jp/pricing/details/storage/)
@@ -555,7 +555,7 @@ MAX_JUDGMENT_REVISIONS=1
 
 | リソース | GCP サービス名 | 用途 |
 |---------|---------------|------|
-| APIホスティング | Cloud Functions (2nd gen) | REST API エンドポイント |
+| APIホスティング | Cloud Run | REST API エンドポイント（Docker + FastAPI） |
 | LLM処理 | Vertex AI (Gemini 3) | AI評価 |
 | OCR処理 | Document AI | PDF・画像からのテキスト抽出 |
 | ファイル保存 | Cloud Storage | 一時ファイル、ログ |
@@ -569,12 +569,13 @@ MAX_JUDGMENT_REVISIONS=1
 
 ## 2. GCPコスト概算
 
-### 2.1 Cloud Functions
+### 2.1 Cloud Run
 
 | 項目 | 単価 | 無料枠 |
 |-----|------|-------|
-| 呼び出し回数 | $0.40 / 100万回 | 200万回/月 |
-| コンピューティング時間 | $0.000016 / GB-秒 | 40万GB-秒/月 |
+| vCPU | $0.00002400 / vCPU-秒 | 月間18万vCPU-秒 |
+| メモリ | $0.00000250 / GiB-秒 | 月間36万GiB-秒 |
+| リクエスト | $0.40 / 100万回 | 200万回/月 |
 
 ### 2.2 Vertex AI (Gemini 3 Pro Preview)
 
@@ -606,7 +607,7 @@ MAX_JUDGMENT_REVISIONS=1
 
 ## 3. GCP参考リンク
 
-- [Cloud Functions 価格](https://cloud.google.com/functions/pricing)
+- [Cloud Run 価格](https://cloud.google.com/run/pricing)
 - [Vertex AI 価格](https://cloud.google.com/vertex-ai/pricing)
 - [Document AI 価格](https://cloud.google.com/document-ai/pricing)
 - [Cloud Storage 価格](https://cloud.google.com/storage/pricing)
@@ -622,7 +623,7 @@ MAX_JUDGMENT_REVISIONS=1
 
 | リソース | AWS サービス名 | 用途 |
 |---------|---------------|------|
-| APIホスティング | Lambda + API Gateway | REST API エンドポイント |
+| APIホスティング | App Runner | REST API エンドポイント（Docker + FastAPI） |
 | LLM処理 | Amazon Bedrock (Claude Opus 4.6) | AI評価 |
 | OCR処理（英語） | Amazon Textract | PDF・画像からのテキスト抽出 |
 | OCR処理（日本語） | YomiToku-Pro (SageMaker) | 日本語特化高精度OCR |
@@ -648,12 +649,13 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 
 ## 2. AWSコスト概算
 
-### 2.1 Lambda
+### 2.1 App Runner
 
 | 項目 | 単価 | 無料枠 |
 |-----|------|-------|
-| リクエスト数 | $0.20 / 100万回 | 100万回/月 |
-| 実行時間 | $0.0000167 / GB-秒 | 40万GB-秒/月 |
+| vCPU（アクティブ） | $0.064 / vCPU-時間 | - |
+| メモリ（アクティブ） | $0.007 / GB-時間 | - |
+| 自動一時停止時のプロビジョニング | $0.007 / GB-時間 | - |
 
 ### 2.2 Amazon Bedrock (Claude Opus 4.6)
 
@@ -697,7 +699,7 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 
 ## 3. AWS参考リンク
 
-- [Lambda 価格](https://aws.amazon.com/lambda/pricing/)
+- [App Runner 価格](https://aws.amazon.com/apprunner/pricing/)
 - [Amazon Bedrock 価格](https://aws.amazon.com/bedrock/pricing/)
 - [Amazon Textract 価格](https://aws.amazon.com/textract/pricing/)
 - [SageMaker 価格](https://aws.amazon.com/sagemaker/pricing/)
@@ -712,7 +714,7 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 
 | 機能 | Azure | GCP | AWS |
 |-----|-------|-----|-----|
-| サーバーレス関数 | Azure Functions | Cloud Functions | Lambda |
+| コンテナホスティング | Azure Container Apps | Cloud Run | App Runner |
 | LLM | AI Foundry (GPT-5.2) | Vertex AI (Gemini 3 Pro) | Bedrock (Claude Opus 4.6) |
 | OCR | Document Intelligence | Document AI | Textract + YomiToku + Tesseract |
 | ジョブストレージ | Table Storage | Firestore | DynamoDB |
@@ -723,7 +725,7 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 
 | 項目 | Azure | GCP | AWS |
 |-----|-------|-----|-----|
-| サーバーレス関数 | ¥0 | ¥0（無料枠） | ¥0（無料枠） |
+| コンテナホスティング | ¥0 | ¥0（無料枠） | ¥0（無料枠） |
 | LLM | ¥17,830 | ¥17,920 | ¥41,800 |
 | OCR | ¥12,160 | ¥12,160 | ¥18,240 |
 | ストレージ | ¥500 | ¥304 | ¥304 |
@@ -837,7 +839,7 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 
 | # | カテゴリ | リソース名 | プラン/SKU | 設定 | 使用量 | 費用（JPY） |
 |---|---------|-----------|-----------|------|--------|------------|
-| 1 | コンピュート | Azure Functions | **Consumption Plan** | メモリ512MB, タイムアウト230秒 | 6,000回 × 60秒 | ¥0 |
+| 1 | コンピュート | Azure Container Apps | **Consumption Plan** | vCPU 0.5, メモリ1GB, Docker+FastAPI | 6,000回 × 60秒 | ¥0 |
 | 2 | LLM | Azure AI Foundry | **Standard** | GPT-5.2, East Japan | 入力42M tokens | ¥11,172 |
 | 3 | LLM | Azure AI Foundry | Standard | GPT-5.2, East Japan | 出力4.8M tokens | ¥10,214 |
 | 4 | OCR | Document Intelligence | **S0 / Layout** | East Japan, 全言語対応 | 9,600ページ | ¥14,592 |
@@ -856,7 +858,7 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 
 | # | カテゴリ | リソース名 | プラン | 設定 | 使用量 | USD | JPY(@152) |
 |---|---------|-----------|-------|------|--------|-----|-----------|
-| 1 | コンピュート | Cloud Functions (2nd gen) | **従量課金** | メモリ512MB, タイムアウト540秒 | 6,000回 | $0 | ¥0 |
+| 1 | コンピュート | Cloud Run | **従量課金** | vCPU 1, メモリ1GB, Docker+FastAPI | 6,000回 | $0 | ¥0 |
 | 2 | LLM | Vertex AI | **Gemini 3 Pro Preview** | global | 入力42M tokens | $84 | ¥12,768 |
 | 3 | LLM | Vertex AI | Gemini 3 Pro Preview | global | 出力4.8M tokens | $57.6 | ¥8,755 |
 | 4 | OCR | Document AI | **Layout Parser** | 全言語対応 | 9,600ページ | $96 | ¥14,592 |
@@ -874,7 +876,7 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 
 | # | カテゴリ | リソース名 | プラン | 設定 | 使用量 | USD | JPY(@152) |
 |---|---------|-----------|-------|------|--------|-----|-----------|
-| 1 | コンピュート | Lambda | **従量課金** | メモリ512MB, タイムアウト300秒 | 6,000回 | $0 | ¥0 |
+| 1 | コンピュート | App Runner | **従量課金** | vCPU 1, メモリ2GB, Docker+FastAPI | 6,000回 | $0 | ¥0 |
 | 2 | API | API Gateway | **REST API** | リージョンエンドポイント | 6,000回 | $0 | ¥0 |
 | 3 | LLM | Amazon Bedrock | **Claude Opus 4.6** | ap-northeast-1 | 入力42M tokens | $210 | ¥31,920 |
 | 4 | LLM | Amazon Bedrock | Claude Opus 4.6 | ap-northeast-1 | 出力4.8M tokens | $120 | ¥18,240 |

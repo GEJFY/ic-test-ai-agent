@@ -7,7 +7,7 @@
 #
 # 【機能】
 # - シークレット管理（Vertex AI API Key、Document AI API Key等）
-# - Cloud Functionsからのアクセス制御（IAMポリシー）
+# - Cloud Runからのアクセス制御（IAMポリシー）
 # - 自動ローテーション機能（将来対応）
 # - バージョン管理
 #
@@ -80,37 +80,37 @@ resource "google_secret_manager_secret_version" "openai_api_key" {
 }
 
 # ------------------------------------------------------------------------------
-# Cloud Functions用サービスアカウント
+# Cloud Run用サービスアカウント
 # ------------------------------------------------------------------------------
 
-resource "google_service_account" "cloud_function" {
-  account_id   = "${var.project_name}-${var.environment}-func-sa"
-  display_name = "Cloud Functions Service Account for ${var.project_name}"
+resource "google_service_account" "cloud_run" {
+  account_id   = "${var.project_name}-${var.environment}-run-sa"
+  display_name = "Cloud Run Service Account for ${var.project_name}"
   project      = var.project_id
 }
 
 # ------------------------------------------------------------------------------
-# Secret Manager IAMポリシー（Cloud Functions読み取り権限）
+# Secret Manager IAMポリシー（Cloud Run読み取り権限）
 # ------------------------------------------------------------------------------
 
 resource "google_secret_manager_secret_iam_member" "vertex_ai_access" {
   secret_id = google_secret_manager_secret.vertex_ai_api_key.id
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.cloud_function.email}"
+  member    = "serviceAccount:${google_service_account.cloud_run.email}"
   project   = var.project_id
 }
 
 resource "google_secret_manager_secret_iam_member" "document_ai_access" {
   secret_id = google_secret_manager_secret.document_ai_api_key.id
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.cloud_function.email}"
+  member    = "serviceAccount:${google_service_account.cloud_run.email}"
   project   = var.project_id
 }
 
 resource "google_secret_manager_secret_iam_member" "openai_access" {
   secret_id = google_secret_manager_secret.openai_api_key.id
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.cloud_function.email}"
+  member    = "serviceAccount:${google_service_account.cloud_run.email}"
   project   = var.project_id
 }
 
@@ -133,7 +133,7 @@ output "openai_api_key_id" {
   value       = google_secret_manager_secret.openai_api_key.id
 }
 
-output "cloud_function_service_account_email" {
-  description = "Cloud Functions用サービスアカウントのEmail"
-  value       = google_service_account.cloud_function.email
+output "cloud_run_service_account_email" {
+  description = "Cloud Run用サービスアカウントのEmail"
+  value       = google_service_account.cloud_run.email
 }
