@@ -2,7 +2,7 @@
 
 ## 概要
 
-内部統制テスト評価AIシステムのAzureインフラストラクチャをBicepで管理します。
+内部統制テスト評価AIシステムのAzureインフラストラクチャをTerraformで管理します。
 
 ### デプロイされるリソース
 
@@ -24,8 +24,8 @@
 # Azure CLI
 az --version  # 2.50.0以上
 
-# Bicep CLI
-az bicep version  # 0.20.0以上
+# Terraform
+terraform --version  # 1.5.0以上
 
 # Azure Functions Core Tools（コードデプロイ用）
 func --version  # 4.0.5
@@ -48,28 +48,24 @@ az account set --subscription "<サブスクリプションID>"
 
 ### ステップ1: パラメータファイル編集
 
-`bicep/parameters.json` を編集し、環境に合わせて値を設定します。
+`terraform/terraform.tfvars` を編集し、環境に合わせて値を設定します。
 
-```json
-{
-  "parameters": {
-    "projectName": {
-      "value": "ic-test-ai"  // プロジェクト名
-    },
-    "environment": {
-      "value": "prod"  // dev, stg, prod
-    },
-    "location": {
-      "value": "japaneast"  // リージョン
-    },
-    "apimPublisherEmail": {
-      "value": "your-email@example.com"  // ✏️ 要変更
-    },
-    "apimPublisherName": {
-      "value": "Your Organization Name"  // ✏️ 要変更
-    }
-  }
-}
+```hcl
+project_name        = "ic-test-ai"
+environment         = "prod"          # dev, stg, prod
+location            = "japaneast"     # リージョン
+resource_group_name = "rg-ic-test-evaluation"
+
+# APIM設定
+apim_publisher_email = "your-email@example.com"  # ✏️ 要変更
+apim_publisher_name  = "Your Organization Name"  # ✏️ 要変更
+apim_sku_name        = "Consumption"
+apim_sku_capacity    = 0
+
+# Function App設定
+function_app_sku_name = "Y1"
+function_app_sku_tier = "Dynamic"
+python_version        = "3.11"
 ```
 
 ### ステップ2: リソースグループ作成
@@ -77,28 +73,31 @@ az account set --subscription "<サブスクリプションID>"
 ```bash
 # リソースグループ作成
 az group create \
-  --name rg-ic-test-ai-prod \
+  --name rg-ic-test-evaluation \
   --location japaneast
 ```
 
-### ステップ3: Bicepデプロイ実行
+### ステップ3: Terraformデプロイ実行
 
 ```bash
-# デプロイ実行（約15-20分）
-cd infrastructure/azure/bicep
+# Terraformディレクトリに移動
+cd infrastructure/azure/terraform
 
-az deployment group create \
-  --resource-group rg-ic-test-ai-prod \
-  --template-file main.bicep \
-  --parameters parameters.json \
-  --query "properties.outputs" \
-  --output table
+# 初期化
+terraform init
+
+# プラン確認（約15-20分）
+terraform plan -out=tfplan
+
+# デプロイ実行
+terraform apply tfplan
 ```
 
 **デプロイ完了後、出力される情報をメモしてください：**
-- `apimGatewayUrl`: VBA/PowerShellで使用するエンドポイント
-- `keyVaultName`: シークレット設定先
-- `functionAppName`: コードデプロイ先
+
+- `apim_gateway_url`: VBA/PowerShellで使用するエンドポイント
+- `key_vault_name`: シークレット設定先
+- `function_app_name`: コードデプロイ先
 
 ### ステップ4: Key Vaultにシークレットを設定
 
@@ -106,11 +105,7 @@ az deployment group create \
 
 ```bash
 # Key Vault名を取得
-KEY_VAULT_NAME=$(az deployment group show \
-  --resource-group rg-ic-test-ai-prod \
-  --name main \
-  --query "properties.outputs.keyVaultName.value" \
-  --output tsv)
+KEY_VAULT_NAME=$(cd infrastructure/azure/terraform && terraform output -raw key_vault_name)
 
 # Azure Foundry API Key設定
 az keyvault secret set \
@@ -147,33 +142,12 @@ cd ../../../platforms/azure
 func azure functionapp publish <FunctionAppName>
 ```
 
-### ステップ6: APIMポリシーを適用
-
-**方法1: Azure Portal（推奨）**
-
-1. Azure Portal → API Management → 対象のAPIM
-2. "APIs" → "ic-test-ai-api" → "Design"
-3. "All operations" → "Inbound processing" → `</>` (Code editor)
-4. `infrastructure/azure/apim-policies.xml` の内容をコピー&ペースト
-5. "Save"
-
-**方法2: Azure CLI**
-
-```bash
-# ポリシーファイルを適用
-az apim api policy create \
-  --resource-group rg-ic-test-ai-prod \
-  --service-name <APIM名> \
-  --api-id ic-test-ai-api \
-  --policy-content @apim-policies.xml
-```
-
-### ステップ7: APIMサブスクリプションキーを取得
+### ステップ6: APIMサブスクリプションキーを取得
 
 ```bash
 # Subscription Key（Primary）を取得
 az apim subscription show \
-  --resource-group rg-ic-test-ai-prod \
+  --resource-group rg-ic-test-evaluation \
   --service-name <APIM名> \
   --sid ic-test-ai-subscription \
   --query "primaryKey" \
@@ -182,7 +156,7 @@ az apim subscription show \
 
 **このキーをVBA/PowerShellの `API_KEY` に設定します。**
 
-### ステップ8: VBA/PowerShellのエンドポイント変更
+### ステップ7: VBA/PowerShellのエンドポイント変更
 
 **ExcelToJson.bas (VBA):**
 
@@ -244,6 +218,7 @@ az monitor log-analytics query \
 Azure Portal → Application Insights → "Application map"
 
 以下が可視化されていることを確認：
+
 - VBA/PowerShell → APIM → Azure Functions → Azure Foundry API
 - 相関IDですべてのリクエストが追跡可能
 
@@ -264,7 +239,7 @@ Managed Identityの権限確認：
 ```bash
 # Function AppのManaged Identity確認
 az functionapp identity show \
-  --resource-group rg-ic-test-ai-prod \
+  --resource-group rg-ic-test-evaluation \
   --name <Function App名>
 
 # Key Vaultアクセスポリシー確認
@@ -275,12 +250,7 @@ az keyvault show \
 
 ### APIM: 429 Too Many Requests
 
-レート制限に達しています。`apim-policies.xml` の以下を調整：
-
-```xml
-<rate-limit-by-key calls="100" renewal-period="60" ... />
-<!-- calls を増やす -->
-```
+レート制限に達しています。Terraform の `apim.tf` で設定されたAPIMポリシーを調整してください。
 
 ### Application Insights: ログが表示されない
 
@@ -288,9 +258,17 @@ az keyvault show \
 
 ## リソース削除
 
+### Terraformで削除（推奨）
+
 ```bash
-# リソースグループごと削除
-az group delete --name rg-ic-test-ai-prod --yes --no-wait
+cd infrastructure/azure/terraform
+terraform destroy
+```
+
+### リソースグループごと削除
+
+```bash
+az group delete --name rg-ic-test-evaluation --yes --no-wait
 
 # Key Vaultを完全削除（再デプロイ時）
 az keyvault purge --name <Key Vault名>
@@ -300,18 +278,20 @@ az keyvault purge --name <Key Vault名>
 
 ### 1. Application Insightsサンプリング
 
-`app-insights.bicep` の `SamplingPercentage` を 10-20% に変更：
+`terraform/monitoring.tf` の `sampling_percentage` を 10-20% に変更：
 
-```bicep
-SamplingPercentage: 10  // 初期100% → 10%に削減
+```hcl
+sampling_percentage = 10  # 初期100% → 10%に削減
 ```
 
 ### 2. ログ保持期間短縮
 
-`app-insights.bicep` の `retentionInDays` を調整：
+`terraform/variables.tf` の `log_retention_in_days` を調整：
 
-```bicep
-retentionInDays: 30  // 初期30日 → 必要に応じて短縮
+```hcl
+variable "log_retention_in_days" {
+  default = 30  # 必要に応じて短縮
+}
 ```
 
 ### 3. APIM Consumptionプラン活用
@@ -322,25 +302,22 @@ Consumptionプランは呼び出し数に応じた従量課金なので、利用
 
 ### 1. APIMネットワークアクセス制限
 
-```xml
-<!-- apim-policies.xml に追加 -->
-<ip-filter action="allow">
-    <address>xxx.xxx.xxx.xxx</address>  <!-- 許可するIPアドレス -->
-</ip-filter>
+`terraform/apim.tf` でIPフィルタリングポリシーを追加：
+
+```hcl
+# APIM ポリシーでIPフィルタリングを追加
+# azure_api_management_api_policy リソースで管理
 ```
 
 ### 2. Key Vaultネットワークアクセス制限
 
-```bicep
-// key-vault.bicep のnetworkAcls変更
-networkAcls: {
-  bypass: 'AzureServices'
-  defaultAction: 'Deny'
-  ipRules: [
-    {
-      value: 'xxx.xxx.xxx.xxx'  // 許可するIPアドレス
-    }
-  ]
+`terraform/key-vault.tf` の `network_acls` を変更：
+
+```hcl
+network_acls {
+  bypass         = "AzureServices"
+  default_action = "Deny"
+  ip_rules       = ["xxx.xxx.xxx.xxx"]  # 許可するIPアドレス
 }
 ```
 
@@ -353,12 +330,12 @@ networkAcls: {
 az role assignment create \
   --assignee <Function App Principal ID> \
   --role "Key Vault Secrets User" \
-  --scope /subscriptions/<サブスクリプションID>/resourceGroups/rg-ic-test-ai-prod/providers/Microsoft.KeyVault/vaults/<Key Vault名>
+  --scope /subscriptions/<サブスクリプションID>/resourceGroups/rg-ic-test-evaluation/providers/Microsoft.KeyVault/vaults/<Key Vault名>
 ```
 
 ## 参考リンク
 
 - [Azure API Management ドキュメント](https://learn.microsoft.com/azure/api-management/)
-- [Azure Functions Bicep リファレンス](https://learn.microsoft.com/azure/templates/microsoft.web/sites)
-- [Key Vault Bicep リファレンス](https://learn.microsoft.com/azure/templates/microsoft.keyvault/vaults)
+- [Azure Functions Terraform リファレンス](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/linux_function_app)
+- [Key Vault Terraform リファレンス](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/key_vault)
 - [Application Insights ドキュメント](https://learn.microsoft.com/azure/azure-monitor/app/app-insights-overview)

@@ -2732,7 +2732,7 @@
     **Tesseract（Docker版）について**:
     ```text
     AWS Lambda上でTesseractを使用する場合、Dockerコンテナでデプロイします。
-    platforms/aws/Dockerfile に設定例があります。
+    ルートの Dockerfile に設定例があります。
 
     【対応言語】
     - jpn: 日本語

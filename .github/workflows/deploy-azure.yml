@@ -55,21 +55,33 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy Infrastructure
-        id: deploy-infra
-        uses: azure/arm-deploy@v2
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
-          resourceGroupName: ${{ secrets.AZURE_RESOURCE_GROUP }}
-          template: ./infrastructure/azure/bicep/main.bicep
-          parameters: ./infrastructure/azure/bicep/parameters.json
+          terraform_version: 1.6.0
+          terraform_wrapper: false
 
-      # Bicepデプロイ出力からAPIMエンドポイントとサブスクリプションキーを自動取得
-      - name: Get APIM endpoint and subscription key
-        id: apim-info
+      - name: Deploy Infrastructure
+        working-directory: ./infrastructure/azure/terraform
         run: |
-          APIM_NAME="${{ steps.deploy-infra.outputs.apimName }}"
-          GATEWAY_URL="${{ steps.deploy-infra.outputs.apimGatewayUrl }}"
+          terraform init
+          terraform plan -out=tfplan \
+            -var="resource_group_name=${{ secrets.AZURE_RESOURCE_GROUP }}"
+          terraform apply -auto-approve tfplan
+
+      # Terraformデプロイ出力からAPIMエンドポイントとサブスクリプションキーを自動取得
+      # Terraformデプロイ出力からリソース名・APIM情報を自動取得
+      - name: Get deployment outputs
+        id: apim-info
+        working-directory: ./infrastructure/azure/terraform
+        run: |
+          APIM_NAME=$(terraform output -raw apim_name)
+          GATEWAY_URL=$(terraform output -raw apim_gateway_url)
+          FUNC_APP_NAME=$(terraform output -raw function_app_name)
           RG_NAME="${{ secrets.AZURE_RESOURCE_GROUP }}"
+
+          # Function App名
+          echo "function-app-name=${FUNC_APP_NAME}" >> $GITHUB_OUTPUT
 
           # APIMエンドポイント（API pathは /api）
           APIM_ENDPOINT="${GATEWAY_URL}/api"
@@ -102,7 +114,7 @@ jobs:
 
       - uses: Azure/functions-action@v1
         with:
-          app-name: ${{ secrets.AZURE_FUNCTION_APP_NAME }}
+          app-name: ${{ steps.apim-info.outputs.function-app-name }}
           package: ./deploy-package
 
   validate:
