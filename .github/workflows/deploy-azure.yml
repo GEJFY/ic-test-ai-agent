@@ -44,6 +44,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test, security]
     environment: ${{ github.event.inputs.environment || 'staging' }}
+    outputs:
+      apim-endpoint: ${{ steps.apim-info.outputs.apim-endpoint }}
+      apim-subscription-key: ${{ steps.apim-info.outputs.apim-subscription-key }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,25 +56,54 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Deploy Infrastructure
+        id: deploy-infra
         uses: azure/arm-deploy@v2
         with:
           resourceGroupName: ${{ secrets.AZURE_RESOURCE_GROUP }}
           template: ./infrastructure/azure/bicep/main.bicep
           parameters: ./infrastructure/azure/bicep/parameters.json
 
+      # Bicepデプロイ出力からAPIMエンドポイントとサブスクリプションキーを自動取得
+      - name: Get APIM endpoint and subscription key
+        id: apim-info
+        run: |
+          APIM_NAME="${{ steps.deploy-infra.outputs.apimName }}"
+          GATEWAY_URL="${{ steps.deploy-infra.outputs.apimGatewayUrl }}"
+          RG_NAME="${{ secrets.AZURE_RESOURCE_GROUP }}"
+
+          # APIMエンドポイント（API pathは /api）
+          APIM_ENDPOINT="${GATEWAY_URL}/api"
+          echo "apim-endpoint=${APIM_ENDPOINT}" >> $GITHUB_OUTPUT
+
+          # サブスクリプションキーをAzure REST APIで取得
+          SUB_ID=$(az account show --query id -o tsv)
+          KEY=$(az rest --method post \
+            --url "https://management.azure.com/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ApiManagement/service/${APIM_NAME}/subscriptions/ic-test-ai-subscription/listSecrets?api-version=2023-05-01-preview" \
+            --query primaryKey -o tsv)
+
+          echo "::add-mask::${KEY}"
+          echo "apim-subscription-key=${KEY}" >> $GITHUB_OUTPUT
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Deploy Functions
+      # デプロイパッケージ作成: platforms/azure/ + 共有src/
+      - name: Prepare deployment package
         run: |
-          cd platforms/azure
+          mkdir -p deploy-package
+          cp platforms/azure/function_app.py deploy-package/
+          cp platforms/azure/host.json deploy-package/
+          cp platforms/azure/requirements.txt deploy-package/
+          cp platforms/azure/.funcignore deploy-package/ 2>/dev/null || true
+          cp -r src deploy-package/src
+          cd deploy-package
           pip install -r requirements.txt -t .python_packages/lib/site-packages
 
       - uses: Azure/functions-action@v1
         with:
           app-name: ${{ secrets.AZURE_FUNCTION_APP_NAME }}
-          package: ./platforms/azure
+          package: ./deploy-package
 
   validate:
     runs-on: ubuntu-latest
@@ -83,8 +115,8 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Validate
         env:
-          AZURE_APIM_ENDPOINT: ${{ secrets.AZURE_APIM_ENDPOINT }}
-          AZURE_APIM_SUBSCRIPTION_KEY: ${{ secrets.AZURE_APIM_SUBSCRIPTION_KEY }}
+          AZURE_APIM_ENDPOINT: ${{ needs.deploy.outputs.apim-endpoint }}
+          AZURE_APIM_SUBSCRIPTION_KEY: ${{ needs.deploy.outputs.apim-subscription-key }}
         run: |
           pip install requests
           python scripts/validate_deployment.py --platform azure

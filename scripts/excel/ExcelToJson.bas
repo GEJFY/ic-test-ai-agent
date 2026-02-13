@@ -22,15 +22,13 @@
 ' 【必要なファイル】
 ' - ExcelToJson.bas（本ファイル）
 ' - setting.json（設定ファイル）
-' - CallCloudApi.ps1（PowerShellスクリプト）
+' - scripts/powershell/CallCloudApi.ps1（PowerShellスクリプト）
 '
 ' 【使い方】
 ' 1. setting.jsonでAPI設定と列マッピングを設定
 ' 2. Excelにテスト項目データを入力
 ' 3. ProcessWithApiマクロを実行
 '
-' 【作成者】 goyos
-' 【更新日】 2025年
 '===============================================================================
 Option Explicit
 
@@ -823,7 +821,8 @@ Private Function CallPowerShellApi(inputPath As String, outputPath As String, co
 
     ' PowerShellスクリプトのパスを取得
     ' OneDrive環境でもローカルパスに変換
-    psScriptPath = GetLocalPath(ThisWorkbook.Path) & "\" & scriptName
+    ' PS1ファイルは scripts/powershell/ に配置
+    psScriptPath = GetLocalPath(ThisWorkbook.Path) & "\scripts\powershell\" & scriptName
 
     WriteLog LOG_LEVEL_DEBUG, "CallPowerShellApi", "スクリプトパス: " & psScriptPath
 
@@ -833,7 +832,7 @@ Private Function CallPowerShellApi(inputPath As String, outputPath As String, co
         ShowErrorMessage ERR_POWERSHELL_SCRIPT_NOT_FOUND, _
                          "PowerShellスクリプトが見つかりません。" & vbCrLf & _
                          "パス: " & psScriptPath & vbCrLf & vbCrLf & _
-                         scriptName & "がExcelファイルと同じフォルダにあるか確認してください。"
+                         scriptName & "が scripts\powershell\ フォルダにあるか確認してください。"
         CallPowerShellApi = False
         Exit Function
     End If
@@ -1176,9 +1175,13 @@ Private Sub WriteEvidenceFilesWithLinks(ws As Worksheet, rowNum As Long, itemJso
     Dim evidenceFilesJson As String   ' evidenceFiles配列のJSON
     Dim fileCount As Long             ' ファイル数
     Dim colOffset As Long             ' 列オフセット
-    Dim fileName As String            ' ファイル名
+    Dim fileName As String            ' ファイル名（ハイライト付き実ファイル名）
+    Dim originalFileName As String    ' 元のファイル名（表示用）
+    Dim displayName As String         ' セルに表示するファイル名
+    Dim base64Content As String       ' Base64エンコードされたファイル内容
     Dim filePath As String            ' ファイルパス
     Dim fullPath As String            ' 完全なファイルパス
+    Dim localDir As String            ' ローカル保存先ディレクトリ
     Dim targetCell As Range           ' 書き込み先セル
     Dim baseColNum As Long            ' 基準列番号
     Dim i As Long                     ' ループカウンター
@@ -1203,6 +1206,19 @@ Private Sub WriteEvidenceFilesWithLinks(ws As Worksheet, rowNum As Long, itemJso
         Exit Sub
     End If
 
+    ' ローカル保存先ディレクトリを構築（xlsmと同じフォルダのic_audit_highlighted）
+    localDir = ThisWorkbook.Path & "\ic_audit_highlighted"
+
+    ' ディレクトリが存在しなければ作成
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FolderExists(localDir) Then
+        fso.CreateFolder localDir
+        WriteLog LOG_LEVEL_DEBUG, "WriteEvidenceFilesWithLinks", _
+                 "ハイライトフォルダ作成: " & localDir
+    End If
+    Set fso = Nothing
+
     ' JSON配列内のオブジェクトを順次処理
     colOffset = 0
     startPos = InStr(1, evidenceFilesJson, "{")
@@ -1214,44 +1230,91 @@ Private Sub WriteEvidenceFilesWithLinks(ws As Worksheet, rowNum As Long, itemJso
         If endPos > startPos Then
             currentJson = Mid(evidenceFilesJson, startPos, endPos - startPos + 1)
 
-            ' ファイル名とパスを抽出
+            ' ファイル名・元ファイル名・パス・Base64を抽出
             fileName = ExtractJsonValue(currentJson, "fileName")
+            originalFileName = ExtractJsonValue(currentJson, "originalFileName")
             filePath = ExtractJsonValue(currentJson, "filePath")
+            base64Content = ExtractJsonValue(currentJson, "base64")
+
+            WriteLog LOG_LEVEL_INFO, "WriteEvidenceFilesWithLinks", _
+                     "ファイル" & (colOffset + 1) & ": " & fileName & _
+                     " (originalFileName=" & originalFileName & _
+                     ", base64Len=" & Len(base64Content) & _
+                     ", filePath=" & Left(filePath, 50) & ")"
+
+            ' 表示名の決定: originalFileNameがあればそれを使用、なければfileNameから推測
+            If originalFileName <> "" Then
+                displayName = originalFileName
+            ElseIf Left(fileName, 12) = "highlighted_" Then
+                ' "highlighted_" プレフィックスを除去して元のファイル名を復元
+                displayName = Mid(fileName, 13)
+            Else
+                displayName = fileName
+            End If
 
             If fileName <> "" Then
                 ' 書き込み先セルを決定
                 Set targetCell = ws.Cells(rowNum, baseColNum + colOffset)
 
-                ' 完全なファイルパスを構築
-                If filePath <> "" Then
-                    ' パスの末尾に\がなければ追加
+                ' Base64コンテンツがある場合はローカルに保存
+                If base64Content <> "" Then
+                    fullPath = localDir & "\" & fileName
+
+                    ' Base64デコードしてファイルに保存
+                    If DecodeBase64ToFile(base64Content, fullPath) Then
+                        ' ハイパーリンクを設定（ローカルファイルへ）
+                        On Error Resume Next
+                        ws.Hyperlinks.Add _
+                            Anchor:=targetCell, _
+                            Address:=fullPath, _
+                            TextToDisplay:=displayName
+
+                        If Err.Number <> 0 Then
+                            Err.Clear
+                            targetCell.Value = displayName
+                            WriteLog LOG_LEVEL_WARNING, "WriteEvidenceFilesWithLinks", _
+                                     "ハイパーリンク設定失敗: " & fullPath
+                        Else
+                            WriteLog LOG_LEVEL_DEBUG, "WriteEvidenceFilesWithLinks", _
+                                     "ハイパーリンク設定: " & displayName & " -> " & fullPath
+                        End If
+                        On Error GoTo 0
+                    Else
+                        ' ファイル保存失敗時はテキストのみ
+                        targetCell.Value = displayName
+                        WriteLog LOG_LEVEL_WARNING, "WriteEvidenceFilesWithLinks", _
+                                 "Base64ファイル保存失敗: " & fileName
+                    End If
+
+                ElseIf filePath <> "" Then
+                    ' Base64がない場合は従来のパスを使用（フォールバック）
                     If Right(filePath, 1) <> "\" Then
                         fullPath = filePath & "\" & fileName
                     Else
                         fullPath = filePath & fileName
                     End If
 
-                    ' ハイパーリンクを設定（ファイルが存在する場合）
                     On Error Resume Next
                     ws.Hyperlinks.Add _
                         Anchor:=targetCell, _
                         Address:=fullPath, _
-                        TextToDisplay:=fileName
+                        TextToDisplay:=displayName
 
-                    ' ハイパーリンク設定に失敗した場合はテキストのみ
                     If Err.Number <> 0 Then
                         Err.Clear
-                        targetCell.Value = fileName
+                        targetCell.Value = displayName
                         WriteLog LOG_LEVEL_WARNING, "WriteEvidenceFilesWithLinks", _
                                  "ハイパーリンク設定失敗: " & fullPath
                     Else
                         WriteLog LOG_LEVEL_DEBUG, "WriteEvidenceFilesWithLinks", _
-                                 "ハイパーリンク設定: " & fileName & " -> " & fullPath
+                                 "ハイパーリンク設定: " & displayName & " -> " & fullPath
                     End If
                     On Error GoTo 0
                 Else
-                    ' パスがない場合はファイル名のみ
-                    targetCell.Value = fileName
+                    ' パスもBase64もない場合はファイル名のみ（ハイパーリンクなし）
+                    targetCell.Value = displayName
+                    WriteLog LOG_LEVEL_WARNING, "WriteEvidenceFilesWithLinks", _
+                             "Base64もファイルパスも空のためハイパーリンクなし: " & fileName
                 End If
 
                 colOffset = colOffset + 1
@@ -1265,6 +1328,70 @@ Private Sub WriteEvidenceFilesWithLinks(ws As Worksheet, rowNum As Long, itemJso
     WriteLog LOG_LEVEL_DEBUG, "WriteEvidenceFilesWithLinks", _
              "証跡ファイル書き込み完了 - " & colOffset & " ファイル"
 End Sub
+
+'===============================================================================
+' Base64文字列をファイルにデコード保存する関数
+'===============================================================================
+' 【機能】
+' Base64エンコードされた文字列をデコードし、指定パスにバイナリファイルとして保存します。
+' サーバーから返されたハイライト済み証跡ファイルをローカルに保存するために使用します。
+'
+' 【引数】
+' base64Text: Base64エンコードされた文字列
+' outputPath: 保存先ファイルパス
+'
+' 【戻り値】
+' Boolean: 成功した場合True
+'===============================================================================
+Private Function DecodeBase64ToFile(base64Text As String, outputPath As String) As Boolean
+    Dim xmlDoc As Object
+    Dim xmlNode As Object
+    Dim stream As Object
+
+    On Error GoTo ErrorHandler
+
+    If base64Text = "" Then
+        DecodeBase64ToFile = False
+        Exit Function
+    End If
+
+    ' XMLDOMを使用してBase64デコード
+    Set xmlDoc = CreateObject("MSXML2.DOMDocument")
+    Set xmlNode = xmlDoc.createElement("b64")
+    xmlNode.DataType = "bin.base64"
+    xmlNode.text = base64Text
+
+    ' バイナリデータをファイルに保存
+    Set stream = CreateObject("ADODB.Stream")
+    With stream
+        .Type = 1  ' バイナリモード
+        .Open
+        .Write xmlNode.nodeTypedValue
+        .SaveToFile outputPath, 2  ' 2 = 上書き保存
+        .Close
+    End With
+
+    Set stream = Nothing
+    Set xmlNode = Nothing
+    Set xmlDoc = Nothing
+
+    DecodeBase64ToFile = True
+    WriteLog LOG_LEVEL_DEBUG, "DecodeBase64ToFile", "デコード保存完了: " & outputPath
+
+    Exit Function
+
+ErrorHandler:
+    WriteLog LOG_LEVEL_ERROR, "DecodeBase64ToFile", _
+             "デコードエラー: " & Err.Description & " - パス: " & outputPath
+    DecodeBase64ToFile = False
+
+    On Error Resume Next
+    If Not stream Is Nothing Then stream.Close
+    Set stream = Nothing
+    Set xmlNode = Nothing
+    Set xmlDoc = Nothing
+    On Error GoTo 0
+End Function
 
 '===============================================================================
 ' JSON配列抽出関数

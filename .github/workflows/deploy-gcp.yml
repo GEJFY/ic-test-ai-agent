@@ -74,13 +74,23 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      # デプロイパッケージ作成: main.py + requirements.txt + src/*（フラット）
+      # GCPはsrcの中身（core/, infrastructure/）をルートに配置
+      - name: Prepare deployment package
+        run: |
+          mkdir -p deploy-package
+          cp platforms/gcp/main.py deploy-package/
+          cp platforms/gcp/requirements.txt deploy-package/
+          cp platforms/gcp/.gcloudignore deploy-package/ 2>/dev/null || true
+          cp -r src/* deploy-package/
+
       - name: Deploy Cloud Functions
         run: |
           gcloud functions deploy ic-test-evaluator \
             --gen2 \
             --runtime=python311 \
             --region=${{ env.GCP_REGION }} \
-            --source=./platforms/gcp \
+            --source=./deploy-package \
             --entry-point=evaluate \
             --trigger-http \
             --allow-unauthenticated=false \

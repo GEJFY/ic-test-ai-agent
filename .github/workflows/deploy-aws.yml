@@ -59,12 +59,14 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      # Lambdaパッケージ作成: lambda_handler.py + src/*（フラット）
+      # AWSはsrcの中身（core/, infrastructure/）をルートに配置
       - name: Package Lambda Function
         run: |
           cd platforms/aws
           pip install -r requirements.txt -t package/
           cp lambda_handler.py package/
-          cp -r ../../src package/
+          cp -r ../../src/* package/
           cd package
           zip -r ../lambda-deployment.zip .
 

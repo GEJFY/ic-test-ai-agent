@@ -186,10 +186,15 @@ python -m pytest tests/unit/ -v
 
 ## 更新履歴
 
+### Version 2.6.0 (2026-02-13)
+
+- プラットフォーム間コード重複を統合（platforms/azure/src/ 削除、共有src/に一本化）
+- function_app.py のパス解決をルートsrc/優先に修正
+- ドキュメント整合性更新
+
 ### Version 2.5.0 (2026-02-12)
 
 - 証跡ハイライト機能追加（PDF/Excel/テキスト対応）
-- Azureデプロイ用ソースコード追加（platforms/azure/src/）
 - クラウドコスト見積もり v9.0（為替¥152/USD）
 - セットアップガイドをアーキテクチャと整合性更新
 - 792テストケース

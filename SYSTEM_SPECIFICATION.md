@@ -280,6 +280,7 @@
     │   │   ├── auditor_agent.py     # 監査オーケストレーター（レガシー）
     │   │   ├── graph_orchestrator.py# LangGraphオーケストレーター
     │   │   ├── document_processor.py# ドキュメント処理
+    │   │   ├── highlighting_service.py# 証跡ハイライト（PDF/Excel/テキスト）
     │   │   ├── prompts.py           # プロンプトテンプレート
     │   │   └── tasks/
     │   │       ├── base_task.py           # 基底クラス
@@ -322,12 +323,15 @@
     │   │   ├── deploy.ps1           # デプロイスクリプト
     │   │   ├── .gcloudignore        # デプロイ除外設定
     │   │   └── README.md            # GCP固有の手順書
-    │   └── aws/                 # AWS Lambda
-    │       ├── lambda_handler.py    # エントリーポイント
-    │       ├── requirements.txt     # AWS用依存関係
-    │       ├── deploy.ps1           # デプロイスクリプト
-    │       ├── .lambdaignore        # デプロイ除外設定
-    │       └── README.md            # AWS固有の手順書
+    │   ├── aws/                 # AWS Lambda
+    │   │   ├── lambda_handler.py    # エントリーポイント
+    │   │   ├── requirements.txt     # AWS用依存関係
+    │   │   ├── deploy.ps1           # デプロイスクリプト
+    │   │   ├── .lambdaignore        # デプロイ除外設定
+    │   │   └── README.md            # AWS固有の手順書
+    │   └── local/               # ローカル/オンプレミス
+    │       ├── main.py              # エントリーポイント（FastAPI）
+    │       └── requirements.txt     # ローカル用依存関係
     │
     ├── scripts/                 # ユーティリティスクリプト
     │   ├── setup-azure-ad-auth.ps1  # Azure AD認証設定

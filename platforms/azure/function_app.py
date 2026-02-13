@@ -63,28 +63,31 @@ import traceback
 # =============================================================================
 # パス設定
 # =============================================================================
-# Azure上: /home/site/wwwroot/src/ にsrc/がコピーされている前提
-# ローカル: ../../src/ を参照
+# パス解決の優先順位:
+# 1. プロジェクトルートの src/ (ローカル開発環境)
+# 2. 同ディレクトリの src/  (Azureデプロイ環境: deploy.ps1がコピー)
+#
+# ローカル開発時は常にルートのsrc/を使用し、コード重複を防止する。
+# Azure上ではルートsrc/が存在しないため、デプロイパッケージ内のsrc/を使用する。
 
 _current_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(os.path.dirname(_current_dir))
 
-# Azure上かローカルかを判定してパスを設定
-_azure_src_path = os.path.join(_current_dir, "src")  # Azure上: platforms/azure/src/
-_local_src_path = os.path.join(os.path.dirname(os.path.dirname(_current_dir)), "src")  # ローカル: ../../src/
+_root_src_path = os.path.join(_project_root, "src")      # ローカル: ../../src/
+_deploy_src_path = os.path.join(_current_dir, "src")      # Azure上: deploy.ps1がコピーしたsrc/
 
-if os.path.exists(_azure_src_path):
-    # Azure上（src/がデプロイパッケージに含まれている）
-    _src_path = _azure_src_path
+if os.path.exists(_root_src_path):
+    # ローカル開発環境（プロジェクトルートのsrc/を使用）
+    _src_path = _root_src_path
+elif os.path.exists(_deploy_src_path):
+    # Azureデプロイ環境（デプロイパッケージ内のsrc/を使用）
+    _src_path = _deploy_src_path
 else:
-    # ローカル開発環境
-    _src_path = _local_src_path
+    raise RuntimeError("src/ directory not found. Check project structure or deployment package.")
 
 # src/ディレクトリをパスに追加
 if _src_path not in sys.path:
     sys.path.insert(0, _src_path)
-
-# プロジェクトルートを設定（.env読み込み用）
-_project_root = os.path.dirname(os.path.dirname(_current_dir))
 
 # =============================================================================
 # 環境変数の読み込み（.env ファイルから）

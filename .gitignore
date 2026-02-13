@@ -53,6 +53,7 @@ platforms/*/.deploy/
 .python_packages/
 .func/
 platforms/azure/deploy.zip
+platforms/azure/src/
 platforms/azure/core/
 platforms/azure/infrastructure/
 

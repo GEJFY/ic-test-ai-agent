@@ -111,6 +111,7 @@ from .prompts import (
     PLAN_REFINE_PROMPT,
     JUDGMENT_REFINE_PROMPT,
 )
+from .highlighting_service import HighlightingService
 
 # =============================================================================
 # ログ設定
@@ -377,6 +378,9 @@ class GraphAuditOrchestrator:
 
         # JSON出力パーサー
         self.parser = JsonOutputParser()
+
+        # ハイライトサービス
+        self.highlighting_service = HighlightingService()
 
         # LangGraphを構築
         self.graph = self._build_graph()
@@ -1236,17 +1240,38 @@ class GraphAuditOrchestrator:
             potential_issues=execution_plan_raw.get("potential_issues", [])
         )
 
-        # 証跡ファイル情報を構築
-        evidence_files_info = []
-        for ef in context.evidence_files:
-            evidence_files_info.append({
-                "fileName": ef.file_name,
-                "filePath": context.evidence_link
-            })
-
         # 証跡からの引用をフォーマット
         document_quotes = final_result.get("document_quotes", [])
         document_reference = self._format_document_quotes(document_quotes)
+
+        # ハイライト処理
+        try:
+            temp_result = AuditResult(
+                item_id=context.item_id,
+                evaluation_result=final_result.get("evaluation_result", False),
+                judgment_basis=final_result.get("judgment_basis", ""),
+                document_reference=document_reference,
+                file_name=context.evidence_files[0].file_name if context.evidence_files else "",
+                confidence=final_result.get("confidence", 0.0),
+            )
+
+            evidence_files_info = await self.highlighting_service.highlight_evidence(
+                temp_result,
+                context
+            )
+            logger.info(f"[最終判断] ハイライト処理完了: {len(evidence_files_info)}件")
+
+        except Exception as e:
+            logger.error(f"[最終判断] ハイライト処理エラー: {e}", exc_info=True)
+            # エラー時は元のファイルをBase64で返す（クライアント側でローカル保存するため）
+            evidence_files_info = []
+            for ef in context.evidence_files:
+                evidence_files_info.append({
+                    "fileName": ef.file_name,
+                    "originalFileName": ef.file_name,
+                    "filePath": context.evidence_link,
+                    "base64": ef.base64_content if ef.base64_content else ""
+                })
 
         # AuditResultを作成
         result = AuditResult(
@@ -1401,6 +1426,10 @@ class GraphAuditOrchestrator:
                             parts.append(f"{source_info}\n{clean_quote}")
                         else:
                             parts.append(clean_quote)
+
+        # 引用が全て空だった場合のフォールバック
+        if not parts:
+            return "（引用なし）"
 
         # 各引用を空行で区切る
         return "\n\n".join(parts)
@@ -1746,7 +1775,9 @@ class GraphAuditOrchestrator:
         for ef in context.evidence_files:
             evidence_files_info.append({
                 "fileName": ef.file_name,
-                "filePath": context.evidence_link
+                "originalFileName": ef.file_name,
+                "filePath": context.evidence_link,
+                "base64": ef.base64_content if ef.base64_content else ""
             })
 
         # ユーザーフレンドリーなエラーメッセージに変換
