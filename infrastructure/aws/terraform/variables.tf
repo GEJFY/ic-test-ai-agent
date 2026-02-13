@@ -1,18 +1,6 @@
 # ==============================================================================
 # variables.tf - AWS Terraform 変数定義
 # ==============================================================================
-#
-# 【概要】
-# 内部統制テスト評価AIシステムのAWSインフラストラクチャ変数定義です。
-#
-# 【使用方法】
-# terraform.tfvars ファイルで値を設定してください：
-#
-# project_name = "ic-test-ai"
-# environment  = "prod"
-# region       = "ap-northeast-1"
-#
-# ==============================================================================
 
 # ------------------------------------------------------------------------------
 # プロジェクト基本情報
@@ -49,37 +37,49 @@ variable "tags" {
   description = "全リソースに適用するタグ"
   type        = map(string)
   default = {
-    Project    = "InternalControlTestAI"
-    ManagedBy  = "Terraform"
+    Project   = "InternalControlTestAI"
+    ManagedBy = "Terraform"
   }
 }
 
 # ------------------------------------------------------------------------------
-# Lambda設定
+# App Runner設定
 # ------------------------------------------------------------------------------
 
-variable "lambda_runtime" {
-  description = "Lambda実行環境"
+variable "app_runner_cpu" {
+  description = "App Runner CPU（例: 1024 = 1 vCPU）"
   type        = string
-  default     = "python3.11"
+  default     = "1024"
 }
 
-variable "lambda_timeout" {
-  description = "Lambda実行タイムアウト（秒）"
+variable "app_runner_memory" {
+  description = "App Runner メモリ（例: 2048 = 2 GB）"
+  type        = string
+  default     = "2048"
+}
+
+variable "app_runner_timeout" {
+  description = "App Runner リクエストタイムアウト（秒）"
   type        = number
   default     = 540
 }
 
-variable "lambda_memory" {
-  description = "Lambda メモリサイズ（MB）"
+variable "app_runner_max_concurrency" {
+  description = "App Runner 最大同時リクエスト数（インスタンスあたり）"
   type        = number
-  default     = 1024
+  default     = 25
 }
 
-variable "lambda_reserved_concurrency" {
-  description = "Lambda予約同時実行数（-1=無制限）"
+variable "app_runner_max_size" {
+  description = "App Runner 最大インスタンス数"
   type        = number
-  default     = -1
+  default     = 5
+}
+
+variable "container_image_tag" {
+  description = "Dockerイメージタグ（CDワークフローから上書き）"
+  type        = string
+  default     = "latest"
 }
 
 # ------------------------------------------------------------------------------
@@ -103,7 +103,7 @@ variable "api_gateway_throttle_rate_limit" {
 # ------------------------------------------------------------------------------
 
 variable "bedrock_api_key" {
-  description = "AWS Bedrock APIキー（セキュリティのため、terraform.tfvarsではなく環境変数で設定）"
+  description = "AWS Bedrock APIキー"
   type        = string
   default     = "REPLACE_WITH_ACTUAL_API_KEY"
   sensitive   = true
@@ -137,16 +137,6 @@ variable "enable_xray_tracing" {
   description = "X-Rayトレーシングを有効化"
   type        = bool
   default     = true
-}
-
-# ------------------------------------------------------------------------------
-# S3設定
-# ------------------------------------------------------------------------------
-
-variable "s3_lifecycle_expiration_days" {
-  description = "S3オブジェクトの自動削除日数"
-  type        = number
-  default     = 90
 }
 
 # ------------------------------------------------------------------------------

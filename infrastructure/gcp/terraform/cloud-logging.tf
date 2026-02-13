@@ -6,7 +6,7 @@
 # Cloud Logging、Cloud Monitoring、Cloud Traceの設定を管理します。
 #
 # 【機能】
-# - Cloud Functionsの詳細ログ記録
+# - Cloud Runの詳細ログ記録
 # - エラー率アラート
 # - レスポンスタイムアラート
 # - 予算アラート
@@ -18,35 +18,35 @@
 # Cloud Logging シンク（ログエクスポート）
 # ------------------------------------------------------------------------------
 
-resource "google_logging_project_sink" "cloud_function_errors" {
-  name        = "${var.project_name}-${var.environment}-function-errors"
+resource "google_logging_project_sink" "cloud_run_errors" {
+  name        = "${var.project_name}-${var.environment}-run-errors"
   project     = var.project_id
   destination = "logging.googleapis.com/projects/${var.project_id}/logs/${var.project_name}-${var.environment}-errors"
 
   filter = <<-EOT
-    resource.type="cloud_function"
+    resource.type="cloud_run_revision"
     severity>=ERROR
-    resource.labels.function_name="${google_cloudfunctions2_function.evaluate.name}"
+    resource.labels.service_name="${google_cloud_run_v2_service.ic_test_ai.name}"
   EOT
 
   unique_writer_identity = true
 }
 
 # ------------------------------------------------------------------------------
-# Cloud Monitoring アラート: Cloud Functions エラー率
+# Cloud Monitoring アラート: Cloud Run エラー率
 # ------------------------------------------------------------------------------
 
-resource "google_monitoring_alert_policy" "function_errors" {
+resource "google_monitoring_alert_policy" "cloud_run_errors" {
   count        = var.enable_monitoring_alerts ? 1 : 0
   project      = var.project_id
-  display_name = "${var.project_name}-${var.environment}-function-errors"
+  display_name = "${var.project_name}-${var.environment}-run-errors"
   combiner     = "OR"
 
   conditions {
-    display_name = "Cloud Function エラー率が閾値を超えました"
+    display_name = "Cloud Run エラー率が閾値を超えました"
 
     condition_threshold {
-      filter          = "resource.type = \"cloud_function\" AND resource.labels.function_name = \"${google_cloudfunctions2_function.evaluate.name}\" AND metric.type = \"cloudfunctions.googleapis.com/function/execution_count\" AND metric.labels.status != \"ok\""
+      filter          = "resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${google_cloud_run_v2_service.ic_test_ai.name}\" AND metric.type = \"run.googleapis.com/request_count\" AND metric.labels.response_code_class != \"2xx\""
       duration        = "300s"
       comparison      = "COMPARISON_GT"
       threshold_value = 10
@@ -58,7 +58,7 @@ resource "google_monitoring_alert_policy" "function_errors" {
     }
   }
 
-  notification_channels = []  # 通知チャンネルを追加する場合はここに記述
+  notification_channels = []
 
   alert_strategy {
     auto_close = "1800s"
@@ -66,20 +66,20 @@ resource "google_monitoring_alert_policy" "function_errors" {
 }
 
 # ------------------------------------------------------------------------------
-# Cloud Monitoring アラート: Cloud Functions 実行時間
+# Cloud Monitoring アラート: Cloud Run レスポンス時間
 # ------------------------------------------------------------------------------
 
-resource "google_monitoring_alert_policy" "function_duration" {
+resource "google_monitoring_alert_policy" "cloud_run_latency" {
   count        = var.enable_monitoring_alerts ? 1 : 0
   project      = var.project_id
-  display_name = "${var.project_name}-${var.environment}-function-duration"
+  display_name = "${var.project_name}-${var.environment}-run-latency"
   combiner     = "OR"
 
   conditions {
-    display_name = "Cloud Function 平均実行時間が閾値を超えました"
+    display_name = "Cloud Run 平均レスポンス時間が閾値を超えました"
 
     condition_threshold {
-      filter          = "resource.type = \"cloud_function\" AND resource.labels.function_name = \"${google_cloudfunctions2_function.evaluate.name}\" AND metric.type = \"cloudfunctions.googleapis.com/function/execution_times\""
+      filter          = "resource.type = \"cloud_run_revision\" AND resource.labels.service_name = \"${google_cloud_run_v2_service.ic_test_ai.name}\" AND metric.type = \"run.googleapis.com/request_latencies\""
       duration        = "300s"
       comparison      = "COMPARISON_GT"
       threshold_value = 180000  # 3分（ミリ秒）
@@ -113,12 +113,12 @@ resource "google_monitoring_dashboard" "ic_test_ai" {
           width  = 6
           height = 4
           widget = {
-            title = "Cloud Functions 実行回数"
+            title = "Cloud Run リクエスト数"
             xyChart = {
               dataSets = [{
                 timeSeriesQuery = {
                   timeSeriesFilter = {
-                    filter = "resource.type=\"cloud_function\" resource.labels.function_name=\"${google_cloudfunctions2_function.evaluate.name}\" metric.type=\"cloudfunctions.googleapis.com/function/execution_count\""
+                    filter = "resource.type=\"cloud_run_revision\" resource.labels.service_name=\"${google_cloud_run_v2_service.ic_test_ai.name}\" metric.type=\"run.googleapis.com/request_count\""
                     aggregation = {
                       alignmentPeriod  = "60s"
                       perSeriesAligner = "ALIGN_RATE"
@@ -127,7 +127,7 @@ resource "google_monitoring_dashboard" "ic_test_ai" {
                 }
               }]
               yAxis = {
-                label = "Executions/sec"
+                label = "Requests/sec"
                 scale = "LINEAR"
               }
             }
@@ -138,12 +138,12 @@ resource "google_monitoring_dashboard" "ic_test_ai" {
           width  = 6
           height = 4
           widget = {
-            title = "Cloud Functions エラー率"
+            title = "Cloud Run エラー率"
             xyChart = {
               dataSets = [{
                 timeSeriesQuery = {
                   timeSeriesFilter = {
-                    filter = "resource.type=\"cloud_function\" resource.labels.function_name=\"${google_cloudfunctions2_function.evaluate.name}\" metric.type=\"cloudfunctions.googleapis.com/function/execution_count\" metric.labels.status!=\"ok\""
+                    filter = "resource.type=\"cloud_run_revision\" resource.labels.service_name=\"${google_cloud_run_v2_service.ic_test_ai.name}\" metric.type=\"run.googleapis.com/request_count\" metric.labels.response_code_class!=\"2xx\""
                     aggregation = {
                       alignmentPeriod  = "60s"
                       perSeriesAligner = "ALIGN_RATE"
@@ -159,12 +159,12 @@ resource "google_monitoring_dashboard" "ic_test_ai" {
           width  = 12
           height = 4
           widget = {
-            title = "Cloud Functions 実行時間"
+            title = "Cloud Run レスポンス時間"
             xyChart = {
               dataSets = [{
                 timeSeriesQuery = {
                   timeSeriesFilter = {
-                    filter = "resource.type=\"cloud_function\" resource.labels.function_name=\"${google_cloudfunctions2_function.evaluate.name}\" metric.type=\"cloudfunctions.googleapis.com/function/execution_times\""
+                    filter = "resource.type=\"cloud_run_revision\" resource.labels.service_name=\"${google_cloud_run_v2_service.ic_test_ai.name}\" metric.type=\"run.googleapis.com/request_latencies\""
                     aggregation = {
                       alignmentPeriod  = "60s"
                       perSeriesAligner = "ALIGN_MEAN"
@@ -173,7 +173,7 @@ resource "google_monitoring_dashboard" "ic_test_ai" {
                 }
               }]
               yAxis = {
-                label = "Duration (ms)"
+                label = "Latency (ms)"
                 scale = "LINEAR"
               }
             }
@@ -229,8 +229,8 @@ data "google_project" "current" {
 # ------------------------------------------------------------------------------
 
 output "cloud_logging_url" {
-  description = "Cloud Logging URL（Cloud Functions）"
-  value       = "https://console.cloud.google.com/logs/query;query=resource.type%3D%22cloud_function%22%0Aresource.labels.function_name%3D%22${google_cloudfunctions2_function.evaluate.name}%22;project=${var.project_id}"
+  description = "Cloud Logging URL（Cloud Run）"
+  value       = "https://console.cloud.google.com/logs/query;query=resource.type%3D%22cloud_run_revision%22%0Aresource.labels.service_name%3D%22${google_cloud_run_v2_service.ic_test_ai.name}%22;project=${var.project_id}"
 }
 
 output "cloud_trace_url" {

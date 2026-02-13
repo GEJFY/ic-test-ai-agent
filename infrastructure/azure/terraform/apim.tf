@@ -34,7 +34,7 @@ resource "azurerm_api_management" "main" {
   tags = var.tags
 
   depends_on = [
-    azurerm_linux_function_app.main,
+    azurerm_container_app.main,
     azurerm_application_insights.main,
   ]
 }
@@ -63,12 +63,12 @@ resource "azurerm_api_management_named_value" "backend_url" {
   api_management_name = azurerm_api_management.main.name
   resource_group_name = data.azurerm_resource_group.main.name
   display_name        = "backend-function-app-url"
-  value               = "https://${azurerm_linux_function_app.main.default_hostname}"
+  value               = "https://${azurerm_container_app.main.ingress[0].fqdn}"
   secret              = false
 }
 
 # ------------------------------------------------------------------------------
-# バックエンド（Azure Functions）
+# バックエンド（Azure Container Apps）
 # ------------------------------------------------------------------------------
 
 resource "azurerm_api_management_backend" "functions" {
@@ -76,9 +76,9 @@ resource "azurerm_api_management_backend" "functions" {
   api_management_name = azurerm_api_management.main.name
   resource_group_name = data.azurerm_resource_group.main.name
   protocol            = "http"
-  url                 = "https://${azurerm_linux_function_app.main.default_hostname}"
-  title               = "IC Test AI Azure Functions Backend"
-  description         = "内部統制テスト評価AIのバックエンド（Azure Functions）"
+  url                 = "https://${azurerm_container_app.main.ingress[0].fqdn}"
+  title               = "IC Test AI Azure Container Apps Backend"
+  description         = "内部統制テスト評価AIのバックエンド（Azure Container Apps）"
 }
 
 # ------------------------------------------------------------------------------
@@ -95,7 +95,7 @@ resource "azurerm_api_management_api" "ic_test_ai" {
   protocols             = ["https"]
   subscription_required = true
   revision              = "1"
-  service_url           = "https://${azurerm_linux_function_app.main.default_hostname}"
+  service_url           = "https://${azurerm_container_app.main.ingress[0].fqdn}"
 }
 
 # ------------------------------------------------------------------------------

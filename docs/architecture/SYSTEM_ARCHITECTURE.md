@@ -25,7 +25,7 @@
 
 ### 1.1 目的
 
-本システムは、内部統制テスト（J-SOX/SOX対応）の評価業務をAIで自動化するマルチクラウド対応のサーバーレスアプリケーションである。監査担当者が作成したテスト項目に対して、AI（LLM）が証跡ファイルを分析し、統制の有効性を判断する。
+本システムは、内部統制テスト（J-SOX/SOX対応）の評価業務をAIで自動化するマルチクラウド対応のコンテナベースアプリケーションである。監査担当者が作成したテスト項目に対して、AI（LLM）が証跡ファイルを分析し、統制の有効性を判断する。
 
 ### 1.2 設計思想
 
@@ -44,9 +44,9 @@
 
 | クラウド | API Gateway | コンピュート | シークレット管理 | 監視 | LLM | OCR |
 |---------|------------|------------|---------------|------|-----|-----|
-| **Azure** | API Management (APIM) | Azure Functions | Key Vault | Application Insights | Azure AI Foundry | Document Intelligence |
-| **AWS** | API Gateway | Lambda | Secrets Manager | X-Ray + CloudWatch | Bedrock | Textract |
-| **GCP** | Apigee | Cloud Functions | Secret Manager | Cloud Logging + Cloud Trace | Vertex AI | Document AI |
+| **Azure** | API Management (APIM) | Azure Container Apps (ACR) | Key Vault | Application Insights | Azure AI Foundry | Document Intelligence |
+| **AWS** | API Gateway | AWS App Runner (ECR) | Secrets Manager | X-Ray + CloudWatch | Bedrock | Textract |
+| **GCP** | Apigee | GCP Cloud Run (Artifact Registry) | Secret Manager | Cloud Logging + Cloud Trace | Vertex AI | Document AI |
 
 ---
 
@@ -68,9 +68,9 @@ flowchart TB
     end
 
     subgraph Backend["バックエンド層 (プラットフォームエントリポイント)"]
-        AzFunc["Azure Functions<br/>Python 3.11"]
-        Lambda["AWS Lambda<br/>Python 3.11"]
-        GCF["GCP Cloud Functions<br/>Python 3.11"]
+        AzCA["Azure Container Apps<br/>Docker + FastAPI"]
+        AppRunner["AWS App Runner<br/>Docker + FastAPI"]
+        CloudRun["GCP Cloud Run<br/>Docker + FastAPI"]
     end
 
     subgraph Core["コアロジック層 (プラットフォーム非依存)"]
@@ -97,13 +97,13 @@ flowchart TB
     Excel -->|"HTTP POST"| AWSGW
     Excel -->|"HTTP POST"| Apigee
 
-    APIM -->|"Subscription Key認証<br/>レート制限"| AzFunc
-    AWSGW -->|"API Key認証<br/>Usage Plan"| Lambda
-    Apigee -->|"API Key認証<br/>Quota"| GCF
+    APIM -->|"Subscription Key認証<br/>レート制限"| AzCA
+    AWSGW -->|"API Key認証<br/>Usage Plan"| AppRunner
+    Apigee -->|"API Key認証<br/>Quota"| CloudRun
 
-    AzFunc --> Handlers
-    Lambda --> Handlers
-    GCF --> Handlers
+    AzCA --> Handlers
+    AppRunner --> Handlers
+    CloudRun --> Handlers
 
     Handlers --> Orchestrator
     Handlers --> AsyncH
@@ -188,21 +188,23 @@ API Gatewayは外部ネットワーク（North-South）からのトラフィッ�
 
 ### 3.3 バックエンド層
 
-各クラウドプラットフォームのサーバーレス関数がエントリポイントとなる。プラットフォーム固有の処理（HTTPリクエスト/レスポンスの変換）を行い、共通のコアロジックを呼び出す。
+全プラットフォームで共通のDockerイメージ（FastAPI/Uvicorn）がエントリポイントとなる。`platforms/local/main.py`が共通のFastAPIアプリケーションを提供し、`platforms/local/Dockerfile`でコンテナ化される。
 
 ```
 platforms/
-  azure/    -> Azure Functions (function_app.py)
-  aws/      -> AWS Lambda (lambda_handler.py)
-  gcp/      -> GCP Cloud Functions (main.py)
-  local/    -> ローカル開発サーバー (FastAPI)
+  local/    -> 共通Dockerイメージ (FastAPI/Uvicorn)
+    main.py      -> 全プラットフォーム共通エントリポイント
+    Dockerfile   -> 共通コンテナビルド定義
+  azure/    -> Azure Container Apps (ACR経由デプロイ)
+  aws/      -> AWS App Runner (ECR経由デプロイ)
+  gcp/      -> GCP Cloud Run (Artifact Registry経由デプロイ)
 ```
 
 **バックエンド層の責務:**
-- HTTPリクエストの受信とプラットフォーム固有形式からの変換
+- FastAPIによるHTTPリクエストの受信・レスポンス返却
 - `X-Correlation-ID`ヘッダーの取得とContextVarへの設定
 - `handlers.py`の共通関数呼び出し
-- プラットフォーム固有形式でのHTTPレスポンス返却
+- 全プラットフォームで同一のAPIパス（`/evaluate`, `/health`, `/config`）を提供
 
 ### 3.4 コアロジック層
 
@@ -308,7 +310,7 @@ api_key = provider.get_secret("AZURE_FOUNDRY_API_KEY")
 sequenceDiagram
     participant Client as Excel VBA / PowerShell
     participant GW as API Gateway<br/>(APIM/API GW/Apigee)
-    participant BE as Backend<br/>(Functions/Lambda/CF)
+    participant BE as Backend<br/>(Container Apps/App Runner/Cloud Run)
     participant Core as handlers.py
     participant Orch as GraphAuditOrchestrator
     participant LLM as LLM API
@@ -536,9 +538,9 @@ flowchart TB
         end
 
         subgraph Compute["コンピュート"]
-            SA["Storage Account"]
-            ASP["App Service Plan<br/>(Dynamic/Y1)"]
-            FA["Azure Functions<br/>(Python 3.11)"]
+            ACR["Azure Container Registry"]
+            CAE["Container Apps Environment"]
+            CA["Azure Container Apps<br/>(Docker + FastAPI)"]
         end
 
         subgraph Security["セキュリティ"]
@@ -550,9 +552,9 @@ flowchart TB
         end
 
         AI --> LA
-        FA --> AI
-        FA --> KV
-        APIM --> FA
+        CA --> AI
+        CA --> KV
+        APIM --> CA
         APIM --> AI
     end
 ```
@@ -563,7 +565,7 @@ flowchart TB
 |---------|---------|------|
 | `main.bicep` | 統合デプロイ | 全モジュールのオーケストレーション |
 | `app-insights.bicep` | Log Analytics + App Insights | 監視基盤 |
-| `function-app.bicep` | Storage + ASP + Functions | バックエンド |
+| `container-app.bicep` | ACR + Container Apps Environment + Container App | バックエンド |
 | `key-vault.bicep` | Key Vault | シークレット管理 |
 | `apim.bicep` | API Management + API定義 + サブスクリプション | API Gateway |
 | `parameters.json` | パラメータ値 | 環境別設定値 |
@@ -583,8 +585,8 @@ az deployment group create \
 
 | ファイル | リソース |
 |---------|---------|
-| `api-gateway.tf` | REST API, リソース, メソッド, Lambda統合, Usage Plan, API Key |
-| `lambda.tf` | Lambda関数, IAMロール, 環境変数 |
+| `api-gateway.tf` | REST API, リソース, メソッド, App Runner統合, Usage Plan, API Key |
+| `apprunner.tf` | App Runnerサービス, ECR, IAMロール, 環境変数 |
 | `secrets-manager.tf` | Secrets Manager シークレット |
 | `cloudwatch.tf` | CloudWatch Logs, アラーム |
 | `variables.tf` | 変数定義 |
@@ -598,7 +600,7 @@ az deployment group create \
 | ファイル | リソース |
 |---------|---------|
 | `apigee.tf` | Apigee環境, API製品, Developer App（条件付き作成） |
-| `cloud-functions.tf` | Cloud Functions (Gen2), サービスアカウント |
+| `cloud-run.tf` | Cloud Run, Artifact Registry, サービスアカウント |
 | `secret-manager.tf` | Secret Managerシークレット |
 | `cloud-logging.tf` | Cloud Logging, Cloud Trace |
 | `variables.tf` | 変数定義 |
@@ -688,9 +690,9 @@ APIMポリシーにより、リクエストボディのサイズを10MB以下に
 ```python
 # プラットフォーム自動検出
 class Platform(Enum):
-    AZURE = "AZURE"    # Azure Functions環境変数で検出
-    AWS = "AWS"        # Lambda環境変数で検出
-    GCP = "GCP"        # Cloud Functions環境変数で検出
+    AZURE = "AZURE"    # Azure Container Apps環境変数で検出
+    AWS = "AWS"        # App Runner環境変数で検出
+    GCP = "GCP"        # Cloud Run環境変数で検出
     LOCAL = "LOCAL"    # 上記以外
 
 # プロバイダー選択
@@ -835,17 +837,20 @@ ic-test-ai-agent/
 |   |       |-- gcp_tasks.py         # GCP Cloud Tasks実装
 |
 |-- platforms/                        # プラットフォーム固有のエントリポイント
-|   |-- azure/                        # Azure Functions
-|   |-- aws/                          # AWS Lambda
-|   |-- gcp/                          # GCP Cloud Functions
-|   |-- local/                        # ローカル開発サーバー (FastAPI)
+|   |-- local/                        # 共通Dockerイメージ (FastAPI/Uvicorn)
+|   |   |-- main.py                  # 全プラットフォーム共通エントリポイント
+|   |   |-- Dockerfile               # 共通コンテナビルド定義
+|   |   |-- requirements.txt         # 依存関係
+|   |-- azure/                        # Azure Container Apps (ACR)
+|   |-- aws/                          # AWS App Runner (ECR)
+|   |-- gcp/                          # GCP Cloud Run (Artifact Registry)
 |
 |-- infrastructure/                   # IaCテンプレート
 |   |-- azure/
 |   |   |-- bicep/
 |   |   |   |-- main.bicep            # 統合デプロイメント
 |   |   |   |-- apim.bicep            # API Management
-|   |   |   |-- function-app.bicep    # Function App
+|   |   |   |-- container-app.bicep   # Container App
 |   |   |   |-- key-vault.bicep       # Key Vault
 |   |   |   |-- app-insights.bicep    # Application Insights
 |   |   |   |-- parameters.json       # パラメータ値
@@ -854,7 +859,7 @@ ic-test-ai-agent/
 |   |-- aws/
 |   |   |-- terraform/
 |   |       |-- api-gateway.tf        # API Gateway
-|   |       |-- lambda.tf             # Lambda
+|   |       |-- apprunner.tf          # App Runner
 |   |       |-- secrets-manager.tf    # Secrets Manager
 |   |       |-- cloudwatch.tf         # CloudWatch
 |   |       |-- variables.tf
@@ -864,7 +869,7 @@ ic-test-ai-agent/
 |   |-- gcp/
 |       |-- terraform/
 |           |-- apigee.tf             # Apigee
-|           |-- cloud-functions.tf    # Cloud Functions
+|           |-- cloud-run.tf          # Cloud Run
 |           |-- secret-manager.tf     # Secret Manager
 |           |-- cloud-logging.tf      # Cloud Logging
 |           |-- variables.tf

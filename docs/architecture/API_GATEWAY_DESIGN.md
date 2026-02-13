@@ -25,7 +25,7 @@
 
 ### 1.1 API Gatewayの役割
 
-API Gatewayは、外部クライアント（Excel VBA、PowerShell）とバックエンド（Azure Functions、AWS Lambda、GCP Cloud Functions）の間に位置するリバースプロキシである。以下の横断的関心事を一元的に処理することで、バックエンドの実装を簡素化し、セキュリティと可観測性を担保する。
+API Gatewayは、外部クライアント（Excel VBA、PowerShell）とバックエンド（Azure Container Apps、AWS App Runner、GCP Cloud Run）の間に位置するリバースプロキシである。以下の横断的関心事を一元的に処理することで、バックエンドの実装を簡素化し、セキュリティと可観測性を担保する。
 
 ```mermaid
 flowchart LR
@@ -42,7 +42,7 @@ flowchart LR
     end
 
     subgraph Internal["内部ネットワーク"]
-        Backend["Backend<br/>(Functions/Lambda/CF)"]
+        Backend["Backend<br/>(Container Apps/App Runner/Cloud Run)"]
     end
 
     Client -->|"North-South<br/>トラフィック"| Auth
@@ -88,7 +88,7 @@ API Gatewayを採用した理由を以下に示す。
 | **採用SKU/プラン** | Consumption | REST API | eval/pay-as-you-go |
 | **認証方式** | Subscription Key (Ocp-Apim-Subscription-Key) | API Key (x-api-key) + Usage Plan | API Key (VerifyAPIKey Policy) |
 | **レート制限** | rate-limit-by-key ポリシー | Usage Plan + Method Throttling | Quota ポリシー |
-| **バックエンド統合** | Function App URL直接指定 | Lambda Proxy統合 (AWS_PROXY) | Target Server + API Proxy |
+| **バックエンド統合** | Container App URL直接指定 | App Runner URL直接指定 | Target Server + API Proxy |
 | **ログ統合** | Application Insights (W3C) | CloudWatch Logs + X-Ray | Cloud Logging |
 | **IaC** | Bicep | Terraform | Terraform |
 | **CORS** | cors ポリシー | OPTIONS Mock統合 | CORS ポリシー |
@@ -96,15 +96,15 @@ API Gatewayを採用した理由を以下に示す。
 | **TLS** | TLS 1.2+ (SSL3.0/TLS1.0/1.1明示無効) | TLS 1.2+ | TLS 1.2+ |
 | **ID体系** | Managed Identity (SystemAssigned) | IAM Role | Service Account |
 | **コスト** | 従量課金（100万コール/月 含む） | 従量課金（REST API） | 高額（月額$4.50～） |
-| **備考** | 本システムの主要対象 | Lambda Proxy統合で簡素化 | 高コストのため条件付き有効化 |
+| **備考** | 本システムの主要対象 | App Runner直接統合 | 高コストのため条件付き有効化 |
 
 ### 2.2 プラットフォーム選定指針
 
 | 条件 | 推奨プラットフォーム | 理由 |
 |------|-------------------|------|
 | Azure AI Foundryを使用 | Azure APIM | 同一クラウド内の通信でレイテンシ最小化 |
-| Bedrockを使用 | AWS API Gateway | Lambda Proxy統合で実装が簡素 |
-| Vertex AIを使用 | GCP (Cloud Functions直接) | Apigee高コストのため、直接アクセスを推奨 |
+| Bedrockを使用 | AWS API Gateway | App Runnerとの統合が簡素 |
+| Vertex AIを使用 | GCP (Cloud Run直接) | Apigee高コストのため、直接アクセスを推奨 |
 | 開発/テスト環境 | ローカル (FastAPI) | API Gatewayなし、直接呼び出し |
 
 ---
@@ -143,16 +143,16 @@ flowchart TB
     end
 
     AppInsights["Application Insights"]
-    FunctionApp["Azure Functions"]
+    ContainerApp["Azure Container Apps"]
 
     API --> OP1 & OP2 & OP3 & OP4 & OP5 & OP6
     Product --> API
     Subscription --> Product
     Logger --> AppInsights
     Diagnostic --> Logger
-    Backend --> FunctionApp
+    Backend --> ContainerApp
     NV --> Backend
-    Identity -.-> FunctionApp
+    Identity -.-> ContainerApp
 ```
 
 **Bicep リソース定義:**
@@ -403,7 +403,7 @@ flowchart TB
         REST["REST API<br/>(REGIONAL)"]
         Resource["/evaluate<br/>リソース"]
         Method["POST メソッド<br/>(api_key_required: true)"]
-        Integration["Lambda Proxy統合<br/>(AWS_PROXY)"]
+        Integration["App Runner統合<br/>(HTTP_PROXY)"]
         Stage["ステージ<br/>(X-Ray有効)"]
         AccessLog["アクセスログ<br/>(CloudWatch)"]
     end
@@ -414,30 +414,30 @@ flowchart TB
         Throttle["Throttling<br/>(burst/rate)"]
     end
 
-    Lambda["AWS Lambda"]
+    AppRunner["AWS App Runner"]
     CWLogs["CloudWatch Logs"]
     XRay["X-Ray"]
 
     REST --> Resource --> Method --> Integration
-    Integration --> Lambda
+    Integration --> AppRunner
     Stage --> AccessLog --> CWLogs
     Stage --> XRay
     APIKey --> UsagePlan --> Stage
     UsagePlan --> Throttle
 ```
 
-### 4.2 Lambda Proxy統合
+### 4.2 App Runner HTTP統合
 
-AWS API Gatewayでは**Lambda Proxy統合（AWS_PROXY）** を採用する。この統合方式では、HTTPリクエストの全情報（ヘッダー、ボディ、パラメータ）がそのままLambdaに渡されるため、API Gateway側でのマッピングテンプレートが不要となる。
+AWS API Gatewayでは**HTTP Proxy統合（HTTP_PROXY）** を採用する。この統合方式では、HTTPリクエストがそのままApp RunnerのエンドポイントURLに転送されるため、API Gateway側でのマッピングテンプレートが不要となる。
 
 ```hcl
-resource "aws_api_gateway_integration" "evaluate_lambda" {
+resource "aws_api_gateway_integration" "evaluate_apprunner" {
   rest_api_id             = aws_api_gateway_rest_api.ic_test_ai.id
   resource_id             = aws_api_gateway_resource.evaluate.id
   http_method             = aws_api_gateway_method.evaluate_post.http_method
   integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.ic_test_ai.invoke_arn
+  type                    = "HTTP_PROXY"
+  uri                     = "${aws_apprunner_service.ic_test_ai.service_url}/evaluate"
 }
 ```
 
@@ -510,7 +510,7 @@ resource "aws_api_gateway_method" "evaluate_post" {
 }
 ```
 
-Lambda側では、`event["headers"]["X-Correlation-ID"]`として受信し、ContextVarに設定する。
+App Runner側では、FastAPIミドルウェアで`X-Correlation-ID`ヘッダーを取得し、ContextVarに設定する。
 
 ---
 
@@ -518,7 +518,7 @@ Lambda側では、`event["headers"]["X-Correlation-ID"]`として受信し、Con
 
 ### 5.1 設計方針
 
-Apigeeは高コスト（月額$4.50以上）であるため、本システムでは**条件付き有効化**（`enable_apigee`変数）を採用する。Apigee無効時はCloud Functionsへの直接アクセスとなり、相関ID管理・レート制限はCloud Functions内で実装する。
+Apigeeは高コスト（月額$4.50以上）であるため、本システムでは**条件付き有効化**（`enable_apigee`変数）を採用する。Apigee無効時はCloud Runへの直接アクセスとなり、相関ID管理・レート制限はCloud Run内で実装する。
 
 ### 5.2 リソース構成
 
@@ -538,17 +538,17 @@ flowchart TB
         AssignMsg["AssignMessage<br/>(相関ID)"]
         Quota["Quota<br/>(100/min)"]
         MsgLog["MessageLogging<br/>(Cloud Logging)"]
-        Target["Target Server<br/>(Cloud Functions URI)"]
+        Target["Target Server<br/>(Cloud Run URI)"]
     end
 
-    CloudFunctions["Cloud Functions"]
+    CloudRun["Cloud Run"]
 
     Org --> Env
     EnvGroup --> Env
     Product --> App
     Developer --> App
     VerifyKey --> AssignMsg --> Quota --> MsgLog --> Target
-    Target --> CloudFunctions
+    Target --> CloudRun
 ```
 
 ### 5.3 API Product設定
@@ -603,10 +603,10 @@ Apigee無効時（`enable_apigee = false`）は、以下の構成で同等機能
 
 | 機能 | 代替実装 |
 |------|---------|
-| 認証 | Cloud Functions内でAPI Keyヘッダーを検証 |
+| 認証 | Cloud Run内でAPI Keyヘッダーを検証 |
 | レート制限 | Cloud Armor + Cloud Load Balancer、またはアプリケーション内実装 |
-| 相関ID | Cloud Functions内で`X-Correlation-ID`ヘッダーを処理 |
-| ログ | Cloud Functions標準ログ + Cloud Logging |
+| 相関ID | Cloud Run内で`X-Correlation-ID`ヘッダーを処理 |
+| ログ | Cloud Run標準ログ + Cloud Logging |
 
 ---
 
@@ -618,7 +618,7 @@ Apigee無効時（`enable_apigee = false`）は、以下の構成で同等機能
 sequenceDiagram
     participant Client as クライアント<br/>(Excel VBA/PowerShell)
     participant GW as API Gateway<br/>(APIM/API GW/Apigee)
-    participant BE as バックエンド<br/>(Functions/Lambda/CF)
+    participant BE as バックエンド<br/>(Container Apps/App Runner/Cloud Run)
     participant Core as コアロジック<br/>(handlers.py)
     participant Ext as 外部API<br/>(LLM/OCR)
     participant Mon as 監視<br/>(App Insights/X-Ray)
@@ -657,7 +657,7 @@ sequenceDiagram
 | プラットフォーム | 取得方法 | 生成方法（未設定時） | バックエンド転送 | レスポンス付与 |
 |---------------|---------|-------------------|---------------|-------------|
 | **Azure APIM** | `context.Request.Headers.GetValueOrDefault("X-Correlation-ID", "")` | `Guid.NewGuid().ToString()` | `set-header` ポリシー | `set-header` ポリシー |
-| **AWS API GW** | `event["headers"]["X-Correlation-ID"]` | Lambda内で`uuid.uuid4()` | Lambda Proxy統合で自動 | Lambdaレスポンスヘッダー |
+| **AWS API GW** | `request.headers["X-Correlation-ID"]` | FastAPI内で`uuid.uuid4()` | HTTP Proxy統合で自動 | FastAPIレスポンスヘッダー |
 | **GCP Apigee** | `request.header.X-Correlation-ID` | `AssignMessage`で`java.util.UUID.randomUUID()` | `AssignMessage`でTarget転送 | `AssignMessage`でレスポンス設定 |
 
 ### 6.3 バックエンド内部での相関ID管理
@@ -854,7 +854,7 @@ resource "google_apigee_product" "ic_test_ai" {
         "multi_cloud_ocr": true,
         "multi_cloud_llm": true
     },
-    "platform": "Azure Functions"
+    "platform": "Azure Container Apps"
 }
 ```
 
@@ -889,19 +889,19 @@ resource "google_apigee_product" "ic_test_ai" {
 |---------------|---------|------|------------|
 | **Azure** | `main.bicep` | `infrastructure/azure/bicep/main.bicep` | 全モジュール統合 |
 | **Azure** | `apim.bicep` | `infrastructure/azure/bicep/apim.bicep` | APIM, API, Operations, Subscription, Product, Diagnostic |
-| **Azure** | `function-app.bicep` | `infrastructure/azure/bicep/function-app.bicep` | Storage, ASP, Function App |
+| **Azure** | `container-app.bicep` | `infrastructure/azure/bicep/container-app.bicep` | ACR, Container Apps Environment, Container App |
 | **Azure** | `key-vault.bicep` | `infrastructure/azure/bicep/key-vault.bicep` | Key Vault, Access Policies |
 | **Azure** | `app-insights.bicep` | `infrastructure/azure/bicep/app-insights.bicep` | Log Analytics, App Insights |
 | **Azure** | `parameters.json` | `infrastructure/azure/bicep/parameters.json` | パラメータ値 |
 | **Azure** | `apim-policies.xml` | `infrastructure/azure/apim-policies.xml` | APIMポリシー（Inbound/Outbound/Error） |
-| **AWS** | `api-gateway.tf` | `infrastructure/aws/terraform/api-gateway.tf` | REST API, Lambda統合, API Key, Usage Plan |
-| **AWS** | `lambda.tf` | `infrastructure/aws/terraform/lambda.tf` | Lambda, IAM Role |
+| **AWS** | `api-gateway.tf` | `infrastructure/aws/terraform/api-gateway.tf` | REST API, App Runner統合, API Key, Usage Plan |
+| **AWS** | `apprunner.tf` | `infrastructure/aws/terraform/apprunner.tf` | App Runner, ECR, IAM Role |
 | **AWS** | `secrets-manager.tf` | `infrastructure/aws/terraform/secrets-manager.tf` | Secrets Manager |
 | **AWS** | `cloudwatch.tf` | `infrastructure/aws/terraform/cloudwatch.tf` | CloudWatch Logs, Alarms |
 | **AWS** | `variables.tf` | `infrastructure/aws/terraform/variables.tf` | 変数定義 |
 | **AWS** | `outputs.tf` | `infrastructure/aws/terraform/outputs.tf` | 出力値 |
 | **GCP** | `apigee.tf` | `infrastructure/gcp/terraform/apigee.tf` | Apigee Environment, Product, Developer App |
-| **GCP** | `cloud-functions.tf` | `infrastructure/gcp/terraform/cloud-functions.tf` | Cloud Functions (Gen2) |
+| **GCP** | `cloud-run.tf` | `infrastructure/gcp/terraform/cloud-run.tf` | Cloud Run, Artifact Registry |
 | **GCP** | `secret-manager.tf` | `infrastructure/gcp/terraform/secret-manager.tf` | Secret Manager |
 | **GCP** | `cloud-logging.tf` | `infrastructure/gcp/terraform/cloud-logging.tf` | Cloud Logging |
 | **GCP** | `variables.tf` | `infrastructure/gcp/terraform/variables.tf` | 変数定義 |
@@ -924,8 +924,10 @@ az deployment group create \
 # 3. Key Vaultにシークレット設定
 az keyvault secret set --vault-name <KV_NAME> --name AZURE-FOUNDRY-API-KEY --value "<KEY>"
 
-# 4. Function Appにコードデプロイ
-cd platforms/azure && func azure functionapp publish <FUNC_NAME>
+# 4. Container Appにイメージデプロイ
+docker build -t "$ACR_NAME.azurecr.io/ic-test-ai:latest" -f platforms/local/Dockerfile .
+docker push "$ACR_NAME.azurecr.io/ic-test-ai:latest"
+az containerapp update --name <APP_NAME> --resource-group <RG> --image "$ACR_NAME.azurecr.io/ic-test-ai:latest"
 
 # 5. APIMポリシー適用（Azure Portal）
 # APIs -> ic-test-ai-api -> Design -> Inbound -> Code editor

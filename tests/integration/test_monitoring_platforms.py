@@ -12,7 +12,7 @@ Application Insights/CloudWatch/Cloud Loggingに正しくログ・メトリク�
    - APPLICATIONINSIGHTS_CONNECTION_STRING環境変数
 
 2. AWS CloudWatch/X-Ray
-   - AWS_LAMBDA_FUNCTION_NAME環境変数（Lambdaコンテキスト）
+   - AWS_LAMBDA_FUNCTION_NAME環境変数（コンテナ/App Runnerコンテキスト）
    - AWS認証情報
 
 3. GCP Cloud Logging/Trace
@@ -112,7 +112,7 @@ def test_aws_cloudwatch_xray_logging(correlation_id: str):
     """
     CloudWatch LogsとX-Rayにログ・トレースが送信されることを確認
     """
-    # Lambda環境をシミュレート
+    # App Runner (コンテナ) 環境をシミュレート
     os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "integration-test-function"
 
     from infrastructure.monitoring.aws_xray import AWSXRay

@@ -11,7 +11,7 @@
 3. [gcloud CLIのセットアップ](#3-gcloud-cliのセットアップ)
 4. [IAMとサービスアカウント](#4-iamとサービスアカウント)
 5. [必要なAPIの有効化](#5-必要なapiの有効化)
-6. [Cloud Functions](#6-cloud-functions)
+6. [Cloud Run](#6-cloud-run)
 7. [Vertex AI (Gemini 3 Pro)](#7-vertex-ai-gemini-3-pro)
 8. [Document AI](#8-document-ai)
 9. [Apigee](#9-apigee)
@@ -100,7 +100,7 @@ GCP Consoleは、GCPのすべてのリソースを管理するWebダッシュボ
 3. 上部のプロジェクト選択ドロップダウンでプロジェクトを切り替え
 4. 右上の「Cloud Shell」アイコンでブラウザ内ターミナルを起動可能
 
-📖 **プロジェクト** とは、GCPリソースをまとめる「箱」のようなものです。一つのプロジェクトの中に、Cloud Functions、Vertex AI、Secret Managerなどのサービスを配置します。
+📖 **プロジェクト** とは、GCPリソースをまとめる「箱」のようなものです。一つのプロジェクトの中に、Cloud Run、Vertex AI、Secret Managerなどのサービスを配置します。
 
 ### プロジェクトの作成
 
@@ -260,28 +260,28 @@ IAMは「**誰が**」「**何に対して**」「**何をできるか**」を�
 | 概念 | 説明 | 例 |
 |------|------|-----|
 | **プリンシパル** | アクセスする人・サービス | ユーザー、サービスアカウント |
-| **ロール** | 権限のまとまり | `roles/cloudfunctions.developer` |
-| **ポリシー** | プリンシパルとロールの紐付け | 「AさんにCloud Functions開発者権限を付与」 |
+| **ロール** | 権限のまとまり | `roles/run.developer` |
+| **ポリシー** | プリンシパルとロールの紐付け | 「AさんにCloud Run開発者権限を付与」 |
 
-📖 **サービスアカウント** は、人間ではなくプログラム（Cloud FunctionsやTerraformなど）がGCPリソースにアクセスするための「仮想的なアカウント」です。
+📖 **サービスアカウント** は、人間ではなくプログラム（Cloud RunやTerraformなど）がGCPリソースにアクセスするための「仮想的なアカウント」です。
 
 ### サービスアカウントの作成
 
-本システムでは、Cloud Functionsが Vertex AI、Document AI、Secret Manager にアクセスするためのサービスアカウントが必要です。
+本システムでは、Cloud Runが Vertex AI、Document AI、Secret Manager にアクセスするためのサービスアカウントが必要です。
 
 ```bash
 # プロジェクトIDを変数に設定
 export PROJECT_ID="ic-test-ai-xxxxxx"
 
 # サービスアカウントを作成
-gcloud iam service-accounts create ic-test-ai-prod-func-sa \
-  --display-name="Cloud Functions Service Account for ic-test-ai" \
+gcloud iam service-accounts create ic-test-ai-prod-run-sa \
+  --display-name="Cloud Run Service Account for ic-test-ai" \
   --project=$PROJECT_ID
 ```
 
 ✅ **期待される出力**:
 ```
-Created service account [ic-test-ai-prod-func-sa].
+Created service account [ic-test-ai-prod-run-sa].
 ```
 
 💡 Windows PowerShellの場合は `export` の代わりに `$env:PROJECT_ID = "ic-test-ai-xxxxxx"` を使用してください。
@@ -291,27 +291,27 @@ Created service account [ic-test-ai-prod-func-sa].
 ```bash
 # Vertex AI ユーザー権限
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:ic-test-ai-prod-func-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --member="serviceAccount:ic-test-ai-prod-run-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
   --role="roles/aiplatform.user"
 
 # Document AI ユーザー権限
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:ic-test-ai-prod-func-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --member="serviceAccount:ic-test-ai-prod-run-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
   --role="roles/documentai.apiUser"
 
 # Secret Manager アクセス権限
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:ic-test-ai-prod-func-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --member="serviceAccount:ic-test-ai-prod-run-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 
 # Cloud Logging 書き込み権限
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:ic-test-ai-prod-func-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --member="serviceAccount:ic-test-ai-prod-run-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
   --role="roles/logging.logWriter"
 
 # Cloud Trace エージェント権限
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:ic-test-ai-prod-func-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --member="serviceAccount:ic-test-ai-prod-run-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
   --role="roles/cloudtrace.agent"
 ```
 
@@ -320,7 +320,7 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 Updated IAM policy for project [ic-test-ai-xxxxxx].
 bindings:
 - members:
-  - serviceAccount:ic-test-ai-prod-func-sa@ic-test-ai-xxxxxx.iam.gserviceaccount.com
+  - serviceAccount:ic-test-ai-prod-run-sa@ic-test-ai-xxxxxx.iam.gserviceaccount.com
   role: roles/aiplatform.user
 ...
 ```
@@ -332,7 +332,7 @@ bindings:
 ```bash
 # キーファイルを作成（ローカル開発用のみ）
 gcloud iam service-accounts keys create key.json \
-  --iam-account=ic-test-ai-prod-func-sa@${PROJECT_ID}.iam.gserviceaccount.com
+  --iam-account=ic-test-ai-prod-run-sa@${PROJECT_ID}.iam.gserviceaccount.com
 ```
 
 ✅ **期待される出力**:
@@ -355,7 +355,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/key.json"
 # サービスアカウントに付与されたロールを確認
 gcloud projects get-iam-policy $PROJECT_ID \
   --flatten="bindings[].members" \
-  --filter="bindings.members:ic-test-ai-prod-func-sa" \
+  --filter="bindings.members:ic-test-ai-prod-run-sa" \
   --format="table(bindings.role)"
 ```
 
@@ -382,9 +382,9 @@ GCPでは、各サービスのAPIは**デフォルトで無効**になってい�
 ```bash
 # 必要な全APIを一括で有効化
 gcloud services enable \
-  cloudfunctions.googleapis.com \
-  cloudbuild.googleapis.com \
   run.googleapis.com \
+  cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com \
   aiplatform.googleapis.com \
   documentai.googleapis.com \
   secretmanager.googleapis.com \
@@ -408,9 +408,9 @@ Operation "operations/acat.xxxxx" finished successfully.
 
 | API | 用途 | 本システムでの使い方 |
 |-----|------|---------------------|
-| `cloudfunctions.googleapis.com` | Cloud Functions | バックエンドAPI（評価エンドポイント） |
-| `cloudbuild.googleapis.com` | Cloud Build | Cloud Functionsのビルド・デプロイ |
-| `run.googleapis.com` | Cloud Run | Cloud Functions Gen2のベース |
+| `run.googleapis.com` | Cloud Run | バックエンドAPI（コンテナベース） |
+| `cloudbuild.googleapis.com` | Cloud Build | Dockerイメージのビルド・デプロイ |
+| `artifactregistry.googleapis.com` | Artifact Registry | Dockerイメージの保存 |
 | `aiplatform.googleapis.com` | Vertex AI | Gemini 3 Proによるテスト評価 |
 | `documentai.googleapis.com` | Document AI | PDF・画像からのOCRテキスト抽出 |
 | `secretmanager.googleapis.com` | Secret Manager | APIキーの安全な管理 |
@@ -443,40 +443,39 @@ gcloud services list --enabled --project=$PROJECT_ID --format="table(config.name
 
 ---
 
-## 6. Cloud Functions
+## 6. Cloud Run
 
-### 📖 サーバーレスとは
+### 📖 コンテナサービスとは
 
-「サーバーレス」とは、サーバーの管理をクラウド側に任せて、開発者はコードだけを書けばよいサービス形態です。サーバーの購入、OS更新、スケーリング（負荷増加時のサーバー追加）を自分で行う必要がありません。
+「コンテナサービス」とは、Dockerコンテナ化されたアプリケーションをクラウド上で実行するサービスです。サーバーの購入、OS更新、スケーリング（負荷増加時のサーバー追加）をクラウド側が自動管理します。
 
-### 📖 Cloud Functions とは
+### 📖 Cloud Run とは
 
-Cloud Functionsは、GCPのサーバーレスコンピューティングサービスです。HTTPリクエストが来た時にだけ関数が実行され、実行した分だけ課金されます。
+Cloud Runは、GCPのフルマネージドコンテナ実行サービスです。Dockerイメージをデプロイするだけで、HTTPS URL が自動発行され、リクエスト数に応じて自動スケーリングされます。
 
-### Gen2 vs Gen1
+Cloud Runの特徴：
+- **Dockerイメージ対応**: 任意のコンテナイメージをデプロイ可能
+- **自動HTTPS**: SSL/TLS証明書が自動発行される
+- **自動スケーリング**: リクエスト数に応じてコンテナインスタンスが増減（ゼロスケール対応）
+- **従量課金**: リクエスト処理中のCPU・メモリのみ課金
+- **最大60分のタイムアウト**: AI処理に十分な時間
 
-| 項目 | Gen1 | Gen2（本システムで使用） |
-|------|------|--------------------------|
-| 実行時間 | 最大9分 | 最大60分 |
-| メモリ | 最大8GB | 最大32GB |
-| 同時実行 | 関数1つにつき1リクエスト | 複数リクエスト並行処理 |
-| ベース | 独自基盤 | Cloud Run |
+💡 本システムではCloud Runを使用します。FastAPIアプリケーションをDockerコンテナとしてデプロイします。
 
-💡 本システムではGen2を使用します。AI処理に時間がかかるため、長い実行時間とメモリが必要です。
+### 本システムのCloud Run構成
 
-### 本システムのCloud Functions構成
-
-本システムのCloud Functionsは以下の設定で構築されます（`infrastructure/gcp/terraform/cloud-functions.tf` に定義済み）。
+本システムのCloud Runは以下の設定で構築されます（`infrastructure/gcp/terraform/cloud-run.tf` に定義済み）。
 
 | 設定項目 | 値 | 説明 |
 |----------|-----|------|
-| ランタイム | `python311` | Python 3.11 |
+| コンテナポート | `8000` | FastAPIデフォルトポート |
 | タイムアウト | `540秒` | 最大9分（AI処理の余裕を確保） |
-| メモリ | `1024Mi` | 1GB |
+| メモリ | `1Gi` | 1GB |
+| CPU | `1` | 1 vCPU |
 | 最大インスタンス | `10` | 同時最大10インスタンス |
 | 最小インスタンス | `0` | 使わない時はゼロ（コスト最適化） |
 
-### ローカルでのテスト（Cloud Functions前のPythonテスト）
+### ローカルでのテスト（Cloud Runデプロイ前のテスト）
 
 デプロイ前に、ローカルでコードが正常に動作するか確認しましょう。
 
@@ -503,67 +502,70 @@ tests/unit/test_tasks.py::test_xxx PASSED
 792 passed in X.XXs
 ```
 
-### Cloud Functionsへのデプロイ
+### DockerイメージのビルドとCloud Runへのデプロイ
 
 ```bash
-# デプロイパッケージを作成
-mkdir -p deploy-package
-cp -r src/ deploy-package/
-cp platforms/gcp/main.py deploy-package/
-cp requirements.txt deploy-package/
+# プロジェクトルートでDockerイメージをビルド
+docker build -t ic-test-ai-agent .
 
-# Cloud Storageにソースをアップロード
-cd deploy-package
-zip -r ../function-source.zip .
-cd ..
+# ローカルでテスト実行
+docker run -p 8000:8000 --env-file .env ic-test-ai-agent
 
-gcloud storage cp function-source.zip \
-  gs://ic-test-ai-prod-function-source-${PROJECT_ID}/
+# 別ターミナルからヘルスチェック
+curl http://localhost:8000/api/health
 
-# Cloud Functions Gen2 をデプロイ
-gcloud functions deploy ic-test-ai-prod-evaluate \
-  --gen2 \
+# Artifact Registryリポジトリを作成
+gcloud artifacts repositories create ic-test-ai-repo \
+  --repository-format=docker \
+  --location=asia-northeast1 \
+  --project=$PROJECT_ID
+
+# Dockerイメージにタグを付与
+docker tag ic-test-ai-agent \
+  asia-northeast1-docker.pkg.dev/${PROJECT_ID}/ic-test-ai-repo/ic-test-ai-agent:latest
+
+# Artifact Registryにプッシュ
+gcloud auth configure-docker asia-northeast1-docker.pkg.dev
+docker push \
+  asia-northeast1-docker.pkg.dev/${PROJECT_ID}/ic-test-ai-repo/ic-test-ai-agent:latest
+
+# Cloud Runにデプロイ
+gcloud run deploy ic-test-ai-prod \
+  --image=asia-northeast1-docker.pkg.dev/${PROJECT_ID}/ic-test-ai-repo/ic-test-ai-agent:latest \
   --region=asia-northeast1 \
-  --runtime=python311 \
-  --source=gs://ic-test-ai-prod-function-source-${PROJECT_ID}/function-source.zip \
-  --entry-point=evaluate \
-  --memory=1024Mi \
+  --memory=1Gi \
+  --cpu=1 \
   --timeout=540s \
   --max-instances=10 \
   --min-instances=0 \
-  --service-account=ic-test-ai-prod-func-sa@${PROJECT_ID}.iam.gserviceaccount.com \
+  --port=8000 \
+  --service-account=ic-test-ai-prod-run-sa@${PROJECT_ID}.iam.gserviceaccount.com \
   --set-env-vars="LLM_PROVIDER=GCP,OCR_PROVIDER=GCP,GCP_PROJECT_ID=${PROJECT_ID},GCP_REGION=asia-northeast1" \
   --allow-unauthenticated
-
-# クリーンアップ
-rm -rf deploy-package function-source.zip
 ```
 
 ✅ **期待される出力**:
 ```
-Deploying function (may take a while - up to 2 minutes)...done.
-availableMemoryMb: 1024
+Deploying container to Cloud Run service [ic-test-ai-prod] in project [ic-test-ai-xxxxxx] region [asia-northeast1]
 ...
-status: ACTIVE
-url: https://asia-northeast1-ic-test-ai-xxxxxx.cloudfunctions.net/ic-test-ai-prod-evaluate
+Service [ic-test-ai-prod] revision [ic-test-ai-prod-xxxxx] has been deployed and is serving 100 percent of traffic.
+Service URL: https://ic-test-ai-prod-xxxxxx-an.a.run.app
 ```
 
-💡 デプロイには2〜5分かかります。`status: ACTIVE` が表示されれば成功です。
+💡 デプロイには2〜5分かかります。Service URLが表示されれば成功です。
 
 ### 環境変数の設定
 
-Cloud Functionsの環境変数はTerraform経由で自動設定されますが、手動で変更する場合は以下のコマンドを使用します。
+Cloud Runの環境変数はTerraform経由で自動設定されますが、手動で変更する場合は以下のコマンドを使用します。
 
 ```bash
 # 環境変数の確認
-gcloud functions describe ic-test-ai-prod-evaluate \
-  --gen2 \
+gcloud run services describe ic-test-ai-prod \
   --region=asia-northeast1 \
-  --format="yaml(serviceConfig.environmentVariables)"
+  --format="yaml(spec.template.spec.containers[0].env)"
 
 # 環境変数を追加・更新する場合
-gcloud functions deploy ic-test-ai-prod-evaluate \
-  --gen2 \
+gcloud run services update ic-test-ai-prod \
   --region=asia-northeast1 \
   --update-env-vars="DEBUG=true"
 ```
@@ -571,13 +573,13 @@ gcloud functions deploy ic-test-ai-prod-evaluate \
 ### デプロイの検証
 
 ```bash
-# Cloud Functionsに直接リクエストを送信
-FUNCTION_URL=$(gcloud functions describe ic-test-ai-prod-evaluate \
-  --gen2 --region=asia-northeast1 \
-  --format="value(serviceConfig.uri)")
+# Cloud RunのサービスURLを取得
+SERVICE_URL=$(gcloud run services describe ic-test-ai-prod \
+  --region=asia-northeast1 \
+  --format="value(status.url)")
 
 # ヘルスチェック
-curl -s "${FUNCTION_URL}/health" | python -m json.tool
+curl -s "${SERVICE_URL}/api/health" | python -m json.tool
 ```
 
 ✅ **期待される出力**:
@@ -593,10 +595,10 @@ curl -s "${FUNCTION_URL}/health" | python -m json.tool
 
 | エラー | 原因 | 対処法 |
 |--------|------|--------|
-| `Build failed` | 依存パッケージのエラー | `requirements.txt` を確認 |
+| `Build failed` | Dockerイメージのビルドエラー | `Dockerfile` と `requirements.txt` を確認 |
 | `Permission denied` | サービスアカウント権限不足 | セクション4のロール付与を再確認 |
-| `Function timeout` | 処理時間超過 | `--timeout` を延長 |
-| `Memory limit exceeded` | メモリ不足 | `--memory` を増加（2048Miなど） |
+| `Container timeout` | 処理時間超過 | `--timeout` を延長 |
+| `Memory limit exceeded` | メモリ不足 | `--memory` を増加（2Giなど） |
 
 ---
 
@@ -810,9 +812,9 @@ ApigeeはGCPのフルマネージドAPI管理プラットフォームです。�
 | **レート制限** | 1分間に100リクエストまで |
 | **相関ID管理** | `X-Correlation-ID` ヘッダーの付与・伝播 |
 | **ログ統合** | Cloud Loggingへの自動ログ送信 |
-| **Cloud Functions連携** | バックエンドへのルーティング |
+| **Cloud Run連携** | バックエンドへのルーティング |
 
-⚠️ **コスト注意**: Apigeeは評価版期間外では**月額$4.50〜**の課金が発生します。開発段階ではApigeeなしでCloud Functionsに直接アクセスする構成を推奨します。
+⚠️ **コスト注意**: Apigeeは評価版期間外では**月額$4.50〜**の課金が発生します。開発段階ではApigeeなしでCloud Runに直接アクセスする構成を推奨します。
 
 ### 評価版 vs 本番
 
@@ -871,7 +873,7 @@ gcloud apigee envgroups attachments create \
 
 #### Step 4: APIプロキシの作成
 
-APIプロキシは、クライアントのリクエストをCloud Functionsに転送する「中継器」です。
+APIプロキシは、クライアントのリクエストをCloud Runに転送する「中継器」です。
 
 ```bash
 # Apigee Console（Web UI）でAPIプロキシを作成
@@ -882,7 +884,7 @@ APIプロキシは、クライアントのリクエストをCloud Functionsに�
 # 5. 以下を設定:
 #    - Proxy name: ic-test-ai-evaluate
 #    - Base path: /api
-#    - Target URL: <Cloud FunctionsのURL>
+#    - Target URL: <Cloud RunのURL>
 # 6. ポリシーを追加:
 #    - Verify API Key（リクエスト時にAPIキーを検証）
 #    - Assign Message（X-Correlation-IDヘッダーを付与）
@@ -916,21 +918,21 @@ APIプロキシは、クライアントのリクエストをCloud Functionsに�
 
 ### Apigee未使用の場合（推奨: 開発段階）
 
-Apigeeなしでも本システムは動作します。Cloud Functionsに直接アクセスする場合は、Terraform変数で `enable_apigee = false`（デフォルト）を設定します。
+Apigeeなしでも本システムは動作します。Cloud Runに直接アクセスする場合は、Terraform変数で `enable_apigee = false`（デフォルト）を設定します。
 
 ```bash
-# Cloud Functionsに直接アクセス
-FUNCTION_URL=$(gcloud functions describe ic-test-ai-prod-evaluate \
-  --gen2 --region=asia-northeast1 \
-  --format="value(serviceConfig.uri)")
+# Cloud Runに直接アクセス
+SERVICE_URL=$(gcloud run services describe ic-test-ai-prod \
+  --region=asia-northeast1 \
+  --format="value(status.url)")
 
-curl -X POST "${FUNCTION_URL}/evaluate" \
+curl -X POST "${SERVICE_URL}/api/evaluate" \
   -H "Content-Type: application/json" \
   -H "X-Correlation-ID: test-corr-001" \
   -d '{"test_data": "sample"}'
 ```
 
-💡 Apigeeなしの場合、レート制限や API Key認証はCloud Functions内で実装するか、Cloud Armor + Cloud Load Balancerで代替できます。
+💡 Apigeeなしの場合、レート制限や API Key認証はCloud Run内で実装するか、Cloud Armor + Cloud Load Balancerで代替できます。
 
 ---
 
@@ -1011,12 +1013,12 @@ Created version [2] of the secret [ic-test-ai-prod-vertex-ai-api-key].
 
 ### IAM権限の設定
 
-Cloud Functionsのサービスアカウントが Secret Manager にアクセスできるようにします（セクション4で設定済みの場合はスキップ可能）。
+Cloud Runのサービスアカウントが Secret Manager にアクセスできるようにします（セクション4で設定済みの場合はスキップ可能）。
 
 ```bash
 # 個別シークレットへのアクセス権限を付与
 gcloud secrets add-iam-policy-binding ic-test-ai-prod-vertex-ai-api-key \
-  --member="serviceAccount:ic-test-ai-prod-func-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --member="serviceAccount:ic-test-ai-prod-run-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor" \
   --project=$PROJECT_ID
 ```
@@ -1055,7 +1057,7 @@ print(f"シークレット取得成功: {secret_value[:4]}****")
 
 ### 📖 Cloud Logging とは
 
-Cloud Loggingは、GCPリソースのログを一元的に収集・検索・分析するサービスです。Cloud Functionsの実行ログ、エラーログ、カスタムログをすべてここで確認できます。
+Cloud Loggingは、GCPリソースのログを一元的に収集・検索・分析するサービスです。Cloud Runの実行ログ、エラーログ、カスタムログをすべてここで確認できます。
 
 ### 📖 Cloud Trace とは
 
@@ -1066,25 +1068,25 @@ Cloud Traceは、リクエストの処理経路（どのサービスをどの順
 #### GCP Consoleから確認
 
 1. [https://console.cloud.google.com/logs](https://console.cloud.google.com/logs) にアクセス
-2. リソースタイプを「Cloud Function」に設定
-3. 関数名でフィルタリング
+2. リソースタイプを「Cloud Run Revision」に設定
+3. サービス名でフィルタリング
 
 #### gcloud CLIから確認
 
 ```bash
-# Cloud Functionsの最新ログを表示（直近10件）
-gcloud functions logs read ic-test-ai-prod-evaluate \
-  --gen2 \
-  --region=asia-northeast1 \
-  --limit=10
+# Cloud Runの最新ログを表示（直近10件）
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="ic-test-ai-prod"' \
+  --project=$PROJECT_ID \
+  --limit=10 \
+  --format="table(timestamp, severity, textPayload)"
 ```
 
 ✅ **期待される出力**:
 ```
-LEVEL  NAME                        EXECUTION_ID  TIME_UTC                 LOG
-I      ic-test-ai-prod-evaluate    xxxxxxxxxx    2026-02-11 12:00:00.000  Function execution started
-I      ic-test-ai-prod-evaluate    xxxxxxxxxx    2026-02-11 12:00:01.000  GCP Cloud Logging/Trace監視を初期化しました
-I      ic-test-ai-prod-evaluate    xxxxxxxxxx    2026-02-11 12:00:05.000  Function execution took 5000 ms
+TIMESTAMP                    SEVERITY  TEXT_PAYLOAD
+2026-02-11T12:00:00.000Z     INFO      Container started
+2026-02-11T12:00:01.000Z     INFO      GCP Cloud Logging/Trace監視を初期化しました
+2026-02-11T12:00:05.000Z     INFO      Request processed in 5000 ms
 ```
 
 ### Cloud Loggingのクエリ構文
@@ -1093,16 +1095,16 @@ Cloud Loggingでは、ログの検索にフィルター構文を使用します�
 
 ```
 # Cloud Functionsのエラーログ
-resource.type="cloud_function"
+resource.type="cloud_run_revision"
 resource.labels.function_name="ic-test-ai-prod-evaluate"
 severity>=ERROR
 
 # 特定の相関IDのログ
-resource.type="cloud_function"
+resource.type="cloud_run_revision"
 jsonPayload.correlation_id="corr-12345-abcde"
 
 # 直近1時間のログ
-resource.type="cloud_function"
+resource.type="cloud_run_revision"
 timestamp>="2026-02-11T11:00:00Z"
 ```
 
@@ -1135,7 +1137,7 @@ timestamp>="2026-02-11T11:00:00Z"
 ```bash
 # gcloud CLIでログを検索
 gcloud logging read \
-  'resource.type="cloud_function" AND severity>=ERROR' \
+  'resource.type="cloud_run_revision" AND severity>=ERROR' \
   --project=$PROJECT_ID \
   --limit=5 \
   --format="table(timestamp, severity, textPayload)"
@@ -1152,9 +1154,9 @@ Terraformデプロイ後、自動的に以下のダッシュボードが作成�
 
 | ウィジェット | 説明 |
 |-------------|------|
-| Cloud Functions 実行回数 | 1分ごとの実行回数 |
-| Cloud Functions エラー率 | エラー発生率 |
-| Cloud Functions 実行時間 | 平均処理時間 |
+| Cloud Run リクエスト数 | 1分ごとのリクエスト数 |
+| Cloud Run エラー率 | エラー発生率 |
+| Cloud Run レイテンシ | 平均処理時間 |
 
 ダッシュボードURL:
 ```
@@ -1182,14 +1184,14 @@ Cloud Storageは、GCPのオブジェクトストレージサービスです。�
 
 | 用途 | バケット名 | 説明 |
 |------|-----------|------|
-| デプロイパッケージ | `ic-test-ai-prod-function-source-*` | Cloud Functionsのソースコード |
+| 証跡・ジョブ結果 | `ic-test-ai-prod-artifacts-*` | 証跡ファイルやジョブ結果の保存 |
 | Terraformステート | `ic-test-ai-terraform-state` | Terraformの状態管理ファイル |
 
 ### バケットの作成
 
 ```bash
-# デプロイパッケージ用バケット（Terraform管理ではない場合の手動作成）
-gcloud storage buckets create gs://ic-test-ai-prod-function-source-${PROJECT_ID} \
+# 証跡・ジョブ結果用バケット（Terraform管理ではない場合の手動作成）
+gcloud storage buckets create gs://ic-test-ai-prod-artifacts-${PROJECT_ID} \
   --project=$PROJECT_ID \
   --location=asia-northeast1 \
   --uniform-bucket-level-access
@@ -1207,7 +1209,7 @@ gcloud storage buckets update gs://ic-test-ai-terraform-state \
 
 ✅ **期待される出力**:
 ```
-Creating gs://ic-test-ai-prod-function-source-ic-test-ai-xxxxxx/...
+Creating gs://ic-test-ai-prod-artifacts-ic-test-ai-xxxxxx/...
 Creating gs://ic-test-ai-terraform-state/...
 Updating gs://ic-test-ai-terraform-state/...
 ```
@@ -1231,7 +1233,7 @@ for bucket in client.list_buckets():
     print(f"バケット: {bucket.name}")
 
 # ファイルのアップロード
-bucket = client.bucket("ic-test-ai-prod-function-source-ic-test-ai-xxxxxx")
+bucket = client.bucket("ic-test-ai-prod-artifacts-ic-test-ai-xxxxxx")
 blob = bucket.blob("test/hello.txt")
 blob.upload_from_string("Hello, Cloud Storage!")
 print("アップロード完了!")
@@ -1251,7 +1253,7 @@ Terraformでは、90日後に古いオブジェクトが自動削除されるラ
 
 ```bash
 # ライフサイクルルールの確認
-gcloud storage buckets describe gs://ic-test-ai-prod-function-source-${PROJECT_ID} \
+gcloud storage buckets describe gs://ic-test-ai-prod-artifacts-${PROJECT_ID} \
   --format="yaml(lifecycle)"
 ```
 
@@ -1316,7 +1318,7 @@ on windows_amd64
 infrastructure/gcp/terraform/
 ├── backend.tf          # Terraform設定・プロバイダー定義
 ├── variables.tf        # 変数定義（プロジェクトID、リージョン等）
-├── cloud-functions.tf  # Cloud Functions Gen2 リソース
+├── cloud-run.tf        # Cloud Run サービスリソース
 ├── secret-manager.tf   # Secret Manager・サービスアカウント
 ├── apigee.tf           # Apigee API管理（オプション）
 ├── cloud-logging.tf    # Cloud Logging/Monitoring アラート
@@ -1340,11 +1342,12 @@ project_name = "ic-test-ai"
 environment  = "prod"
 region       = "asia-northeast1"
 
-# Cloud Functions設定
-function_runtime       = "python311"
-function_timeout       = 540
-function_memory        = 1024
-function_max_instances = 10
+# Cloud Run設定
+cloud_run_cpu       = "1"
+cloud_run_memory    = "1Gi"
+cloud_run_timeout   = 540
+cloud_run_max_instances = 10
+cloud_run_min_instances = 0
 
 # Apigee（オプション: 開発段階ではfalse推奨）
 enable_apigee = false
@@ -1395,8 +1398,8 @@ terraform plan -out=tfplan
 ```
 Terraform will perform the following actions:
 
-  # google_cloudfunctions2_function.evaluate will be created
-  + resource "google_cloudfunctions2_function" "evaluate" {
+  # google_cloud_run_v2_service.evaluate will be created
+  + resource "google_cloud_run_v2_service" "evaluate" {
       + name     = "ic-test-ai-prod-evaluate"
       + location = "asia-northeast1"
       ...
@@ -1405,7 +1408,7 @@ Terraform will perform the following actions:
   # google_secret_manager_secret.vertex_ai_api_key will be created
   ...
 
-  # google_service_account.cloud_function will be created
+  # google_service_account.cloud_run will be created
   ...
 
 Plan: XX to add, 0 to change, 0 to destroy.
@@ -1421,8 +1424,8 @@ terraform apply tfplan
 
 ✅ **期待される出力**:
 ```
-google_service_account.cloud_function: Creating...
-google_service_account.cloud_function: Creation complete after 2s
+google_service_account.cloud_run: Creating...
+google_service_account.cloud_run: Creation complete after 2s
 google_secret_manager_secret.vertex_ai_api_key: Creating...
 google_secret_manager_secret.vertex_ai_api_key: Creation complete after 1s
 ...
@@ -1431,10 +1434,10 @@ Apply complete! Resources: XX added, 0 changed, 0 destroyed.
 
 Outputs:
 
-cloud_functions_endpoint = "https://asia-northeast1-ic-test-ai-xxxxxx.cloudfunctions.net/ic-test-ai-prod-evaluate/evaluate"
+cloud_run_endpoint = "https://ic-test-ai-prod-evaluate-xxxxxxxx-an.a.run.app/evaluate"
 cloud_logging_url = "https://console.cloud.google.com/logs/query;..."
 cloud_trace_url = "https://console.cloud.google.com/traces/list?project=..."
-function_name = "ic-test-ai-prod-evaluate"
+service_name = "ic-test-ai-prod-evaluate"
 project_id = "ic-test-ai-xxxxxx"
 ...
 ```
@@ -1446,7 +1449,7 @@ project_id = "ic-test-ai-xxxxxx"
 terraform output
 
 # 特定の出力値を取得
-terraform output cloud_functions_endpoint
+terraform output cloud_run_endpoint
 terraform output cloud_logging_url
 ```
 
@@ -1492,7 +1495,7 @@ terraform destroy
 |--------|------|--------|
 | `Error: Error creating Secret` | Secret Managerが未有効化 | セクション5のAPI有効化を実行 |
 | `Error: googleapi: Error 403` | 権限不足 | 自分のアカウントに `roles/editor` を付与 |
-| `Error: Error creating Function` | Cloud Build API未有効化 | `gcloud services enable cloudbuild.googleapis.com` |
+| `Error: Error creating Service` | Artifact Registry API未有効化 | `gcloud services enable artifactregistry.googleapis.com` |
 | `Error: Quota exceeded` | プロジェクトのクォータ超過 | GCP Consoleでクォータ増加をリクエスト |
 | `State lock error` | 他のTerraform実行が進行中 | `terraform force-unlock <LOCK_ID>` |
 
@@ -1503,8 +1506,8 @@ terraform destroy
 ### テスト用環境変数の設定
 
 ```bash
-# Cloud FunctionsのエンドポイントURLを取得
-export FUNCTION_URL=$(terraform output -raw cloud_functions_endpoint)
+# Cloud RunのエンドポイントURLを取得
+export SERVICE_URL=$(terraform output -raw cloud_run_endpoint)
 
 # Apigee使用時（オプション）
 # export GCP_APIGEE_ENDPOINT="https://<APIGEE_ENDPOINT>"
@@ -1516,7 +1519,7 @@ export GCP_PROJECT=$PROJECT_ID
 ### ヘルスチェック
 
 ```bash
-curl -s "${FUNCTION_URL%/evaluate}/health" | python -m json.tool
+curl -s "${SERVICE_URL%/evaluate}/health" | python -m json.tool
 ```
 
 ✅ **期待される出力**:
@@ -1533,7 +1536,7 @@ curl -s "${FUNCTION_URL%/evaluate}/health" | python -m json.tool
 ### 設定確認
 
 ```bash
-curl -s "${FUNCTION_URL%/evaluate}/config" | python -m json.tool
+curl -s "${SERVICE_URL%/evaluate}/config" | python -m json.tool
 ```
 
 ✅ **期待される出力**:
@@ -1550,7 +1553,7 @@ curl -s "${FUNCTION_URL%/evaluate}/config" | python -m json.tool
 
 ```bash
 # 評価リクエストを送信
-curl -X POST "${FUNCTION_URL}" \
+curl -X POST "${SERVICE_URL}" \
   -H "Content-Type: application/json" \
   -H "X-Correlation-ID: test-integration-001" \
   -d '{
@@ -1584,7 +1587,7 @@ curl -X POST "${FUNCTION_URL}" \
 ```bash
 # 相関IDで Cloud Logging を検索
 gcloud logging read \
-  'resource.type="cloud_function" AND jsonPayload.correlation_id="test-integration-001"' \
+  'resource.type="cloud_run_revision" AND jsonPayload.correlation_id="test-integration-001"' \
   --project=$PROJECT_ID \
   --limit=10 \
   --format="table(timestamp, severity, jsonPayload.message)"
@@ -1596,7 +1599,7 @@ gcloud logging read \
 
 ```bash
 # 非同期で評価をサブミット
-JOB_RESPONSE=$(curl -s -X POST "${FUNCTION_URL%/evaluate}/evaluate/submit" \
+JOB_RESPONSE=$(curl -s -X POST "${SERVICE_URL%/evaluate}/evaluate/submit" \
   -H "Content-Type: application/json" \
   -H "X-Correlation-ID: test-async-001" \
   -d '{
@@ -1610,10 +1613,10 @@ echo $JOB_RESPONSE | python -m json.tool
 JOB_ID=$(echo $JOB_RESPONSE | python -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
 
 # ステータスを確認
-curl -s "${FUNCTION_URL%/evaluate}/evaluate/status/${JOB_ID}" | python -m json.tool
+curl -s "${SERVICE_URL%/evaluate}/evaluate/status/${JOB_ID}" | python -m json.tool
 
 # 結果を取得（処理完了後）
-curl -s "${FUNCTION_URL%/evaluate}/evaluate/results/${JOB_ID}" | python -m json.tool
+curl -s "${SERVICE_URL%/evaluate}/evaluate/results/${JOB_ID}" | python -m json.tool
 ```
 
 ### デプロイ検証スクリプト
@@ -1631,7 +1634,7 @@ python scripts/validate_deployment.py --platform gcp
 
 | サービス | 無料枠 | 超過時の料金 |
 |---------|--------|-------------|
-| Cloud Functions | 200万回/月, 40万GB-秒/月 | $0.40/100万回 |
+| Cloud Run | 180,000 vCPU秒/月, 360,000 GiB秒/月 | $0.00002400/vCPU秒 |
 | Cloud Logging | 50GiB/月 | $0.50/GiB |
 | Cloud Trace | 250万スパン/月 | $0.20/100万スパン |
 | Cloud Storage | 5GB/月 | $0.020/GB |
@@ -1642,7 +1645,7 @@ python scripts/validate_deployment.py --platform gcp
 
 | サービス | 想定使用量 | 月額見積もり |
 |---------|-----------|------------|
-| Cloud Functions | 3,000回/月 | ¥0（無料枠内） |
+| Cloud Run | 3,000リクエスト/月 | ¥0（無料枠内） |
 | Vertex AI (Gemini 3 Pro) | 100回/月 | 約¥100〜¥200 |
 | Document AI | 50ページ/月 | 約¥50 |
 | Cloud Logging | 1GB/月 | ¥0（無料枠内） |
@@ -1671,7 +1674,7 @@ gcloud billing budgets list --billing-account=$(gcloud billing accounts list --f
 
 ### コスト最適化のヒント
 
-1. **Cloud Functionsの最小インスタンスを0にする**: 使わない時はインスタンスが起動しないため課金されません（Terraform設定済み）。
+1. **Cloud Runの最小インスタンスを0にする**: 使わない時はインスタンスが起動しないため課金されません（Terraform設定済み）。
 2. **Gemini 2.5 Flash / Flash Liteを使用する**: 高精度が不要な場合は、軽量モデルでコストを削減できます。
 3. **Cloud Traceのサンプリングレートを下げる**: デフォルトの10%で十分です。
 4. **Cloud Storageのライフサイクルルール**: 90日後に自動削除（Terraform設定済み）。
@@ -1688,7 +1691,7 @@ terraform destroy
 
 # 手動で作成したリソースの削除
 gcloud storage rm -r gs://ic-test-ai-terraform-state
-gcloud storage rm -r gs://ic-test-ai-prod-function-source-${PROJECT_ID}
+gcloud storage rm -r gs://ic-test-ai-prod-artifacts-${PROJECT_ID}
 
 # プロジェクト自体の削除（全リソースが削除されます）
 # ⚠️ 復旧不可能なため慎重に実行してください
@@ -1709,7 +1712,7 @@ gcloud storage rm -r gs://ic-test-ai-prod-function-source-${PROJECT_ID}
 | gcloud CLIインストール・認証設定 | ☐ |
 | サービスアカウント作成・ロール付与 | ☐ |
 | 必要なAPI有効化 | ☐ |
-| Cloud Functions デプロイ | ☐ |
+| Cloud Run デプロイ | ☐ |
 | Vertex AI 接続テスト | ☐ |
 | Document AI プロセッサ作成 | ☐ |
 | Secret Manager シークレット設定 | ☐ |
@@ -1724,7 +1727,7 @@ gcloud storage rm -r gs://ic-test-ai-prod-function-source-${PROJECT_ID}
 
 - **gcloud CLI**: GCPリソースのコマンドライン操作
 - **IAM**: 権限管理とサービスアカウント
-- **Cloud Functions**: サーバーレスアプリケーション
+- **Cloud Run**: コンテナアプリケーション
 - **Vertex AI**: AI/MLモデルの利用
 - **Document AI**: OCR・文書処理
 - **Secret Manager**: 機密情報の管理
@@ -1744,7 +1747,7 @@ gcloud storage rm -r gs://ic-test-ai-prod-function-source-${PROJECT_ID}
 | 資料 | URL |
 |------|-----|
 | GCP公式ドキュメント | [https://cloud.google.com/docs](https://cloud.google.com/docs) |
-| Cloud Functions ドキュメント | [https://cloud.google.com/functions/docs](https://cloud.google.com/functions/docs) |
+| Cloud Run ドキュメント | [https://cloud.google.com/run/docs](https://cloud.google.com/run/docs) |
 | Vertex AI ドキュメント | [https://cloud.google.com/vertex-ai/docs](https://cloud.google.com/vertex-ai/docs) |
 | Document AI ドキュメント | [https://cloud.google.com/document-ai/docs](https://cloud.google.com/document-ai/docs) |
 | Terraform GCPプロバイダー | [https://registry.terraform.io/providers/hashicorp/google/](https://registry.terraform.io/providers/hashicorp/google/) |

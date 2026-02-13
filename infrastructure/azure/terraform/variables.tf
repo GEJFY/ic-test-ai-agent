@@ -82,25 +82,37 @@ variable "apim_sku_capacity" {
 }
 
 # ------------------------------------------------------------------------------
-# Function App設定
+# Container Apps設定
 # ------------------------------------------------------------------------------
 
-variable "function_app_sku_name" {
-  description = "Function App SKU名（Consumption=Y1）"
-  type        = string
-  default     = "Y1"
+variable "container_app_cpu" {
+  description = "Container App CPU（コア数）"
+  type        = number
+  default     = 0.5
 }
 
-variable "function_app_sku_tier" {
-  description = "Function App SKU Tier"
+variable "container_app_memory" {
+  description = "Container App メモリ（例: 1Gi）"
   type        = string
-  default     = "Dynamic"
+  default     = "1Gi"
 }
 
-variable "python_version" {
-  description = "Pythonバージョン"
+variable "container_app_min_replicas" {
+  description = "Container App 最小レプリカ数（0=スケールtoゼロ）"
+  type        = number
+  default     = 0
+}
+
+variable "container_app_max_replicas" {
+  description = "Container App 最大レプリカ数"
+  type        = number
+  default     = 5
+}
+
+variable "container_image_tag" {
+  description = "Dockerイメージタグ（CDワークフローから上書き）"
   type        = string
-  default     = "3.11"
+  default     = "latest"
 }
 
 # ------------------------------------------------------------------------------

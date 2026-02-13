@@ -19,7 +19,8 @@
 |---------|------|---------|
 | `AZURE_CREDENTIALS` | サービスプリンシパル認証情報（JSON形式） | 下記「Azure認証情報の作成」参照 |
 | `AZURE_RESOURCE_GROUP` | リソースグループ名 | 例: `rg-ic-test-ai-prod` |
-| `AZURE_FUNCTION_APP_NAME` | Function App名 | 例: `func-ic-test-ai-prod` |
+| `AZURE_ACR_NAME` | Azure Container Registry名 | 例: `acrictestai` |
+| `AZURE_CONTAINER_APP_NAME` | Container App名 | 例: `ic-test-eval` |
 | `AZURE_APIM_ENDPOINT` | APIM エンドポイント | 例: `https://apim-ic-test-ai-prod.azure-api.net/api` |
 | `AZURE_APIM_SUBSCRIPTION_KEY` | APIM サブスクリプションキー | APIMポータルから取得 |
 
@@ -60,7 +61,8 @@ az ad sp create-for-rbac \
 |---------|------|---------|
 | `AWS_ACCESS_KEY_ID` | アクセスキーID | IAMユーザー作成時に取得 |
 | `AWS_SECRET_ACCESS_KEY` | シークレットアクセスキー | IAMユーザー作成時に取得 |
-| `AWS_LAMBDA_FUNCTION_NAME` | Lambda関数名 | 例: `ic-test-ai-prod-evaluate` |
+| `AWS_ECR_REPOSITORY` | ECRリポジトリ名 | 例: `ic-test-ai` |
+| `AWS_APPRUNNER_SERVICE_ARN` | App Runnerサービス ARN | 例: `arn:aws:apprunner:ap-northeast-1:...` |
 | `AWS_API_GATEWAY_ENDPOINT` | API Gateway エンドポイント | 例: `https://xxxxx.execute-api.ap-northeast-1.amazonaws.com/prod` |
 | `AWS_API_KEY` | API Key | API Gatewayコンソールから取得 |
 
@@ -87,7 +89,8 @@ aws iam create-access-key --user-name ic-test-github-actions
 |---------|------|---------|
 | `GCP_SERVICE_ACCOUNT_KEY` | サービスアカウントキー（JSON形式） | 下記「GCPサービスアカウントの作成」参照 |
 | `GCP_PROJECT_ID` | プロジェクトID | 例: `ic-test-project` |
-| `GCP_FUNCTION_SERVICE_ACCOUNT` | Cloud Functions サービスアカウント | 例: `ic-test-sa@ic-test-project.iam.gserviceaccount.com` |
+| `GCP_CLOUD_RUN_SERVICE_ACCOUNT` | Cloud Run サービスアカウント | 例: `ic-test-sa@ic-test-project.iam.gserviceaccount.com` |
+| `GCP_ARTIFACT_REGISTRY_URL` | Artifact Registry URL | 例: `asia-northeast1-docker.pkg.dev/project/repo` |
 | `GCP_APIGEE_ENDPOINT` | Apigee エンドポイント | 例: `https://xxxxx-eval.apigee.net/evaluate` |
 | `GCP_API_KEY` | API Key | Apigeeコンソールから取得 |
 
@@ -119,7 +122,8 @@ cat key.json
 
 - [ ] `AZURE_CREDENTIALS` を設定
 - [ ] `AZURE_RESOURCE_GROUP` を設定
-- [ ] `AZURE_FUNCTION_APP_NAME` を設定
+- [ ] `AZURE_ACR_NAME` を設定
+- [ ] `AZURE_CONTAINER_APP_NAME` を設定
 - [ ] `AZURE_APIM_ENDPOINT` を設定
 - [ ] `AZURE_APIM_SUBSCRIPTION_KEY` を設定
 
@@ -127,7 +131,8 @@ cat key.json
 
 - [ ] `AWS_ACCESS_KEY_ID` を設定
 - [ ] `AWS_SECRET_ACCESS_KEY` を設定
-- [ ] `AWS_LAMBDA_FUNCTION_NAME` を設定
+- [ ] `AWS_ECR_REPOSITORY` を設定
+- [ ] `AWS_APPRUNNER_SERVICE_ARN` を設定
 - [ ] `AWS_API_GATEWAY_ENDPOINT` を設定
 - [ ] `AWS_API_KEY` を設定
 
@@ -135,7 +140,8 @@ cat key.json
 
 - [ ] `GCP_SERVICE_ACCOUNT_KEY` を設定
 - [ ] `GCP_PROJECT_ID` を設定
-- [ ] `GCP_FUNCTION_SERVICE_ACCOUNT` を設定
+- [ ] `GCP_CLOUD_RUN_SERVICE_ACCOUNT` を設定
+- [ ] `GCP_ARTIFACT_REGISTRY_URL` を設定
 - [ ] `GCP_APIGEE_ENDPOINT` を設定
 - [ ] `GCP_API_KEY` を設定
 
@@ -190,7 +196,7 @@ az role assignment create \
 # 必要なポリシーを確認して追加
 aws iam attach-user-policy \
   --user-name ic-test-github-actions \
-  --policy-arn arn:aws:iam::aws:policy/AWSLambdaFullAccess
+  --policy-arn arn:aws:iam::aws:policy/AWSAppRunnerFullAccess
 ```
 
 ### GCP: "Permission Denied" エラー
@@ -202,7 +208,7 @@ aws iam attach-user-policy \
 # 必要なロールを追加
 gcloud projects add-iam-policy-binding ic-test-project \
   --member="serviceAccount:ic-test-github-actions@ic-test-project.iam.gserviceaccount.com" \
-  --role="roles/cloudfunctions.admin"
+  --role="roles/run.admin"
 ```
 
 ---

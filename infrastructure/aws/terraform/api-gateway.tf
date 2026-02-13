@@ -3,16 +3,8 @@
 # ==============================================================================
 #
 # 【概要】
-# 内部統制テスト評価AIのAPI Gateway層を構築します。
-#
-# 【機能】
-# - REST API（HTTP API v2も選択可能）
-# - API Key認証
-# - レート制限・スロットリング
-# - 相関ID管理（X-Correlation-IDヘッダー）
-# - CloudWatch Logs統合
-# - Lambda統合
-# - CORSサポート
+# API Gateway REST APIでApp Runnerへプロキシします。
+# API Key認証、レート制限、CORS対応を提供。
 #
 # ==============================================================================
 
@@ -22,7 +14,7 @@
 
 resource "aws_api_gateway_rest_api" "ic_test_ai" {
   name        = "${var.project_name}-${var.environment}-api"
-  description = "内部統制テスト評価AI API Gateway"
+  description = "内部統制テスト評価AI API Gateway (App Runner Backend)"
 
   endpoint_configuration {
     types = ["REGIONAL"]
@@ -35,72 +27,82 @@ resource "aws_api_gateway_rest_api" "ic_test_ai" {
 }
 
 # ------------------------------------------------------------------------------
-# API Gateway リソース（/evaluate）
+# プロキシリソース（{proxy+}で全パスをApp Runnerに転送）
 # ------------------------------------------------------------------------------
 
-resource "aws_api_gateway_resource" "evaluate" {
+resource "aws_api_gateway_resource" "proxy" {
   rest_api_id = aws_api_gateway_rest_api.ic_test_ai.id
   parent_id   = aws_api_gateway_rest_api.ic_test_ai.root_resource_id
-  path_part   = "evaluate"
+  path_part   = "{proxy+}"
 }
 
-# ------------------------------------------------------------------------------
-# API Gateway メソッド（POST /evaluate）
-# ------------------------------------------------------------------------------
-
-resource "aws_api_gateway_method" "evaluate_post" {
-  rest_api_id   = aws_api_gateway_rest_api.ic_test_ai.id
-  resource_id   = aws_api_gateway_resource.evaluate.id
-  http_method   = "POST"
-  authorization = "NONE"
+# ANY /{proxy+} → App Runner
+resource "aws_api_gateway_method" "proxy" {
+  rest_api_id      = aws_api_gateway_rest_api.ic_test_ai.id
+  resource_id      = aws_api_gateway_resource.proxy.id
+  http_method      = "ANY"
+  authorization    = "NONE"
   api_key_required = true
 
   request_parameters = {
-    "method.request.header.X-Correlation-ID" = false
+    "method.request.path.proxy"                = true
+    "method.request.header.X-Correlation-ID"   = false
   }
 }
 
-# ------------------------------------------------------------------------------
-# Lambda統合
-# ------------------------------------------------------------------------------
-
-resource "aws_api_gateway_integration" "evaluate_lambda" {
+resource "aws_api_gateway_integration" "proxy" {
   rest_api_id = aws_api_gateway_rest_api.ic_test_ai.id
-  resource_id = aws_api_gateway_resource.evaluate.id
-  http_method = aws_api_gateway_method.evaluate_post.http_method
+  resource_id = aws_api_gateway_resource.proxy.id
+  http_method = aws_api_gateway_method.proxy.http_method
 
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.ic_test_ai.invoke_arn
+  type                    = "HTTP_PROXY"
+  integration_http_method = "ANY"
+  uri                     = "https://${aws_apprunner_service.ic_test_ai.service_url}/{proxy}"
+
+  request_parameters = {
+    "integration.request.path.proxy"              = "method.request.path.proxy"
+    "integration.request.header.X-Correlation-ID" = "method.request.header.X-Correlation-ID"
+  }
+
+  timeout_milliseconds = 29000
 }
 
-# ------------------------------------------------------------------------------
-# Lambda実行権限
-# ------------------------------------------------------------------------------
+# ルートパス（/）→ App Runner
+resource "aws_api_gateway_method" "root" {
+  rest_api_id      = aws_api_gateway_rest_api.ic_test_ai.id
+  resource_id      = aws_api_gateway_rest_api.ic_test_ai.root_resource_id
+  http_method      = "ANY"
+  authorization    = "NONE"
+  api_key_required = true
+}
 
-resource "aws_lambda_permission" "api_gateway_invoke" {
-  statement_id  = "AllowAPIGatewayInvoke"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.ic_test_ai.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_api_gateway_rest_api.ic_test_ai.execution_arn}/*/*"
+resource "aws_api_gateway_integration" "root" {
+  rest_api_id = aws_api_gateway_rest_api.ic_test_ai.id
+  resource_id = aws_api_gateway_rest_api.ic_test_ai.root_resource_id
+  http_method = aws_api_gateway_method.root.http_method
+
+  type                    = "HTTP_PROXY"
+  integration_http_method = "ANY"
+  uri                     = "https://${aws_apprunner_service.ic_test_ai.service_url}/"
+
+  timeout_milliseconds = 29000
 }
 
 # ------------------------------------------------------------------------------
 # CORS設定（OPTIONSメソッド）
 # ------------------------------------------------------------------------------
 
-resource "aws_api_gateway_method" "evaluate_options" {
+resource "aws_api_gateway_method" "proxy_options" {
   rest_api_id   = aws_api_gateway_rest_api.ic_test_ai.id
-  resource_id   = aws_api_gateway_resource.evaluate.id
+  resource_id   = aws_api_gateway_resource.proxy.id
   http_method   = "OPTIONS"
   authorization = "NONE"
 }
 
-resource "aws_api_gateway_integration" "evaluate_options" {
+resource "aws_api_gateway_integration" "proxy_options" {
   rest_api_id = aws_api_gateway_rest_api.ic_test_ai.id
-  resource_id = aws_api_gateway_resource.evaluate.id
-  http_method = aws_api_gateway_method.evaluate_options.http_method
+  resource_id = aws_api_gateway_resource.proxy.id
+  http_method = aws_api_gateway_method.proxy_options.http_method
   type        = "MOCK"
 
   request_templates = {
@@ -108,10 +110,10 @@ resource "aws_api_gateway_integration" "evaluate_options" {
   }
 }
 
-resource "aws_api_gateway_method_response" "evaluate_options" {
+resource "aws_api_gateway_method_response" "proxy_options" {
   rest_api_id = aws_api_gateway_rest_api.ic_test_ai.id
-  resource_id = aws_api_gateway_resource.evaluate.id
-  http_method = aws_api_gateway_method.evaluate_options.http_method
+  resource_id = aws_api_gateway_resource.proxy.id
+  http_method = aws_api_gateway_method.proxy_options.http_method
   status_code = "200"
 
   response_parameters = {
@@ -121,15 +123,15 @@ resource "aws_api_gateway_method_response" "evaluate_options" {
   }
 }
 
-resource "aws_api_gateway_integration_response" "evaluate_options" {
+resource "aws_api_gateway_integration_response" "proxy_options" {
   rest_api_id = aws_api_gateway_rest_api.ic_test_ai.id
-  resource_id = aws_api_gateway_resource.evaluate.id
-  http_method = aws_api_gateway_method.evaluate_options.http_method
-  status_code = aws_api_gateway_method_response.evaluate_options.status_code
+  resource_id = aws_api_gateway_resource.proxy.id
+  http_method = aws_api_gateway_method.proxy_options.http_method
+  status_code = aws_api_gateway_method_response.proxy_options.status_code
 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Correlation-ID'"
-    "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,PUT,DELETE,OPTIONS'"
     "method.response.header.Access-Control-Allow-Origin"  = "'*'"
   }
 }
@@ -142,16 +144,18 @@ resource "aws_api_gateway_deployment" "ic_test_ai" {
   rest_api_id = aws_api_gateway_rest_api.ic_test_ai.id
 
   depends_on = [
-    aws_api_gateway_integration.evaluate_lambda,
-    aws_api_gateway_integration.evaluate_options
+    aws_api_gateway_integration.proxy,
+    aws_api_gateway_integration.root,
+    aws_api_gateway_integration.proxy_options,
   ]
 
-  # 変更を検出するためのトリガー
   triggers = {
     redeployment = sha1(jsonencode([
-      aws_api_gateway_resource.evaluate.id,
-      aws_api_gateway_method.evaluate_post.id,
-      aws_api_gateway_integration.evaluate_lambda.id,
+      aws_api_gateway_resource.proxy.id,
+      aws_api_gateway_method.proxy.id,
+      aws_api_gateway_integration.proxy.id,
+      aws_api_gateway_method.root.id,
+      aws_api_gateway_integration.root.id,
     ]))
   }
 
@@ -169,24 +173,19 @@ resource "aws_api_gateway_stage" "prod" {
   rest_api_id   = aws_api_gateway_rest_api.ic_test_ai.id
   stage_name    = var.environment
 
-  # X-Rayトレーシング
   xray_tracing_enabled = var.enable_xray_tracing
 
-  # アクセスログ設定
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.api_gateway.arn
     format = jsonencode({
       requestId      = "$context.requestId"
       ip             = "$context.identity.sourceIp"
-      caller         = "$context.identity.caller"
-      user           = "$context.identity.user"
       requestTime    = "$context.requestTime"
       httpMethod     = "$context.httpMethod"
       resourcePath   = "$context.resourcePath"
       status         = "$context.status"
       protocol       = "$context.protocol"
       responseLength = "$context.responseLength"
-      correlationId  = "$context.requestId"
     })
   }
 
@@ -220,7 +219,7 @@ resource "aws_api_gateway_method_settings" "all" {
 # ------------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "api_gateway" {
-  name              = "/aws/apigateway/${aws_api_gateway_rest_api.ic_test_ai.name}"
+  name              = "/aws/apigateway/${var.project_name}-${var.environment}-api"
   retention_in_days = var.cloudwatch_log_retention_days
 
   tags = merge(var.tags, {
@@ -230,7 +229,7 @@ resource "aws_cloudwatch_log_group" "api_gateway" {
 }
 
 # ------------------------------------------------------------------------------
-# API Key + Usage Plan（レート制限・クォータ管理）
+# API Key + Usage Plan
 # ------------------------------------------------------------------------------
 
 resource "aws_api_gateway_api_key" "ic_test_ai" {
@@ -285,12 +284,12 @@ output "api_gateway_id" {
 }
 
 output "api_gateway_url" {
-  description = "API Gateway エンドポイントURL（VBA/PowerShellで使用）"
-  value       = "${aws_api_gateway_stage.prod.invoke_url}/evaluate"
+  description = "API Gateway エンドポイントURL"
+  value       = aws_api_gateway_stage.prod.invoke_url
 }
 
 output "api_key_value" {
-  description = "API Key（機密情報、VBA/PowerShellに設定）"
+  description = "API Key（機密情報）"
   value       = aws_api_gateway_api_key.ic_test_ai.value
   sensitive   = true
 }

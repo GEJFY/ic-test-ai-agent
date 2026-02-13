@@ -9,6 +9,7 @@
 - 各クラウドプラットフォームのアカウントとサブスクリプション
 - Azure CLI / AWS CLI / gcloud CLI のインストールと認証設定
 - Terraform / Azure Bicep のインストール
+- Docker Desktop のインストール
 - Python 3.11以上
 
 ## デプロイメント順序
@@ -17,7 +18,7 @@
 
 1. **シークレット管理** (Key Vault / Secrets Manager / Secret Manager)
 2. **API Gateway層** (APIM / API Gateway / Apigee)
-3. **バックエンド** (Functions / Lambda / Cloud Functions)
+3. **バックエンド** (Container Apps / App Runner / Cloud Run)
 4. **監視サービス** (Application Insights / CloudWatch/X-Ray / Cloud Logging/Trace)
 5. **統合テスト実行**
 

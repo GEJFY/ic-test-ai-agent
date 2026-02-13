@@ -9,11 +9,11 @@
 | リソース | 用途 | 月額コスト（想定） |
 |---------|------|------------------|
 | **API Gateway** (REST API) | API Gateway層、認証、レート制限 | ~$3.50 |
-| **Lambda** (Consumption) | バックエンドAPI | ~$0.50 |
+| **App Runner** | バックエンドAPI（Dockerコンテナ） | ~$5-7 |
+| **ECR** (Elastic Container Registry) | Dockerイメージ管理 | ~$1.00 |
 | **Secrets Manager** | シークレット管理 | ~$6.20 |
 | **CloudWatch Logs/X-Ray** | 監視、ログ、トレース | ~$2.00 |
-| **S3** | Lambda デプロイパッケージ用 | ~$0.05 |
-| **合計** | | **~$12.25/月** |
+| **合計** | | **~$17.70/月** |
 
 ## 前提条件
 
@@ -98,7 +98,8 @@ terraform output
 **デプロイ完了後、以下の情報をメモしてください：**
 - `api_gateway_endpoint`: VBA/PowerShellで使用するエンドポイント
 - `api_key`: VBA/PowerShellの`X-Api-Key`ヘッダーに設定（`terraform output -raw api_key`で取得）
-- `lambda_function_name`: コードデプロイ先
+- `app_runner_service_url`: App Runnerサービス URL
+- `ecr_repository_url`: ECRリポジトリ URL
 
 ### ステップ5: Secrets Managerにシークレットを設定
 
@@ -121,32 +122,24 @@ aws secretsmanager put-secret-value \
   --secret-string "<実際のAPIキー>"
 ```
 
-### ステップ6: Lambda関数にコードをデプロイ
+### ステップ6: Dockerイメージをビルド・プッシュしてデプロイ
 
 ```bash
-# platforms/awsディレクトリに移動
-cd ../../../platforms/aws
+# ECRリポジトリURLを取得
+ECR_REPO=$(cd infrastructure/aws/terraform && terraform output -raw ecr_repository_url)
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+AWS_REGION="ap-northeast-1"
 
-# 依存関係含めてデプロイパッケージ作成
-mkdir -p package
-pip install -r ../../requirements.txt -t package/
-cp -r ../../src package/
-cp lambda_handler.py package/
-cd package
-zip -r ../lambda-deployment.zip .
-cd ..
+# ECRにログイン
+aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-# S3にアップロード
-aws s3 cp lambda-deployment.zip s3://ic-test-ai-prod-lambda-deployments-$(aws sts get-caller-identity --query Account --output text)/
+# Dockerイメージをビルド（プロジェクトルートで実行）
+docker build -t $ECR_REPO:latest -f platforms/local/Dockerfile .
 
-# Lambda更新
-aws lambda update-function-code \
-  --function-name ic-test-ai-prod-evaluate \
-  --s3-bucket ic-test-ai-prod-lambda-deployments-$(aws sts get-caller-identity --query Account --output text) \
-  --s3-key lambda-deployment.zip
+# ECRにプッシュ
+docker push $ECR_REPO:latest
 
-# クリーンアップ
-rm -rf package lambda-deployment.zip
+# App Runnerが自動的に新しいイメージを検出してデプロイします
 ```
 
 ### ステップ7: VBA/PowerShellのエンドポイント変更
@@ -210,7 +203,7 @@ terraform output xray_service_map_url
 ```
 
 以下が可視化されていることを確認：
-- PowerShell → API Gateway → Lambda → Bedrock API
+- PowerShell → API Gateway → App Runner → Bedrock API
 - 相関IDですべてのリクエストが追跡可能
 
 ## トラブルシューティング
@@ -241,14 +234,14 @@ IAM権限不足です。必要な権限：
 }
 ```
 
-### Lambda: Secrets Managerアクセスエラー
+### App Runner: Secrets Managerアクセスエラー
 
 IAMロール権限確認：
 
 ```bash
-# Lambda実行ロールのポリシー確認
+# App Runner実行ロールのポリシー確認
 aws iam list-attached-role-policies \
-  --role-name ic-test-ai-prod-lambda-execution-role
+  --role-name ic-test-ai-prod-apprunner-instance-role
 ```
 
 ### API Gateway: 403 Forbidden
@@ -272,9 +265,8 @@ terraform output -raw api_key
 # 全リソース削除
 terraform destroy
 
-# S3バケットは手動削除（オブジェクトが残っている場合）
-aws s3 rm s3://ic-test-ai-prod-lambda-deployments-<AccountID> --recursive
-aws s3 rb s3://ic-test-ai-prod-lambda-deployments-<AccountID>
+# ECRリポジトリのイメージを手動削除（必要な場合）
+aws ecr batch-delete-image --repository-name ic-test-ai --image-ids imageTag=latest
 ```
 
 ## Terraform State管理（推奨）

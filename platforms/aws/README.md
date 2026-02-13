@@ -1,6 +1,6 @@
-# AWS Lambda デプロイガイド
+# AWS App Runner デプロイガイド
 
-内部統制テスト評価AIシステムのAWS Lambda版デプロイ手順です。
+内部統制テスト評価AIシステムのAWS App Runner版デプロイ手順です。
 
 ## 目次
 
@@ -20,9 +20,10 @@
 
 | サービス | 用途 | SKU/プラン |
 |---------|------|-----------|
-| Lambda | APIホスティング | 1024MB+ メモリ推奨 |
+| App Runner | APIホスティング（Dockerコンテナ） | 1 vCPU / 2GB メモリ推奨 |
+| ECR (Elastic Container Registry) | Dockerイメージ管理 | Private |
 | API Gateway | HTTPエンドポイント | HTTP API (v2) 推奨 |
-| Bedrock | LLM処理 | Claude 3.5 Sonnet |
+| Bedrock | LLM処理 | Claude Sonnet 4.5 |
 | Textract | OCR処理 | 従量課金 |
 
 ### 非同期処理用（オプション）
@@ -71,11 +72,13 @@ AWS_SQS_QUEUE_NAME=evaluation-jobs
 
 ## ローカル開発
 
+全プラットフォーム共通のDockerイメージ（FastAPI/Uvicorn）を使用します。
+
 ### 1. セットアップ
 
 ```powershell
 # ディレクトリ移動
-cd platforms/aws
+cd platforms/local
 
 # 仮想環境作成
 python -m venv .venv
@@ -100,39 +103,56 @@ $env:AWS_REGION = "ap-northeast-1"
 ### 3. ローカルサーバー起動
 
 ```powershell
-python lambda_handler.py
+python main.py
 ```
 
 サーバーが起動したら:
-- http://localhost:8080/health - ヘルスチェック
-- http://localhost:8080/config - 設定確認
-- http://localhost:8080/evaluate - 評価API (POST)
+- http://localhost:8000/health - ヘルスチェック
+- http://localhost:8000/config - 設定確認
+- http://localhost:8000/evaluate - 評価API (POST)
+
+### 4. Dockerでのローカル実行
+
+```powershell
+# プロジェクトルートで実行
+docker build -t ic-test-ai:local -f platforms/local/Dockerfile .
+docker run -p 8000:8000 --env-file .env ic-test-ai:local
+```
 
 ---
 
 ## デプロイ手順
 
-### 1. デプロイパッケージ作成
+### 1. ECRリポジトリ作成（初回のみ）
 
 ```powershell
-# パッケージディレクトリ作成
-mkdir package
-
-# 依存関係インストール
-pip install -r requirements.txt -t package/
-
-# ソースコードコピー
-Copy-Item -Recurse ../../src/* package/
-Copy-Item lambda_handler.py package/
-
-# ZIPファイル作成
-Compress-Archive -Path package/* -DestinationPath deployment.zip -Force
+aws ecr create-repository --repository-name ic-test-ai --region ap-northeast-1
 ```
 
-### 2. IAMロール作成（初回のみ）
+### 2. ECRにログイン
 
 ```powershell
-# 信頼ポリシーファイル作成
+$ACCOUNT_ID = aws sts get-caller-identity --query Account --output text
+$AWS_REGION = "ap-northeast-1"
+
+aws ecr get-login-password --region $AWS_REGION | `
+  docker login --username AWS --password-stdin "$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+```
+
+### 3. Dockerイメージをビルド・プッシュ
+
+```powershell
+$ECR_REPO = "$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/ic-test-ai"
+
+# プロジェクトルートで実行
+docker build -t "${ECR_REPO}:latest" -f platforms/local/Dockerfile .
+docker push "${ECR_REPO}:latest"
+```
+
+### 4. IAMロール作成（初回のみ）
+
+```powershell
+# App Runnerアクセスロール（ECRからイメージ取得用）
 @'
 {
   "Version": "2012-10-17",
@@ -140,76 +160,89 @@ Compress-Archive -Path package/* -DestinationPath deployment.zip -Force
     {
       "Effect": "Allow",
       "Principal": {
-        "Service": "lambda.amazonaws.com"
+        "Service": "build.apprunner.amazonaws.com"
       },
       "Action": "sts:AssumeRole"
     }
   ]
 }
-'@ | Out-File -Encoding utf8 trust-policy.json
+'@ | Out-File -Encoding utf8 trust-policy-access.json
 
-# ロール作成
 aws iam create-role `
-  --role-name lambda-ic-test-role `
-  --assume-role-policy-document file://trust-policy.json
+  --role-name apprunner-ic-test-access-role `
+  --assume-role-policy-document file://trust-policy-access.json
 
-# ポリシーアタッチ（基本実行権限）
 aws iam attach-role-policy `
-  --role-name lambda-ic-test-role `
-  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  --role-name apprunner-ic-test-access-role `
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
 
-# Bedrockアクセス権限
+# App Runnerインスタンスロール（Bedrock等へのアクセス用）
+@'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "tasks.apprunner.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+'@ | Out-File -Encoding utf8 trust-policy-instance.json
+
+aws iam create-role `
+  --role-name apprunner-ic-test-instance-role `
+  --assume-role-policy-document file://trust-policy-instance.json
+
 aws iam attach-role-policy `
-  --role-name lambda-ic-test-role `
+  --role-name apprunner-ic-test-instance-role `
   --policy-arn arn:aws:iam::aws:policy/AmazonBedrockFullAccess
 
-# Textractアクセス権限（OCR使用時）
 aws iam attach-role-policy `
-  --role-name lambda-ic-test-role `
+  --role-name apprunner-ic-test-instance-role `
   --policy-arn arn:aws:iam::aws:policy/AmazonTextractFullAccess
 ```
 
-### 3. Lambda関数作成
+### 5. App Runnerサービス作成
 
 ```powershell
-# アカウントID取得
-$ACCOUNT_ID = aws sts get-caller-identity --query Account --output text
-
-# Lambda関数作成
-aws lambda create-function `
-  --function-name ic-test-evaluate `
-  --runtime python3.11 `
-  --handler lambda_handler.handler `
-  --zip-file fileb://deployment.zip `
-  --role "arn:aws:iam::${ACCOUNT_ID}:role/lambda-ic-test-role" `
-  --timeout 300 `
-  --memory-size 1024 `
-  --environment "Variables={LLM_PROVIDER=AWS,AWS_REGION=ap-northeast-1,OCR_PROVIDER=AWS}"
+aws apprunner create-service `
+  --service-name ic-test-evaluate `
+  --source-configuration "{
+    \"AuthenticationConfiguration\": {
+      \"AccessRoleArn\": \"arn:aws:iam::${ACCOUNT_ID}:role/apprunner-ic-test-access-role\"
+    },
+    \"ImageRepository\": {
+      \"ImageIdentifier\": \"${ECR_REPO}:latest\",
+      \"ImageRepositoryType\": \"ECR\",
+      \"ImageConfiguration\": {
+        \"Port\": \"8000\",
+        \"RuntimeEnvironmentVariables\": {
+          \"LLM_PROVIDER\": \"AWS\",
+          \"AWS_REGION\": \"ap-northeast-1\",
+          \"OCR_PROVIDER\": \"AWS\"
+        }
+      }
+    },
+    \"AutoDeploymentsEnabled\": true
+  }" `
+  --instance-configuration "{
+    \"Cpu\": \"1 vCPU\",
+    \"Memory\": \"2 GB\",
+    \"InstanceRoleArn\": \"arn:aws:iam::${ACCOUNT_ID}:role/apprunner-ic-test-instance-role\"
+  }"
 ```
 
-### 4. 更新（2回目以降）
+### 6. 更新デプロイ（2回目以降）
+
+AutoDeploymentsEnabled が true の場合、ECR に新しいイメージをプッシュすると自動デプロイされます。
 
 ```powershell
-aws lambda update-function-code `
-  --function-name ic-test-evaluate `
-  --zip-file fileb://deployment.zip
-```
-
-### 5. API Gateway設定
-
-```powershell
-# HTTP API作成
-aws apigatewayv2 create-api `
-  --name ic-test-api `
-  --protocol-type HTTP `
-  --target "arn:aws:lambda:ap-northeast-1:${ACCOUNT_ID}:function:ic-test-evaluate"
-
-# Lambda権限追加
-aws lambda add-permission `
-  --function-name ic-test-evaluate `
-  --statement-id apigateway-invoke `
-  --action lambda:InvokeFunction `
-  --principal apigateway.amazonaws.com
+# イメージをビルド・プッシュするだけでOK
+docker build -t "${ECR_REPO}:latest" -f platforms/local/Dockerfile .
+docker push "${ECR_REPO}:latest"
 ```
 
 ---
@@ -255,22 +288,6 @@ aws dynamodb create-table `
 aws sqs create-queue `
   --queue-name evaluation-jobs `
   --attributes MessageRetentionPeriod=1209600,VisibilityTimeout=300,ReceiveMessageWaitTimeSeconds=20
-```
-
-### Lambda環境変数更新
-
-```powershell
-aws lambda update-function-configuration `
-  --function-name ic-test-evaluate `
-  --environment "Variables={
-    LLM_PROVIDER=AWS,
-    AWS_REGION=ap-northeast-1,
-    OCR_PROVIDER=AWS,
-    JOB_STORAGE_PROVIDER=AWS,
-    AWS_DYNAMODB_TABLE=EvaluationJobs,
-    JOB_QUEUE_PROVIDER=AWS,
-    AWS_SQS_QUEUE_NAME=evaluation-jobs
-  }"
 ```
 
 ---
@@ -348,17 +365,19 @@ aws lambda update-function-configuration `
 
 **解決方法**:
 1. AWS Console → Bedrock → Model access
-2. Claude 3.5 Sonnetを有効化
+2. Claude Sonnet 4.5を有効化
 
-### 2. Lambda タイムアウト
+### 2. App Runner デプロイ失敗
 
-**原因**: 処理時間が300秒を超えた
+**原因**: Dockerイメージのビルドエラーまたはヘルスチェック失敗
 
 **解決方法**:
 ```powershell
-aws lambda update-function-configuration `
-  --function-name ic-test-evaluate `
-  --timeout 900  # 最大15分
+# サービスログを確認
+aws apprunner list-operations --service-arn <SERVICE_ARN>
+
+# CloudWatch Logsで詳細確認
+aws logs tail /aws/apprunner/ic-test-evaluate/service --follow
 ```
 
 ### 3. メモリ不足
@@ -367,9 +386,10 @@ aws lambda update-function-configuration `
 
 **解決方法**:
 ```powershell
-aws lambda update-function-configuration `
-  --function-name ic-test-evaluate `
-  --memory-size 2048  # 2GB
+# App Runnerのインスタンスリソースを増加
+aws apprunner update-service `
+  --service-arn <SERVICE_ARN> `
+  --instance-configuration "Cpu=2 vCPU,Memory=4 GB"
 ```
 
 ### 4. DynamoDB書き込みエラー
@@ -388,19 +408,21 @@ aws lambda update-function-configuration `
 
 | サービス | 使用量 | 月額（概算） |
 |---------|--------|-------------|
-| Lambda | 1,000回 × 60秒 × 1GB | ~$1 |
+| App Runner | 1 vCPU / 2GB × アイドル時間含む | ~$5-7 |
+| ECR | イメージストレージ | ~$1 |
 | API Gateway | 1,000リクエスト | ~$0.01 |
-| Bedrock (Claude 3.5) | 7.6M tokens | ~$50 |
+| Bedrock (Claude Sonnet 4.5) | 7.6M tokens | ~$50 |
 | Textract | 2,000ページ | ~$3 |
 | DynamoDB | 1GB, 10,000 WCU | ~$2 |
 | SQS | 10,000メッセージ | ~$0.01 |
-| **合計** | | **~$56/月** |
+| **合計** | | **~$61-63/月** |
 
 ---
 
 ## 参考リンク
 
-- [AWS Lambda 開発者ガイド](https://docs.aws.amazon.com/lambda/latest/dg/)
+- [AWS App Runner ドキュメント](https://docs.aws.amazon.com/apprunner/)
+- [Amazon ECR ドキュメント](https://docs.aws.amazon.com/ecr/)
 - [Amazon Bedrock ドキュメント](https://docs.aws.amazon.com/bedrock/)
 - [Amazon Textract ドキュメント](https://docs.aws.amazon.com/textract/)
 - [DynamoDB 開発者ガイド](https://docs.aws.amazon.com/dynamodb/)

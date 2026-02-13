@@ -9,12 +9,13 @@
 | リソース | 用途 | 月額コスト（想定） |
 |---------|------|------------------|
 | **API Management** (Consumption) | API Gateway層、認証、レート制限 | ~$3.50 |
-| **Azure Functions** (Consumption) | バックエンドAPI | ~$0.50 |
+| **Container Apps** (Consumption) | バックエンドAPI（Dockerコンテナ） | ~$1-3 |
+| **Container Registry (ACR)** | Dockerイメージ管理 | ~$5.00 |
 | **Key Vault** | シークレット管理 | ~$9.00 |
 | **Application Insights** | 監視、ログ、トレース | ~$4.60 |
-| **Storage Account** | Function App用ストレージ | ~$0.02 |
+| **Storage Account** | ストレージ | ~$0.02 |
 | **Log Analytics Workspace** | ログ保存 | 無料枠内 |
-| **合計** | | **~$17.62/月** |
+| **合計** | | **~$23.12/月** |
 
 ## 前提条件
 
@@ -27,8 +28,8 @@ az --version  # 2.50.0以上
 # Terraform
 terraform --version  # 1.5.0以上
 
-# Azure Functions Core Tools（コードデプロイ用）
-func --version  # 4.0.5
+# Docker（コンテナイメージビルド・プッシュ用）
+docker --version  # 20.10以上
 ```
 
 ### Azure CLIログイン
@@ -97,7 +98,8 @@ terraform apply tfplan
 
 - `apim_gateway_url`: VBA/PowerShellで使用するエンドポイント
 - `key_vault_name`: シークレット設定先
-- `function_app_name`: コードデプロイ先
+- `container_app_name`: コンテナアプリ名
+- `acr_login_server`: ACRログインサーバー
 
 ### ステップ4: Key Vaultにシークレットを設定
 
@@ -132,14 +134,25 @@ az keyvault secret set \
   --value "https://your-doc-intelligence.cognitiveservices.azure.com/"
 ```
 
-### ステップ5: Function Appにコードをデプロイ
+### ステップ5: Dockerイメージをビルド・プッシュしてデプロイ
 
 ```bash
-# platforms/azureディレクトリに移動
-cd ../../../platforms/azure
+# ACRにログイン
+ACR_NAME=$(cd infrastructure/azure/terraform && terraform output -raw acr_login_server)
+az acr login --name $ACR_NAME
 
-# Function Appにデプロイ
-func azure functionapp publish <FunctionAppName>
+# Dockerイメージをビルド（プロジェクトルートで実行）
+docker build -t $ACR_NAME/ic-test-ai:latest -f platforms/local/Dockerfile .
+
+# ACRにプッシュ
+docker push $ACR_NAME/ic-test-ai:latest
+
+# Container Appsを更新
+CONTAINER_APP_NAME=$(cd infrastructure/azure/terraform && terraform output -raw container_app_name)
+az containerapp update \
+  --name $CONTAINER_APP_NAME \
+  --resource-group rg-ic-test-evaluation \
+  --image $ACR_NAME/ic-test-ai:latest
 ```
 
 ### ステップ6: APIMサブスクリプションキーを取得
@@ -219,7 +232,7 @@ Azure Portal → Application Insights → "Application map"
 
 以下が可視化されていることを確認：
 
-- VBA/PowerShell → APIM → Azure Functions → Azure Foundry API
+- VBA/PowerShell → APIM → Azure Container Apps → Azure Foundry API
 - 相関IDですべてのリクエストが追跡可能
 
 ## トラブルシューティング
@@ -232,15 +245,15 @@ Key Vault名は削除後90日間予約されます。以下で完全削除：
 az keyvault purge --name <Key Vault名>
 ```
 
-### Function App: Key Vaultアクセスエラー
+### Container Apps: Key Vaultアクセスエラー
 
 Managed Identityの権限確認：
 
 ```bash
-# Function AppのManaged Identity確認
-az functionapp identity show \
+# Container AppsのManaged Identity確認
+az containerapp identity show \
   --resource-group rg-ic-test-evaluation \
-  --name <Function App名>
+  --name <Container App名>
 
 # Key Vaultアクセスポリシー確認
 az keyvault show \
@@ -250,7 +263,7 @@ az keyvault show \
 
 ### APIM: 429 Too Many Requests
 
-レート制限に達しています。Terraform の `apim.tf` で設定されたAPIMポリシーを調整してください。
+レート制限に達しています。Bicep/Terraform の APIMポリシーを調整してください。
 
 ### Application Insights: ログが表示されない
 
@@ -326,9 +339,9 @@ network_acls {
 アクセスポリシーではなくRBACを使用（推奨）：
 
 ```bash
-# Function AppにKey Vaultシークレット読み取り権限付与
+# Container AppsにKey Vaultシークレット読み取り権限付与
 az role assignment create \
-  --assignee <Function App Principal ID> \
+  --assignee <Container App Principal ID> \
   --role "Key Vault Secrets User" \
   --scope /subscriptions/<サブスクリプションID>/resourceGroups/rg-ic-test-evaluation/providers/Microsoft.KeyVault/vaults/<Key Vault名>
 ```
@@ -336,6 +349,6 @@ az role assignment create \
 ## 参考リンク
 
 - [Azure API Management ドキュメント](https://learn.microsoft.com/azure/api-management/)
-- [Azure Functions Terraform リファレンス](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/linux_function_app)
+- [Azure Container Apps Terraform リファレンス](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/container_app)
 - [Key Vault Terraform リファレンス](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/key_vault)
 - [Application Insights ドキュメント](https://learn.microsoft.com/azure/azure-monitor/app/app-insights-overview)

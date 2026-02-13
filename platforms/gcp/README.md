@@ -1,6 +1,6 @@
-# GCP Cloud Functions デプロイガイド
+# GCP Cloud Run デプロイガイド
 
-内部統制テスト評価AIシステムのGCP Cloud Functions版デプロイ手順です。
+内部統制テスト評価AIシステムのGCP Cloud Run版デプロイ手順です。
 
 ## 目次
 
@@ -20,7 +20,8 @@
 
 | サービス | 用途 | SKU/プラン |
 |---------|------|-----------|
-| Cloud Functions | APIホスティング | 1024MB+ メモリ推奨 |
+| Cloud Run | APIホスティング（Dockerコンテナ） | 1 vCPU / 2GB メモリ推奨 |
+| Artifact Registry | Dockerイメージ管理 | Docker リポジトリ |
 | Vertex AI | LLM処理 | Gemini 3 Pro |
 | Document AI | OCR処理（オプション） | 従量課金 |
 
@@ -79,11 +80,13 @@ GCP_TASKS_LOCATION=asia-northeast1
 
 ## ローカル開発
 
+全プラットフォーム共通のDockerイメージ（FastAPI/Uvicorn）を使用します。
+
 ### 1. セットアップ
 
 ```powershell
 # ディレクトリ移動
-cd platforms/gcp
+cd platforms/local
 
 # 仮想環境作成
 python -m venv .venv
@@ -114,86 +117,75 @@ python main.py
 ```
 
 サーバーが起動したら:
-- http://localhost:8080/health - ヘルスチェック
-- http://localhost:8080/config - 設定確認
-- http://localhost:8080/evaluate - 評価API (POST)
+- http://localhost:8000/health - ヘルスチェック
+- http://localhost:8000/config - 設定確認
+- http://localhost:8000/evaluate - 評価API (POST)
+
+### 4. Dockerでのローカル実行
+
+```powershell
+# プロジェクトルートで実行
+docker build -t ic-test-ai:local -f platforms/local/Dockerfile .
+docker run -p 8000:8000 --env-file .env ic-test-ai:local
+```
 
 ---
 
 ## デプロイ手順
 
-### 1. デプロイパッケージ作成
+### 1. Artifact Registryリポジトリ作成（初回のみ）
 
 ```powershell
-# src/ ディレクトリをコピー
-Copy-Item -Recurse ../../src .
+gcloud artifacts repositories create ic-test-ai `
+  --repository-format=docker `
+  --location=asia-northeast1 `
+  --description="IC Test AI Docker images"
 ```
 
-### 2. Cloud Functions にデプロイ
+### 2. Artifact Registryに認証
 
 ```powershell
-# evaluate エンドポイント
-gcloud functions deploy evaluate `
-  --gen2 `
-  --runtime python311 `
-  --trigger-http `
-  --allow-unauthenticated `
-  --entry-point evaluate `
-  --region asia-northeast1 `
-  --timeout 540 `
-  --memory 1024MB `
-  --set-env-vars "LLM_PROVIDER=GCP,GCP_PROJECT_ID=your-project-id,OCR_PROVIDER=NONE"
-
-# health エンドポイント
-gcloud functions deploy health `
-  --gen2 `
-  --runtime python311 `
-  --trigger-http `
-  --allow-unauthenticated `
-  --entry-point health `
-  --region asia-northeast1
-
-# config エンドポイント
-gcloud functions deploy config `
-  --gen2 `
-  --runtime python311 `
-  --trigger-http `
-  --allow-unauthenticated `
-  --entry-point config_status `
-  --region asia-northeast1
+gcloud auth configure-docker asia-northeast1-docker.pkg.dev
 ```
 
-### 3. 更新（2回目以降）
+### 3. Dockerイメージをビルド・プッシュ
 
 ```powershell
-# コードを更新して再デプロイ
-gcloud functions deploy evaluate `
-  --gen2 `
-  --runtime python311 `
-  --trigger-http `
-  --entry-point evaluate `
-  --region asia-northeast1
+$PROJECT_ID = "your-project-id"
+$AR_REPO = "asia-northeast1-docker.pkg.dev/$PROJECT_ID/ic-test-ai"
+
+# プロジェクトルートで実行
+docker build -t "${AR_REPO}/ic-test-ai:latest" -f platforms/local/Dockerfile .
+docker push "${AR_REPO}/ic-test-ai:latest"
 ```
 
-### 4. API Gateway設定（オプション）
+### 4. Cloud Runサービス作成・デプロイ
 
-複数のエンドポイントを単一URLで公開する場合：
+```powershell
+gcloud run deploy ic-test-evaluate `
+  --image="${AR_REPO}/ic-test-ai:latest" `
+  --region=asia-northeast1 `
+  --port=8000 `
+  --cpu=1 `
+  --memory=2Gi `
+  --timeout=540 `
+  --min-instances=0 `
+  --max-instances=3 `
+  --allow-unauthenticated `
+  --set-env-vars "LLM_PROVIDER=GCP,GCP_PROJECT_ID=$PROJECT_ID,OCR_PROVIDER=NONE"
+```
 
-```yaml
-# api-config.yaml
-swagger: "2.0"
-info:
-  title: IC Test Evaluation API
-  version: "1.0"
-paths:
-  /evaluate:
-    post:
-      x-google-backend:
-        address: https://asia-northeast1-PROJECT_ID.cloudfunctions.net/evaluate
-  /health:
-    get:
-      x-google-backend:
-        address: https://asia-northeast1-PROJECT_ID.cloudfunctions.net/health
+### 5. 更新デプロイ（2回目以降）
+
+```powershell
+# イメージをビルド・プッシュ
+docker build -t "${AR_REPO}/ic-test-ai:latest" -f platforms/local/Dockerfile .
+docker push "${AR_REPO}/ic-test-ai:latest"
+
+# Cloud Runサービスを更新
+gcloud run deploy ic-test-evaluate `
+  --image="${AR_REPO}/ic-test-ai:latest" `
+  --region=asia-northeast1
 ```
 
 ---
@@ -220,15 +212,12 @@ gcloud tasks queues create evaluation-jobs `
 ### 環境変数の更新
 
 ```powershell
-gcloud functions deploy evaluate `
-  --gen2 `
-  --runtime python311 `
-  --trigger-http `
-  --entry-point evaluate `
-  --region asia-northeast1 `
+gcloud run deploy ic-test-evaluate `
+  --image="${AR_REPO}/ic-test-ai:latest" `
+  --region=asia-northeast1 `
   --set-env-vars "
     LLM_PROVIDER=GCP,
-    GCP_PROJECT_ID=your-project-id,
+    GCP_PROJECT_ID=$PROJECT_ID,
     OCR_PROVIDER=NONE,
     JOB_STORAGE_PROVIDER=GCP,
     GCP_FIRESTORE_COLLECTION=evaluation_jobs,
@@ -242,7 +231,7 @@ gcloud functions deploy evaluate `
 
 ## IAMポリシー
 
-### Cloud Functions サービスアカウントに必要な権限
+### Cloud Run サービスアカウントに必要な権限
 
 ```bash
 # Vertex AI 権限
@@ -295,17 +284,15 @@ includedPermissions:
 gcloud services enable aiplatform.googleapis.com
 ```
 
-### 2. Cloud Functions タイムアウト
+### 2. Cloud Run タイムアウト
 
-**原因**: 処理時間が540秒を超えた
+**原因**: 処理時間がデフォルトタイムアウトを超えた
 
 **解決方法**:
-- Cloud Functions gen2 の最大タイムアウトは 60分
-- ただし HTTP トリガーは 60分まで延長可能
+Cloud Run のタイムアウトは最大60分まで延長可能：
 
 ```powershell
-gcloud functions deploy evaluate `
-  --gen2 `
+gcloud run deploy ic-test-evaluate `
   --timeout 3600  # 最大60分
 ```
 
@@ -315,9 +302,9 @@ gcloud functions deploy evaluate `
 
 **解決方法**:
 ```powershell
-gcloud functions deploy evaluate `
-  --gen2 `
-  --memory 2048MB  # 2GB
+gcloud run deploy ic-test-evaluate `
+  --memory 4Gi `
+  --cpu 2
 ```
 
 ### 4. 認証エラー
@@ -337,18 +324,20 @@ gcloud functions deploy evaluate `
 
 | サービス | 使用量 | 月額（概算） |
 |---------|--------|-------------|
-| Cloud Functions | 1,000回 × 60秒 × 1GB | ~$1 |
+| Cloud Run | 1,000回 × 60秒 × 1 vCPU | ~$1-3 |
+| Artifact Registry | イメージストレージ | ~$1 |
 | Vertex AI (Gemini 3 Pro) | 7.6M tokens | ~$25 |
 | Document AI | 2,000ページ | ~$3 |
 | Firestore | 10,000 reads/writes | ~$0.10 |
 | Cloud Tasks | 10,000 タスク | ~$0.01 |
-| **合計** | | **~$29/月** |
+| **合計** | | **~$30-32/月** |
 
 ---
 
 ## 参考リンク
 
-- [Cloud Functions 開発者ガイド](https://cloud.google.com/functions/docs)
+- [Cloud Run ドキュメント](https://cloud.google.com/run/docs)
+- [Artifact Registry ドキュメント](https://cloud.google.com/artifact-registry/docs)
 - [Vertex AI ドキュメント](https://cloud.google.com/vertex-ai/docs)
 - [Document AI ドキュメント](https://cloud.google.com/document-ai/docs)
 - [Firestore ドキュメント](https://cloud.google.com/firestore/docs)

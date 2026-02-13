@@ -35,8 +35,8 @@ requests
 **アクセス**: AWS Console → CloudWatch → Dashboards
 
 **主要メトリクス**:
-- Lambda実行時間/エラー数
-- API Gatewayリクエスト数/レイテンシ
+- App Runner実行時間/エラー数
+- App Runnerリクエスト数/レイテンシ
 - Bedrockトークン使用量
 - X-Rayサービスマップ
 
@@ -53,7 +53,7 @@ fields @timestamp, correlation_id, @message
 **アクセス**: GCP Console → Logging → Logs Explorer
 
 **主要メトリクス**:
-- Cloud Functionsリクエスト数/実行時間
+- Cloud Runリクエスト数/実行時間
 - Vertex AIトークン使用量
 - エラーログ数
 
@@ -164,7 +164,7 @@ python scripts/validate_deployment.py --platform <platform>
 **2. 対応**
 - LLMタイムアウト → モデル変更検討
 - OCR遅延 → ドキュメントサイズ制限検討
-- メモリ不足 → Lambda/Functionsメモリ増量
+- メモリ不足 → Container Apps/App Runner/Cloud Runメモリ増量
 
 ### 外部API障害時の対応
 

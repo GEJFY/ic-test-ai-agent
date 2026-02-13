@@ -5,7 +5,7 @@ test_apim_integration.py - Azure APIM統合テスト
 
 【概要】
 Azure API Management（APIM）層の統合テストです。
-モック環境でAPIM→Azure Functionsの連携を検証します。
+モック環境でAPIM→Azure Container Apps (FastAPI/Docker)の連携を検証します。
 
 【テスト項目】
 1. 相関ID伝播（X-Correlation-IDヘッダー）

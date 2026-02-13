@@ -8,12 +8,12 @@
 
 | リソース | 用途 | 月額コスト（想定） |
 |---------|------|------------------|
-| **Cloud Functions** (Gen 2) | バックエンドAPI | ~$0.50 |
+| **Cloud Run** | バックエンドAPI（Dockerコンテナ） | ~$1-3 |
+| **Artifact Registry** | Dockerイメージ管理 | ~$1.00 |
 | **Apigee** (オプション) | API Gateway層、認証、レート制限 | $0/$4.50（評価版/本番） |
 | **Secret Manager** | シークレット管理 | ~$3.20 |
 | **Cloud Logging/Trace** | 監視、ログ、トレース | ~$1.50 |
-| **Cloud Storage** | デプロイパッケージ用 | ~$0.05 |
-| **合計** | | **~$5.25/月（Apigee無効時）<br>~$9.75/月（Apigee有効時）** |
+| **合計** | | **~$6.70/月（Apigee無効時）<br>~$11.20/月（Apigee有効時）** |
 
 **注意**: Apigeeは高コストです。評価版期間後は月額課金されます。`enable_apigee = false` で無効化できます。
 
@@ -48,7 +48,8 @@ gcloud config set project $PROJECT_ID
 gcloud billing projects link $PROJECT_ID --billing-account=<BILLING_ACCOUNT_ID>
 
 # 必要なAPIを有効化
-gcloud services enable cloudfunctions.googleapis.com
+gcloud services enable run.googleapis.com
+gcloud services enable artifactregistry.googleapis.com
 gcloud services enable cloudbuild.googleapis.com
 gcloud services enable secretmanager.googleapis.com
 gcloud services enable aiplatform.googleapis.com
@@ -119,7 +120,8 @@ terraform output
 ```
 
 **デプロイ完了後、以下の情報をメモしてください：**
-- `cloud_functions_endpoint`: VBA/PowerShellで使用するエンドポイント
+- `cloud_run_endpoint`: VBA/PowerShellで使用するエンドポイント
+- `artifact_registry_url`: Artifact Registry URL
 - `secret_manager_vertex_ai_key_id`: Vertex AI API Key Secret ID
 
 ### ステップ5: Secret Managerにシークレットを設定
@@ -140,36 +142,26 @@ gcloud secrets versions add ic-test-ai-prod-openai-api-key \
   --data-file=- <<< "<実際のAPIキー>"
 ```
 
-### ステップ6: Cloud Functionsにコードをデプロイ
+### ステップ6: Dockerイメージをビルド・プッシュしてデプロイ
 
 ```bash
-# platforms/gcpディレクトリに移動
-cd ../../../platforms/gcp
+# Artifact Registry URLを取得
+AR_URL=$(cd infrastructure/gcp/terraform && terraform output -raw artifact_registry_url)
+CLOUD_RUN_SERVICE=$(cd infrastructure/gcp/terraform && terraform output -raw cloud_run_service_name)
 
-# デプロイパッケージ作成
-mkdir -p package
-cp -r ../../src package/
-cp main.py package/
-cp requirements.txt package/
-cd package
-zip -r ../function-source.zip .
-cd ..
+# Artifact Registryに認証
+gcloud auth configure-docker asia-northeast1-docker.pkg.dev
 
-# Cloud Storageにアップロード
-BUCKET_NAME=$(terraform output -raw -state=../../../infrastructure/gcp/terraform/terraform.tfstate cloud_functions_storage_bucket 2>/dev/null || echo "ic-test-ai-prod-function-source-$PROJECT_ID")
-gcloud storage cp function-source.zip gs://$BUCKET_NAME/
+# Dockerイメージをビルド（プロジェクトルートで実行）
+docker build -t $AR_URL/ic-test-ai:latest -f platforms/local/Dockerfile .
 
-# Cloud Functions更新
-FUNCTION_NAME=$(terraform output -raw -state=../../../infrastructure/gcp/terraform/terraform.tfstate cloud_functions_name 2>/dev/null || echo "ic-test-ai-prod-evaluate")
-gcloud functions deploy $FUNCTION_NAME \
-  --gen2 \
-  --region=asia-northeast1 \
-  --source=gs://$BUCKET_NAME/function-source.zip \
-  --runtime=python311 \
-  --entry-point=evaluate
+# Artifact Registryにプッシュ
+docker push $AR_URL/ic-test-ai:latest
 
-# クリーンアップ
-rm -rf package function-source.zip
+# Cloud Runサービスを更新
+gcloud run deploy $CLOUD_RUN_SERVICE \
+  --image=$AR_URL/ic-test-ai:latest \
+  --region=asia-northeast1
 ```
 
 ### ステップ7: VBA/PowerShellのエンドポイント変更
@@ -177,8 +169,8 @@ rm -rf package function-source.zip
 **CallCloudApi.ps1 (PowerShell):**
 
 ```powershell
-# Cloud FunctionsエンドポイントURL
-$ApiUrl = (gcloud functions describe ic-test-ai-prod-evaluate --region=asia-northeast1 --gen2 --format="value(serviceConfig.uri)")/evaluate
+# Cloud RunエンドポイントURL
+$ApiUrl = (gcloud run services describe ic-test-ai-prod --region=asia-northeast1 --format="value(status.url)")/evaluate
 
 # ヘッダー設定（Apigee無効時はAPI Key不要）
 $headers = @{
@@ -195,8 +187,8 @@ $headers = @{
 ### 1. ヘルスチェック
 
 ```bash
-# Cloud FunctionsエンドポイントURL取得
-FUNCTION_URL=$(gcloud functions describe ic-test-ai-prod-evaluate \
+# Cloud RunエンドポイントURL取得
+FUNCTION_URL=$(gcloud run services describe ic-test-ai-prod \
   --region=asia-northeast1 \
   --gen2 \
   --format="value(serviceConfig.uri)")
@@ -232,7 +224,7 @@ echo "https://console.cloud.google.com/traces/list?project=$PROJECT_ID"
 ```
 
 以下が可視化されていることを確認：
-- VBA/PowerShell → Cloud Functions → Vertex AI API
+- VBA/PowerShell → Cloud Run → Vertex AI API
 - 相関IDですべてのリクエストが追跡可能
 
 ## Apigee設定（オプション）
@@ -254,7 +246,7 @@ gcloud apigee organizations provision \
 
 1. Apigee Console: https://apigee.google.com/organizations/$PROJECT_ID
 2. "API Proxies" → "Create New" → "Reverse Proxy"
-3. ターゲットURL: Cloud Functions URI
+3. ターゲットURL: Cloud Run URI
 4. ポリシー追加:
    - VerifyAPIKey（API Key検証）
    - AssignMessage（X-Correlation-ID設定）
@@ -268,14 +260,14 @@ gcloud apigee organizations provision \
 必要なAPIが有効化されていません：
 
 ```bash
-gcloud services enable cloudfunctions.googleapis.com \
+gcloud services enable run.googleapis.com \
   cloudbuild.googleapis.com \
   secretmanager.googleapis.com \
   aiplatform.googleapis.com \
   documentai.googleapis.com
 ```
 
-### Cloud Functions: Secret Managerアクセスエラー
+### Cloud Run: Secret Managerアクセスエラー
 
 サービスアカウント権限確認：
 
@@ -324,10 +316,11 @@ terraform init -reconfigure
 
 ### 1. Cloud Traceサンプリング調整
 
-Cloud Functions環境変数で調整：
+Cloud Run環境変数で調整：
 
 ```bash
-gcloud functions deploy ic-test-ai-prod-evaluate \
+gcloud run services update ic-test-ai-prod-api \
+  --region=asia-northeast1 \
   --update-env-vars CLOUD_TRACE_SAMPLE_RATE=0.1  # 10%サンプリング
 ```
 
@@ -339,32 +332,30 @@ gcloud functions deploy ic-test-ai-prod-evaluate \
 log_retention_days = 7  # 初期30日 → 7日に短縮
 ```
 
-### 3. Cloud Functions最大インスタンス数制限
+### 3. Cloud Run最大インスタンス数制限
 
-`variables.tf` の `function_max_instances` を調整：
+`variables.tf` の `container_max_instances` を調整：
 
 ```hcl
-function_max_instances = 5  # 初期10 → 5に制限
+container_max_instances = 5  # 初期10 → 5に制限
 ```
 
 ## セキュリティ強化（本番環境推奨）
 
-### 1. Cloud Functionsへのアクセス制限
+### 1. Cloud Runへのアクセス制限
 
 特定サービスアカウントのみ許可：
 
 ```bash
-gcloud functions remove-iam-policy-binding ic-test-ai-prod-evaluate \
+gcloud run services remove-iam-policy-binding ic-test-ai-prod-api \
   --region=asia-northeast1 \
-  --gen2 \
   --member="allUsers" \
-  --role="roles/cloudfunctions.invoker"
+  --role="roles/run.invoker"
 
-gcloud functions add-iam-policy-binding ic-test-ai-prod-evaluate \
+gcloud run services add-iam-policy-binding ic-test-ai-prod-api \
   --region=asia-northeast1 \
-  --gen2 \
   --member="serviceAccount:apigee-sa@$PROJECT_ID.iam.gserviceaccount.com" \
-  --role="roles/cloudfunctions.invoker"
+  --role="roles/run.invoker"
 ```
 
 ### 2. Secret Manager自動ローテーション
@@ -373,11 +364,11 @@ gcloud functions add-iam-policy-binding ic-test-ai-prod-evaluate \
 
 ### 3. VPC統合
 
-Cloud FunctionsをVPC内に配置（Connectorプライベートサブネット）
+Cloud RunをVPC内に配置（VPCコネクタ経由）
 
 ## 参考リンク
 
-- [Cloud Functions Terraform](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/cloudfunctions2_function)
+- [Cloud Run Terraform](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/cloud_run_v2_service)
 - [Secret Manager Terraform](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/secret_manager_secret)
 - [Apigee ドキュメント](https://cloud.google.com/apigee/docs)
 - [Cloud Trace ドキュメント](https://cloud.google.com/trace/docs)

@@ -13,10 +13,12 @@ apim_publisher_name  = "Internal Control Test AI"
 apim_sku_name        = "Consumption"
 apim_sku_capacity    = 0
 
-# Function App設定
-function_app_sku_name = "Y1"
-function_app_sku_tier = "Dynamic"
-python_version        = "3.11"
+# Container Apps設定
+container_app_cpu          = 0.5
+container_app_memory       = "1Gi"
+container_app_min_replicas = 0
+container_app_max_replicas = 5
+container_image_tag        = "latest"
 
 # タグ
 tags = {

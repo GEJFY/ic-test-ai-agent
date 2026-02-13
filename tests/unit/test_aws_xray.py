@@ -39,8 +39,8 @@ def test_aws_xray_init_without_sdk():
             assert monitor.xray_recorder is None
 
 
-def test_aws_xray_init_with_lambda_env():
-    """Lambda環境で初期化されることを検証"""
+def test_aws_xray_init_with_container_env():
+    """App Runner (コンテナ) 環境で初期化されることを検証"""
     with patch.dict("os.environ", {"AWS_LAMBDA_FUNCTION_NAME": "test-function"}):
         # aws_xray_sdk.core モジュールをモック
         mock_xray_module = Mock()

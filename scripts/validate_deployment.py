@@ -5,7 +5,7 @@ validate_deployment.py - デプロイメント検証スクリプト
 ================================================================================
 
 【概要】
-Azure/AWS/GCP環境へのデプロイが正しく完了したかを検証します。
+Azure Container Apps/AWS App Runner/GCP Cloud Runへのデプロイが正しく完了したかを検証します。
 
 【検証項目】
 1. 必須リソースの存在確認
@@ -369,29 +369,41 @@ class DeploymentValidator:
                 )
 
         elif self.platform == "aws":
-            # X-Rayは環境変数不要（Lambda自動設定）
-            self.results.append(
-                ValidationResult(
-                    "AWS X-Ray",
-                    ValidationStatus.PASS,
-                    "Lambda環境で自動有効化"
-                )
-            )
-
-        elif self.platform == "gcp":
-            project_id = os.getenv("GCP_PROJECT")
-            if project_id:
+            # App RunnerではCloudWatchメトリクス・ログが自動収集される
+            # X-Rayはサイドカー設定が必要
+            aws_region = os.getenv("AWS_REGION")
+            if aws_region:
                 self.results.append(
                     ValidationResult(
-                        "GCP Cloud Logging/Trace",
+                        "AWS CloudWatch (App Runner)",
                         ValidationStatus.PASS,
-                        f"プロジェクトID: {project_id}"
+                        f"リージョン: {aws_region} - App Runnerメトリクス自動収集"
                     )
                 )
             else:
                 self.results.append(
                     ValidationResult(
-                        "GCP Cloud Logging/Trace",
+                        "AWS CloudWatch (App Runner)",
+                        ValidationStatus.WARN,
+                        "AWS_REGION未設定 - CloudWatchメトリクス確認不可"
+                    )
+                )
+
+        elif self.platform == "gcp":
+            # Cloud RunではCloud Logging/Traceが自動統合される
+            project_id = os.getenv("GCP_PROJECT")
+            if project_id:
+                self.results.append(
+                    ValidationResult(
+                        "GCP Cloud Logging/Trace (Cloud Run)",
+                        ValidationStatus.PASS,
+                        f"プロジェクトID: {project_id} - Cloud Runログ自動収集"
+                    )
+                )
+            else:
+                self.results.append(
+                    ValidationResult(
+                        "GCP Cloud Logging/Trace (Cloud Run)",
                         ValidationStatus.WARN,
                         "GCP_PROJECT未設定"
                     )

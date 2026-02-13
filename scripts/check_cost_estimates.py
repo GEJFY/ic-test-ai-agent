@@ -8,7 +8,7 @@ check_cost_estimates.py - コスト見積もり整合性チェックスクリプ
 CLOUD_COST_ESTIMATION.mdのコスト見積もりが各実装ファイルと整合していることを確認します。
 
 【検証項目】
-1. 全プラットフォームのリソースがコスト見積もりに含まれているか
+1. 全プラットフォーム（Container Apps/App Runner/Cloud Run）のリソースがコスト見積もりに含まれているか
 2. IaC (Bicep/Terraform) で定義されたリソースとコスト見積もりの整合性
 3. 監視サービスコストの記載漏れチェック
 4. 年間処理件数（1,328件）との整合性
@@ -83,9 +83,10 @@ class CostEstimateChecker:
 
         content = self.cost_doc_path.read_text(encoding="utf-8")
 
-        # Azure必須サービス
+        # Azure必須サービス（コンテナベースデプロイ）
         azure_services = [
-            "Azure Functions",
+            "Container Apps",
+            "Container Registry",
             "Azure AI Foundry",
             "Document Intelligence",
             "Storage Account",
@@ -94,21 +95,22 @@ class CostEstimateChecker:
             "Application Insights"
         ]
 
-        # AWS必須サービス
+        # AWS必須サービス（コンテナベースデプロイ）
         aws_services = [
-            "Lambda",
+            "App Runner",
+            "ECR",
             "Bedrock",
             "Textract",
             "S3",
             "API Gateway",
             "Secrets Manager",
-            "CloudWatch",
-            "X-Ray"
+            "CloudWatch"
         ]
 
-        # GCP必須サービス
+        # GCP必須サービス（コンテナベースデプロイ）
         gcp_services = [
-            "Cloud Functions",
+            "Cloud Run",
+            "Artifact Registry",
             "Vertex AI",
             "Document AI",
             "Cloud Storage",
@@ -204,16 +206,20 @@ class CostEstimateChecker:
         """リソースがコストドキュメントに含まれているか確認"""
         content = self.cost_doc_path.read_text(encoding="utf-8")
 
-        # 簡易マッピング（実際にはより詳細なマッピングが必要）
+        # 簡易マッピング（コンテナベースデプロイ対応）
         resource_mappings = {
-            "Microsoft.Web/sites": "Azure Functions",
+            "Microsoft.App/containerApps": "Container Apps",
+            "Microsoft.App/managedEnvironments": "Container Apps",
+            "Microsoft.ContainerRegistry/registries": "Container Registry",
             "Microsoft.ApiManagement/service": "APIM",
             "Microsoft.KeyVault/vaults": "Key Vault",
             "Microsoft.Storage/storageAccounts": "Storage Account",
-            "aws_lambda_function": "Lambda",
+            "aws_apprunner_service": "App Runner",
+            "aws_ecr_repository": "ECR",
             "aws_api_gateway_rest_api": "API Gateway",
             "aws_secretsmanager_secret": "Secrets Manager",
-            "google_cloudfunctions_function": "Cloud Functions",
+            "google_cloud_run_service": "Cloud Run",
+            "google_artifact_registry_repository": "Artifact Registry",
             "google_storage_bucket": "Cloud Storage",
             "google_secret_manager_secret": "Secret Manager"
         }

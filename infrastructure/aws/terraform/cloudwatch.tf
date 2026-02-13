@@ -6,7 +6,7 @@
 # CloudWatch Logs、CloudWatch Alarms、X-Rayトレーシングの設定を管理します。
 #
 # 【機能】
-# - Lambda/API Gatewayの詳細ログ記録
+# - App Runner/API Gatewayの詳細ログ記録
 # - エラー率アラート
 # - レスポンスタイムアラート
 # - コストアラート
@@ -21,88 +21,88 @@
 data "aws_caller_identity" "current" {}
 
 # ------------------------------------------------------------------------------
-# CloudWatch Alarms: Lambda エラー率
+# CloudWatch Alarms: App Runner HTTPエラー率
 # ------------------------------------------------------------------------------
 
-resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
+resource "aws_cloudwatch_metric_alarm" "apprunner_errors" {
   count               = var.enable_cloudwatch_alarms ? 1 : 0
-  alarm_name          = "${var.project_name}-${var.environment}-lambda-errors"
-  alarm_description   = "Lambda関数のエラー率が閾値を超えました"
+  alarm_name          = "${var.project_name}-${var.environment}-apprunner-errors"
+  alarm_description   = "App Runnerの4xx/5xxエラー率が閾値を超えました"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
-  metric_name         = "Errors"
-  namespace           = "AWS/Lambda"
+  metric_name         = "4xxStatusResponses"
+  namespace           = "AWS/AppRunner"
   period              = 300
   statistic           = "Sum"
   threshold           = 10
   treat_missing_data  = "notBreaching"
 
   dimensions = {
-    FunctionName = aws_lambda_function.ic_test_ai.function_name
-  }
-
-  alarm_actions = []  # SNSトピックを追加する場合はここに記述
-
-  tags = merge(var.tags, {
-    Name        = "${var.project_name}-${var.environment}-lambda-errors-alarm"
-    Environment = var.environment
-  })
-}
-
-# ------------------------------------------------------------------------------
-# CloudWatch Alarms: Lambda スロットリング
-# ------------------------------------------------------------------------------
-
-resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
-  count               = var.enable_cloudwatch_alarms ? 1 : 0
-  alarm_name          = "${var.project_name}-${var.environment}-lambda-throttles"
-  alarm_description   = "Lambda関数のスロットリングが発生しました"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 1
-  metric_name         = "Throttles"
-  namespace           = "AWS/Lambda"
-  period              = 300
-  statistic           = "Sum"
-  threshold           = 5
-  treat_missing_data  = "notBreaching"
-
-  dimensions = {
-    FunctionName = aws_lambda_function.ic_test_ai.function_name
+    ServiceName = aws_apprunner_service.ic_test_ai.service_name
   }
 
   alarm_actions = []
 
   tags = merge(var.tags, {
-    Name        = "${var.project_name}-${var.environment}-lambda-throttles-alarm"
+    Name        = "${var.project_name}-${var.environment}-apprunner-errors-alarm"
     Environment = var.environment
   })
 }
 
 # ------------------------------------------------------------------------------
-# CloudWatch Alarms: Lambda 実行時間
+# CloudWatch Alarms: App Runner レスポンス時間
 # ------------------------------------------------------------------------------
 
-resource "aws_cloudwatch_metric_alarm" "lambda_duration" {
+resource "aws_cloudwatch_metric_alarm" "apprunner_latency" {
   count               = var.enable_cloudwatch_alarms ? 1 : 0
-  alarm_name          = "${var.project_name}-${var.environment}-lambda-duration"
-  alarm_description   = "Lambda関数の平均実行時間が閾値を超えました"
+  alarm_name          = "${var.project_name}-${var.environment}-apprunner-latency"
+  alarm_description   = "App Runnerの平均レスポンス時間が閾値を超えました"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
-  metric_name         = "Duration"
-  namespace           = "AWS/Lambda"
+  metric_name         = "RequestLatency"
+  namespace           = "AWS/AppRunner"
   period              = 300
   statistic           = "Average"
   threshold           = 180000  # 3分（ミリ秒）
   treat_missing_data  = "notBreaching"
 
   dimensions = {
-    FunctionName = aws_lambda_function.ic_test_ai.function_name
+    ServiceName = aws_apprunner_service.ic_test_ai.service_name
   }
 
   alarm_actions = []
 
   tags = merge(var.tags, {
-    Name        = "${var.project_name}-${var.environment}-lambda-duration-alarm"
+    Name        = "${var.project_name}-${var.environment}-apprunner-latency-alarm"
+    Environment = var.environment
+  })
+}
+
+# ------------------------------------------------------------------------------
+# CloudWatch Alarms: App Runner アクティブインスタンス数
+# ------------------------------------------------------------------------------
+
+resource "aws_cloudwatch_metric_alarm" "apprunner_instances" {
+  count               = var.enable_cloudwatch_alarms ? 1 : 0
+  alarm_name          = "${var.project_name}-${var.environment}-apprunner-instances"
+  alarm_description   = "App Runnerのアクティブインスタンス数が閾値に達しました"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ActiveInstances"
+  namespace           = "AWS/AppRunner"
+  period              = 300
+  statistic           = "Maximum"
+  threshold           = var.app_runner_max_size
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    ServiceName = aws_apprunner_service.ic_test_ai.service_name
+  }
+
+  alarm_actions = []
+
+  tags = merge(var.tags, {
+    Name        = "${var.project_name}-${var.environment}-apprunner-instances-alarm"
     Environment = var.environment
   })
 }
@@ -180,17 +180,39 @@ resource "aws_cloudwatch_dashboard" "ic_test_ai" {
         type = "metric"
         properties = {
           metrics = [
-            ["AWS/Lambda", "Invocations", { stat = "Sum", label = "Lambda呼び出し数" }],
-            [".", "Errors", { stat = "Sum", label = "Lambdaエラー数" }],
-            [".", "Duration", { stat = "Average", label = "Lambda平均実行時間" }]
+            ["AWS/AppRunner", "RequestCount", "ServiceName", aws_apprunner_service.ic_test_ai.service_name, { stat = "Sum", label = "リクエスト数" }],
+            [".", "4xxStatusResponses", ".", ".", { stat = "Sum", label = "4xxエラー" }],
+            [".", "2xxStatusResponses", ".", ".", { stat = "Sum", label = "2xx成功" }]
+          ]
+          period = 300
+          stat   = "Sum"
+          region = var.region
+          title  = "App Runner リクエストメトリクス"
+        }
+      },
+      {
+        type = "metric"
+        properties = {
+          metrics = [
+            ["AWS/AppRunner", "RequestLatency", "ServiceName", aws_apprunner_service.ic_test_ai.service_name, { stat = "Average", label = "平均レイテンシ" }],
+            [".", ".", ".", ".", { stat = "p99", label = "P99レイテンシ" }]
           ]
           period = 300
           stat   = "Average"
           region = var.region
-          title  = "Lambda メトリクス"
-          dimensions = {
-            FunctionName = [aws_lambda_function.ic_test_ai.function_name]
-          }
+          title  = "App Runner レイテンシ"
+        }
+      },
+      {
+        type = "metric"
+        properties = {
+          metrics = [
+            ["AWS/AppRunner", "ActiveInstances", "ServiceName", aws_apprunner_service.ic_test_ai.service_name, { stat = "Maximum", label = "アクティブインスタンス" }]
+          ]
+          period = 300
+          stat   = "Maximum"
+          region = var.region
+          title  = "App Runner インスタンス数"
         }
       },
       {
@@ -210,14 +232,6 @@ resource "aws_cloudwatch_dashboard" "ic_test_ai" {
             ApiName = [aws_api_gateway_rest_api.ic_test_ai.name]
             Stage   = [aws_api_gateway_stage.prod.stage_name]
           }
-        }
-      },
-      {
-        type = "log"
-        properties = {
-          query = "SOURCE '/aws/lambda/${aws_lambda_function.ic_test_ai.function_name}' | fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 20"
-          region = var.region
-          title  = "最近のエラーログ"
         }
       }
     ]

@@ -5,18 +5,18 @@ test_apigee_integration.py - GCP Apigee統合テスト
 
 【概要】
 GCP Apigee層の統合テストです。
-モック環境でApigee→Cloud Functionsの連携を検証します。
+モック環境でApigee→Cloud Run (FastAPI/Docker)の連携を検証します。
 
 【注意】
 Apigeeは高コストのため、本番環境では無効化（enable_apigee = false）を推奨します。
-その場合、Cloud Functions直接アクセステストも含めます。
+その場合、Cloud Run直接アクセステストも含めます。
 
 【テスト項目】
 1. 相関ID伝播（X-Correlation-IDヘッダー）
 2. API Key認証（X-Api-Key）- Apigee有効時のみ
 3. Quotaポリシー（レート制限）
 4. エラーハンドリング
-5. Cloud Functions直接アクセス（Apigee無効時）
+5. Cloud Run直接アクセス（Apigee無効時）
 
 【実行方法】
 pytest tests/integration/test_apigee_integration.py -v
@@ -46,10 +46,10 @@ def apigee_config():
 
 
 @pytest.fixture
-def cloud_functions_config():
-    """Cloud Functions直接アクセス設定"""
+def cloud_run_config():
+    """Cloud Run直接アクセス設定"""
     return {
-        "function_url": "https://asia-northeast1-project-id.cloudfunctions.net/ic-test-ai-prod-evaluate",
+        "service_url": "https://ic-test-ai-prod-xxxxx.a.run.app",
         "evaluate_path": "/evaluate"
     }
 
@@ -89,7 +89,7 @@ def mock_backend_response():
 # =============================================================================
 
 def test_correlation_id_propagation_apigee(apigee_config, test_request_body, mock_backend_response):
-    """相関IDがApigee→Cloud Functions→Responseで正しく伝播することを検証"""
+    """相関IDがApigee→Cloud Run→Responseで正しく伝播することを検証"""
 
     correlation_id = str(uuid.uuid4())
 
@@ -120,11 +120,11 @@ def test_correlation_id_propagation_apigee(apigee_config, test_request_body, moc
 
 
 # =============================================================================
-# テスト2: Cloud Functions直接アクセス（Apigee無効時）
+# テスト2: Cloud Run直接アクセス（Apigee無効時）
 # =============================================================================
 
-def test_cloud_functions_direct_access(cloud_functions_config, test_request_body, mock_backend_response):
-    """Apigee無効時、Cloud Functionsに直接アクセスできることを検証"""
+def test_cloud_run_direct_access(cloud_run_config, test_request_body, mock_backend_response):
+    """Apigee無効時、Cloud Runに直接アクセスできることを検証"""
 
     correlation_id = str(uuid.uuid4())
 
@@ -140,11 +140,11 @@ def test_cloud_functions_direct_access(cloud_functions_config, test_request_body
 
         import requests
         response = requests.post(
-            f"{cloud_functions_config['function_url']}{cloud_functions_config['evaluate_path']}",
+            f"{cloud_run_config['service_url']}{cloud_run_config['evaluate_path']}",
             headers={
                 "X-Correlation-ID": correlation_id,
                 "Content-Type": "application/json"
-                # API Keyなし（Cloud Functions直接アクセス）
+                # API Keyなし（Cloud Run直接アクセス）
             },
             json=test_request_body
         )
@@ -156,8 +156,8 @@ def test_cloud_functions_direct_access(cloud_functions_config, test_request_body
         assert response.json() == mock_backend_response
 
 
-def test_cloud_functions_correlation_id_auto_generation(cloud_functions_config, test_request_body, mock_backend_response):
-    """Cloud Functions直接アクセス時、相関IDが自動生成されることを検証"""
+def test_cloud_run_correlation_id_auto_generation(cloud_run_config, test_request_body, mock_backend_response):
+    """Cloud Run直接アクセス時、相関IDが自動生成されることを検証"""
 
     auto_correlation_id = str(uuid.uuid4())
 
@@ -173,7 +173,7 @@ def test_cloud_functions_correlation_id_auto_generation(cloud_functions_config, 
 
         import requests
         response = requests.post(
-            f"{cloud_functions_config['function_url']}{cloud_functions_config['evaluate_path']}",
+            f"{cloud_run_config['service_url']}{cloud_run_config['evaluate_path']}",
             headers={
                 "Content-Type": "application/json"
                 # X-Correlation-IDなし
@@ -354,8 +354,8 @@ def test_backend_error_handling_apigee(apigee_config, test_request_body):
         assert error_data["correlation_id"] == correlation_id
 
 
-def test_cloud_functions_error_handling(cloud_functions_config, test_request_body):
-    """Cloud Functionsエラー時の適切なエラーレスポンスを検証"""
+def test_cloud_run_error_handling(cloud_run_config, test_request_body):
+    """Cloud Runエラー時の適切なエラーレスポンスを検証"""
 
     correlation_id = str(uuid.uuid4())
 
@@ -374,7 +374,7 @@ def test_cloud_functions_error_handling(cloud_functions_config, test_request_bod
 
         import requests
         response = requests.post(
-            f"{cloud_functions_config['function_url']}{cloud_functions_config['evaluate_path']}",
+            f"{cloud_run_config['service_url']}{cloud_run_config['evaluate_path']}",
             headers={
                 "X-Correlation-ID": correlation_id,
                 "Content-Type": "application/json"
@@ -394,7 +394,7 @@ def test_cloud_functions_error_handling(cloud_functions_config, test_request_bod
 # テスト6: Cloud Trace統合
 # =============================================================================
 
-def test_cloud_trace_propagation(cloud_functions_config, test_request_body, mock_backend_response):
+def test_cloud_trace_propagation(cloud_run_config, test_request_body, mock_backend_response):
     """Cloud Traceトレースコンテキストが伝播することを検証"""
 
     correlation_id = str(uuid.uuid4())
@@ -412,7 +412,7 @@ def test_cloud_trace_propagation(cloud_functions_config, test_request_body, mock
 
         import requests
         response = requests.post(
-            f"{cloud_functions_config['function_url']}{cloud_functions_config['evaluate_path']}",
+            f"{cloud_run_config['service_url']}{cloud_run_config['evaluate_path']}",
             headers={
                 "X-Correlation-ID": correlation_id,
                 "X-Cloud-Trace-Context": trace_context,

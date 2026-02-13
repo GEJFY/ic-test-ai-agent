@@ -8,7 +8,7 @@
 2. [Azureとは](#2-azureとは)
 3. [Azure CLIのセットアップ](#3-azure-cliのセットアップ)
 4. [リソースグループの作成](#4-リソースグループの作成)
-5. [Azure Functions](#5-azure-functions)
+5. [Azure Container Apps](#5-azure-container-apps)
 6. [Azure AI Foundry (GPT-5.2)](#6-azure-ai-foundry-gpt-52)
 7. [Document Intelligence](#7-document-intelligence)
 8. [API Management (APIM)](#8-api-management-apim)
@@ -31,7 +31,7 @@ Azure未経験の方でも、このガイドに沿って進めるだけで以下
 
 - Azureクラウドの基本概念の理解
 - Azure CLIを使ったリソース管理
-- サーバーレスアーキテクチャの構築
+- コンテナアーキテクチャの構築
 - AI/MLサービスの設定と利用
 - API Gatewayの構築と認証設定
 - シークレット管理とセキュリティのベストプラクティス
@@ -56,7 +56,7 @@ Azure未経験の方でも、このガイドに沿って進めるだけで以下
 |-----------|---------|--------|
 | Azure CLIセットアップ | 15分 | ★☆☆ |
 | リソースグループ作成 | 5分 | ★☆☆ |
-| Azure Functions | 30分 | ★★☆ |
+| Azure Container Apps | 30分 | ★★☆ |
 | Azure AI Foundry | 20分 | ★★☆ |
 | Document Intelligence | 15分 | ★★☆ |
 | API Management | 30分 | ★★★ |
@@ -113,7 +113,7 @@ Azure未経験の方でも、このガイドに沿って進めるだけで以下
 💡 **無料枠について**: Azureの無料アカウントには以下が含まれます。
 - 最初の30日間で使える**200ドル（約30,000円）分のクレジット**
 - 12か月間無料のサービス（一部のVMやStorage等）
-- 永久無料のサービス（Azure Functions月100万回実行、AI Services月5,000トランザクション等）
+- 永久無料のサービス（Azure Container Apps月180,000 vCPU秒無料、AI Services月5,000トランザクション等）
 
 ⚠️ **注意**: 無料クレジットを超過すると課金が開始されます。このガイドの「コスト管理」セクションを必ず確認してください。
 
@@ -290,7 +290,7 @@ az account set --subscription "Azure subscription 1"
 ```
 Azureサブスクリプション
   └── リソースグループ: rg-ic-test-ai-prod
-        ├── Azure Functions（APIバックエンド）
+        ├── Azure Container Apps（APIバックエンド）
         ├── Storage Account（データ保存）
         ├── Azure AI Foundry（GPT-5 Nano）
         ├── Document Intelligence（文書OCR）
@@ -361,31 +361,31 @@ japaneast   rg-ic-test-ai-prod   Succeeded
 
 ---
 
-## 5. Azure Functions
+## 5. Azure Container Apps
 
-### 📖 サーバーレスとは
+### 📖 コンテナとは
 
-**サーバーレス (Serverless)** は、サーバーの管理を完全にクラウドプロバイダーに任せるアーキテクチャです。
+**コンテナ** は、アプリケーションとその依存関係（ライブラリ、ランタイム等）を1つのパッケージにまとめる技術です。Dockerイメージとしてビルドし、どの環境でも同じように動作します。
 
-| 観点 | 従来型サーバー | サーバーレス |
+| 観点 | 従来型サーバー | コンテナ（Azure Container Apps） |
 |------|-------------|------------|
 | サーバー管理 | 自分で管理（OS更新、パッチ適用等） | クラウドが自動管理 |
-| スケーリング | 手動またはルール設定 | 自動スケーリング |
-| 課金 | 常時稼働分の費用 | **実行時間分のみ課金** |
-| 起動時間 | 常時稼働 | コールドスタート（初回数秒） |
+| スケーリング | 手動またはルール設定 | 自動スケーリング（ゼロスケール対応） |
+| 課金 | 常時稼働分の費用 | **従量課金（Consumptionプラン）** |
+| ポータビリティ | 環境依存 | **Dockerイメージで環境非依存** |
 
-本プロジェクトでは、Azure Functionsを「APIバックエンド」として使います。VBAやPowerShellからHTTPリクエストを受け取り、AI評価を実行して結果を返します。
+本プロジェクトでは、Azure Container Appsを「APIバックエンド」として使います。VBAやPowerShellからHTTPリクエストを受け取り、AI評価を実行して結果を返します。
 
-### 📖 Azure Functionsの仕組み
+### 📖 Azure Container Appsの仕組み
 
-Azure Functionsは**イベント駆動**のサーバーレスコンピューティングです。
+Azure Container Appsは**コンテナベース**のマネージドコンピューティングサービスです。
 
 ```
-クライアント                    Azure Functions                 AIサービス
-(VBA/PowerShell)                (Python 3.11)
+クライアント                    Azure Container Apps             AIサービス
+(VBA/PowerShell)                (Docker + Python 3.11)
     │                               │                              │
     ├── HTTP POST /evaluate ──────→ │                              │
-    │                               ├── トリガー起動               │
+    │                               ├── コンテナで処理             │
     │                               ├── リクエスト解析             │
     │                               ├── GPT-5 Nano呼び出し ──────→ │
     │                               │ ←──── 評価結果 ─────────────┤
@@ -394,167 +394,141 @@ Azure Functionsは**イベント駆動**のサーバーレスコンピューテ�
 ```
 
 主要な概念:
-- **トリガー (Trigger)**: 関数を実行するきっかけ。本プロジェクトでは**HTTPトリガー**を使用
-- **バインディング (Binding)**: 入出力データの接続。Storage、Queue等と連携可能
-- **ホスティングプラン**: Consumption（従量課金）、Premium、Dedicatedから選択
+- **Container App Environment**: Container Appsを実行する環境（ネットワーク等を共有）
+- **コンテナイメージ**: アプリケーションをDockerイメージとしてパッケージ化
+- **Ingress**: HTTPトラフィックの受信設定（外部/内部アクセス制御）
+- **スケーリングルール**: HTTPリクエスト数に応じたオートスケール
 
-### Azure Functions Core Toolsインストール
+### Dockerとaz CLIのインストール
 
-ローカルでAzure Functionsの開発・テストを行うために、Core Toolsをインストールします。
-
-```powershell
-# npmを使ったインストール（Node.jsが必要）
-npm install -g azure-functions-core-tools@4 --unsafe-perm true
-```
-
-このコマンドの意味:
-- `npm install -g`: Node.jsのパッケージマネージャーでグローバルインストール
-- `azure-functions-core-tools@4`: Azure Functions v4ランタイム用のCoreTools
-- `--unsafe-perm true`: Windowsでの権限エラーを回避
+ローカルでコンテナの開発・テストを行うために、DockerとAzure CLIをインストールします。
 
 ```powershell
+# Docker Desktopのインストール（Windows推奨）
+winget install -e --id Docker.DockerDesktop
+
 # インストール確認
-func --version
+docker --version
 ```
 
 期待される出力:
 ```
-4.0.6280
+Docker version 27.x.x, build xxxxxxx
 ```
 
-💡 **ヒント**: Node.jsがインストールされていない場合は、[Node.js公式サイト](https://nodejs.org/) からLTS版をインストールしてください。または、wingetで `winget install OpenJS.NodeJS.LTS` としてもOKです。
+💡 **ヒント**: Docker Desktopのインストール後、WSL2バックエンドが有効になっていることを確認してください。設定 → General → 「Use the WSL 2 based engine」にチェック。
 
 ### ローカルでのプロジェクト作成と動作確認
 
-本プロジェクトにはAzure Functions用のコードが `platforms/azure/` に含まれていますが、仕組みを理解するためにゼロから作成する手順も説明します。
+本プロジェクトにはDockerfileが含まれており、`platforms/local/main.py`（FastAPI）をエントリーポイントとしてコンテナを起動します。
 
 ```powershell
-# テスト用ディレクトリを作成（本プロジェクトとは別の場所で試す場合）
-mkdir func-test-project
-cd func-test-project
-
-# Azure Functionsプロジェクトを初期化
-func init --python --model V2
+# プロジェクトルートでDockerイメージをビルド
+docker build -t ic-test-ai-agent .
 ```
 
-各パラメータの意味:
-- `func init`: 新しいAzure Functionsプロジェクトを初期化
-- `--python`: Python言語を選択
-- `--model V2`: プログラミングモデルV2（デコレータベースの新しい構文）を使用
-
-作成されるファイル:
+ビルドに使用される主要ファイル:
 ```
-func-test-project/
-├── function_app.py     ← メインの関数定義ファイル
-├── host.json           ← Functionsホストの設定
-├── local.settings.json ← ローカル実行用の設定
-└── requirements.txt    ← Python依存パッケージ
+ic-test-ai-agent/
+├── Dockerfile              ← コンテナ定義ファイル
+├── requirements.txt        ← Python依存パッケージ
+├── src/                    ← 共通ソースコード
+└── platforms/local/main.py ← FastAPIエントリーポイント
 ```
 
-### local.settings.jsonの設定
+### 環境変数の設定
 
-`local.settings.json` はローカル開発時のみ使用される設定ファイルです（Gitにはコミットしません）。
+ローカル開発時の環境変数は `.env` ファイルで管理します。
 
-```json
-{
-  "IsEncrypted": false,
-  "Values": {
-    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
-    "FUNCTIONS_WORKER_RUNTIME": "python",
-    "LLM_PROVIDER": "AZURE_FOUNDRY",
-    "AZURE_FOUNDRY_API_KEY": "<後で設定>",
-    "AZURE_FOUNDRY_ENDPOINT": "<後で設定>",
-    "AZURE_FOUNDRY_MODEL": "gpt-5-nano"
-  }
-}
+```ini
+# .env ファイル
+LLM_PROVIDER=AZURE_FOUNDRY
+AZURE_FOUNDRY_API_KEY=<後で設定>
+AZURE_FOUNDRY_ENDPOINT=<後で設定>
+AZURE_FOUNDRY_MODEL=gpt-5-nano
 ```
 
-各設定値の意味:
-- `AzureWebJobsStorage`: Functionsランタイムが使うストレージ接続文字列。ローカルでは `UseDevelopmentStorage=true` でAzurite（ローカルエミュレータ）を使用
-- `FUNCTIONS_WORKER_RUNTIME`: 実行言語。`python` を指定
-- `LLM_PROVIDER`: 本プロジェクト独自の設定。使用するLLMプロバイダーを指定
-
-⚠️ **注意**: `local.settings.json` にはAPIキー等の機密情報が含まれます。`.gitignore` に必ず含めてください。
+⚠️ **注意**: `.env` ファイルにはAPIキー等の機密情報が含まれます。`.gitignore` に必ず含めてください。
 
 ### ローカルテスト実行
 
 ```powershell
-func start
+# Dockerコンテナをローカルで起動
+docker run --env-file .env -p 8000:8000 ic-test-ai-agent
 ```
 
 期待される出力:
 ```
-Azure Functions Core Tools
-Core Tools Version:       4.0.6280
-Function Runtime Version: 4.31.1.22191
-
-Functions:
-
-        http_trigger: [GET,POST] http://localhost:7071/api/http_trigger
-
-For detailed output, run func with --verbose flag.
+INFO:     Started server process
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000
 ```
 
-✅ **確認ポイント**: `http://localhost:7071/api/http_trigger` が表示されれば、ローカルでAzure Functionsが起動しています。ブラウザでこのURLにアクセスして動作確認できます。
+✅ **確認ポイント**: `http://localhost:8000/health` にアクセスしてヘルスチェックが成功すれば、ローカルでコンテナが正常に動作しています。
 
 ### クラウドへのデプロイ
 
-Azure上にFunction Appリソースを作成し、コードをデプロイします。
+Azure Container Registryにイメージをプッシュし、Container Appsにデプロイします。
 
 ```powershell
-# Function Appの作成（CLIで個別に作る場合）
-az functionapp create \
-  --resource-group rg-ic-test-ai-prod \
-  --consumption-plan-location japaneast \
-  --runtime python \
-  --runtime-version 3.11 \
-  --functions-version 4 \
-  --name func-ic-test-ai-prod \
-  --storage-account <STORAGE_ACCOUNT_NAME> \
-  --os-type Linux
+# Azure Container Registryの作成
+az acr create `
+  --resource-group rg-ic-test-ai-prod `
+  --name acrictestaiprod `
+  --sku Basic
+
+# ACRにログイン
+az acr login --name acrictestaiprod
+
+# Dockerイメージをタグ付け＆プッシュ
+docker tag ic-test-ai-agent acrictestaiprod.azurecr.io/ic-test-ai-agent:latest
+docker push acrictestaiprod.azurecr.io/ic-test-ai-agent:latest
+
+# Container App Environmentの作成
+az containerapp env create `
+  --name cae-ic-test-ai-prod `
+  --resource-group rg-ic-test-ai-prod `
+  --location japaneast
+
+# Container Appの作成
+az containerapp create `
+  --name ca-ic-test-ai-prod `
+  --resource-group rg-ic-test-ai-prod `
+  --environment cae-ic-test-ai-prod `
+  --image acrictestaiprod.azurecr.io/ic-test-ai-agent:latest `
+  --registry-server acrictestaiprod.azurecr.io `
+  --target-port 8000 `
+  --ingress external `
+  --cpu 1.0 --memory 2.0Gi `
+  --min-replicas 0 --max-replicas 10
 ```
 
 各パラメータの意味:
 - `--resource-group`: デプロイ先のリソースグループ
-- `--consumption-plan-location`: Consumptionプラン（従量課金）のリージョン
-- `--runtime python`: Pythonランタイムを使用
-- `--runtime-version 3.11`: Python 3.11を指定
-- `--functions-version 4`: Azure Functions v4ランタイム
-- `--name`: Function App名（**グローバルで一意**である必要がある）
-- `--storage-account`: Function Appが使用するStorage Account
-- `--os-type Linux`: LinuxベースのFunction App
+- `--environment`: Container App Environment名
+- `--image`: デプロイするDockerイメージ
+- `--target-port 8000`: コンテナが待ち受けるポート
+- `--ingress external`: 外部からのHTTPアクセスを許可
+- `--cpu 1.0 --memory 2.0Gi`: コンテナに割り当てるCPU/メモリ
+- `--min-replicas 0`: 最小レプリカ数（0でゼロスケール対応）
+- `--max-replicas 10`: 最大レプリカ数
 
-💡 **ヒント**: 本プロジェクトでは、このFunction AppをBicepテンプレートで自動作成します（セクション12参照）。ここでは理解のために手動手順を説明しています。
-
-```powershell
-# コードをデプロイ
-func azure functionapp publish func-ic-test-ai-prod
-```
+💡 **ヒント**: 本プロジェクトでは、このContainer AppをBicepテンプレートで自動作成します（セクション12参照）。ここでは理解のために手動手順を説明しています。
 
 期待される出力:
 ```
-Getting site publishing info...
-Uploading package...
-Deploying package...
-Deployment successful.
-
-Functions in func-ic-test-ai-prod:
-    evaluate - [httpTrigger]
-    evaluate_submit - [httpTrigger]
-    evaluate_status - [httpTrigger]
-    evaluate_results - [httpTrigger]
-    health - [httpTrigger]
-    config - [httpTrigger]
+Container app created. Access your app at https://ca-ic-test-ai-prod.xxxxx.japaneast.azurecontainerapps.io/
 ```
 
 ### よくあるエラーと対策
 
 | エラー | 原因 | 対策 |
 |--------|------|------|
-| `No module named 'azure.functions'` | 依存パッケージ未インストール | `pip install azure-functions` を実行 |
-| `Storage account not found` | Storage Accountが未作成 | 先にStorage Accountを作成 |
-| `App name is already in use` | Function App名が他で使われている | 名前を変更（一意にする） |
-| `Python 3.11 is not supported` | リージョンで未対応 | `--runtime-version 3.10` に変更 |
+| `docker: command not found` | Docker未インストール | Docker Desktopをインストール |
+| `unauthorized: authentication required` | ACR認証が切れている | `az acr login --name <ACR名>` を再実行 |
+| `Container app name already in use` | Container App名が既に使われている | 名前を変更（一意にする） |
+| `ImagePullBackOff` | イメージのプルに失敗 | ACRのイメージタグとレジストリ設定を確認 |
 
 ---
 
@@ -851,7 +825,7 @@ for page in result.pages:
 **Azure API Management (APIM)** は、APIの公開・管理・保護・監視を一元的に行う**API Gateway**サービスです。
 
 ```
-クライアント          APIM                    Azure Functions
+クライアント          APIM                    Azure Container Apps
 (VBA/PowerShell)     (API Gateway)            (バックエンド)
     │                    │                         │
     ├── API Key認証 ───→ │                         │
@@ -866,7 +840,7 @@ for page in result.pages:
 
 ### なぜAPIMが必要か
 
-Azure FunctionsのURLを直接公開するのではなく、APIMを経由させる理由は以下の通りです。
+Azure Container AppsのURLを直接公開するのではなく、APIMを経由させる理由は以下の通りです。
 
 1. **認証 (Authentication)**: Subscription Keyによるアクセス制御
 2. **レート制限 (Rate Limiting)**: 過剰なリクエストからバックエンドを保護
@@ -1018,7 +992,7 @@ curl -H "Ocp-Apim-Subscription-Key: <YOUR_SUBSCRIPTION_KEY>" `
   "status": "healthy",
   "version": "2.4.0-multiplatform",
   "llm": {"provider": "AZURE", "configured": true},
-  "platform": "Azure Functions"
+  "platform": "Azure Container Apps"
 }
 ```
 
@@ -1052,7 +1026,7 @@ curl -H "Ocp-Apim-Subscription-Key: <YOUR_SUBSCRIPTION_KEY>" `
 | 一元管理 | 各サーバーに個別設定 | **一箇所で集中管理** |
 | Git漏洩リスク | `.env`が誤コミットされる | **コードにシークレットを含めない** |
 
-本プロジェクトのBicepテンプレート（`key-vault.bicep`）では、Function AppのManaged IdentityにKey Vaultの読み取り権限を自動付与します。
+本プロジェクトのBicepテンプレート（`key-vault.bicep`）では、Container AppのManaged IdentityにKey Vaultの読み取り権限を自動付与します。
 
 ### Key Vault作成
 
@@ -1146,14 +1120,14 @@ AZURE-DOCUMENT-INTELLIGENCE-ENDPOINT
 **Managed Identity** は、AzureサービスがKey Vaultなどの他サービスに**パスワードなしで安全に接続**するための仕組みです。
 
 ```
-Function App（Managed Identity有効）
+Container App（Managed Identity有効）
     │
-    ├── "私はfunc-ic-test-ai-prodです" と名乗る
+    ├── "私はca-ic-test-ai-prodです" と名乗る
     │
     ↓
 Key Vault（アクセスポリシー設定済み）
     │
-    ├── "func-ic-test-ai-prodにはget/listの権限があります" → アクセス許可
+    ├── "ca-ic-test-ai-prodにはget/listの権限があります" → アクセス許可
     │
     ↓
 シークレットの値を返す
@@ -1162,10 +1136,10 @@ Key Vault（アクセスポリシー設定済み）
 本プロジェクトの `key-vault.bicep` では、以下のアクセスポリシーが自動設定されます:
 
 ```
-// Function AppのManaged Identityに対してシークレット読み取り権限を付与
+// Container AppのManaged Identityに対してシークレット読み取り権限を付与
 accessPolicies: [
   {
-    objectId: functionAppPrincipalId  // Function AppのManaged Identity ID
+    objectId: containerAppPrincipalId  // Container AppのManaged Identity ID
     permissions: {
       secrets: ['get', 'list']        // 取得と一覧のみ（書き込み不可）
     }
@@ -1175,7 +1149,7 @@ accessPolicies: [
 
 ### Pythonからのアクセス
 
-Function Appのコードからは、Managed Identityを使って透過的にKey Vaultにアクセスします。
+Container Appのコードからは、Managed Identityを使って透過的にKey Vaultにアクセスします。
 
 ```python
 # src/infrastructure/secrets/azure_keyvault.py で使用されるパターン
@@ -1194,9 +1168,11 @@ secret = client.get_secret("AZURE-FOUNDRY-API-KEY")
 print(f"APIキー: {secret.value[:10]}...")
 ```
 
-💡 **ヒント**: Function Appの環境変数では、Key Vault参照構文を使うことで直接シークレットを参照できます:
-```
-@Microsoft.KeyVault(VaultName=kv-ic-test-ai-prod;SecretName=AZURE-FOUNDRY-API-KEY)
+💡 **ヒント**: Container Appでは、Key Vault参照をシークレット設定に組み込むことで直接シークレットを参照できます:
+
+```powershell
+az containerapp secret set --name ca-ic-test-ai-prod --resource-group rg-ic-test-ai-prod \
+  --secrets "foundry-api-key=keyvaultref:https://kv-ic-test-ai-prod.vault.azure.net/secrets/AZURE-FOUNDRY-API-KEY,identityref:/subscriptions/.../userAssignedIdentities/..."
 ```
 
 ### 登録すべきシークレット一覧
@@ -1226,7 +1202,7 @@ print(f"APIキー: {secret.value[:10]}...")
 - **分散トレーシング**: 相関IDを使ったリクエストの追跡
 - **ログクエリ**: KQL（Kusto Query Language）でログを分析
 
-本プロジェクトでは、VBAからの相関IDをAPIM → Functions → Application Insightsまで追跡できます。
+本プロジェクトでは、VBAからの相関IDをAPIM → Container Apps → Application Insightsまで追跡できます。
 
 ### リソース作成（Log Analytics Workspace含む）
 
@@ -1277,18 +1253,18 @@ InstrumentationKey=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx;IngestionEndpoint=https:
 
 💡 **ヒント**: 以前は `InstrumentationKey` のみで接続していましたが、現在は `ConnectionString` の使用が推奨されています。
 
-### Functions統合設定
+### Container Apps統合設定
 
-Function Appの環境変数に接続文字列を設定すると、自動的にApplication Insightsへのテレメトリ送信が有効になります。
+Container Appの環境変数に接続文字列を設定すると、Application Insightsへのテレメトリ送信が有効になります。
 
 ```powershell
-az functionapp config appsettings set `
-  --name func-ic-test-ai-prod `
+az containerapp update `
+  --name ca-ic-test-ai-prod `
   --resource-group rg-ic-test-ai-prod `
-  --settings APPLICATIONINSIGHTS_CONNECTION_STRING="<接続文字列>"
+  --set-env-vars APPLICATIONINSIGHTS_CONNECTION_STRING="<接続文字列>"
 ```
 
-💡 **ヒント**: Bicepテンプレートでは、この設定は `function-app.bicep` で自動的に行われます。
+💡 **ヒント**: Bicepテンプレートでは、この設定は `container-app.bicep` で自動的に行われます。
 
 ### 基本的なKustoクエリ（KQL）
 
@@ -1383,7 +1359,7 @@ AzureDiagnostics
 | **Table Storage** | NoSQLテーブル | ジョブステータス管理 |
 | **File Storage** | ファイル共有 | 本プロジェクトでは未使用 |
 
-Azure Functionsでは、ランタイム自体がStorage Accountを使用します（トリガー管理、スケーリング情報等）。
+Azure Container Appsでは、証跡ファイルやジョブ結果の保存にStorage Accountを使用します。
 
 ### 作成手順
 
@@ -1491,7 +1467,7 @@ with open("sample.pdf", "rb") as f:
 infrastructure/azure/bicep/
 ├── main.bicep           ← エントリーポイント（全モジュールを統合）
 ├── app-insights.bicep   ← Application Insights + Log Analytics
-├── function-app.bicep   ← Azure Functions + Storage Account + App Service Plan
+├── container-app.bicep  ← Azure Container Apps + Container App Environment + ACR
 ├── key-vault.bicep      ← Key Vault + アクセスポリシー + シークレット雛形
 └── apim.bicep           ← API Management + API定義 + サブスクリプション
 ```
@@ -1501,11 +1477,11 @@ infrastructure/azure/bicep/
 ```
 1. app-insights.bicep     ← 最初にデプロイ（他から参照される）
       ↓
-2. function-app.bicep     ← App Insights接続文字列を参照
+2. container-app.bicep    ← App Insights接続文字列を参照
       ↓
-3. key-vault.bicep        ← Function AppのManaged Identity IDを参照
+3. key-vault.bicep        ← Container AppのManaged Identity IDを参照
       ↓
-4. apim.bicep             ← Function AppのURL、App Insights IDを参照
+4. apim.bicep             ← Container AppのURL、App Insights IDを参照
 ```
 
 この依存関係は `main.bicep` で `dependsOn` を使って自動管理されます。
@@ -1541,11 +1517,8 @@ infrastructure/azure/bicep/
     "apimSkuCapacity": {
       "value": 0
     },
-    "functionAppSkuName": {
-      "value": "Y1"
-    },
-    "functionAppSkuTier": {
-      "value": "Dynamic"
+    "containerAppSkuName": {
+      "value": "Consumption"
     },
     "pythonVersion": {
       "value": "3.11"
@@ -1563,7 +1536,7 @@ infrastructure/azure/bicep/
 | `apimPublisherEmail` | APIM発行者メール | 管理者のメールアドレス |
 | `apimPublisherName` | APIM発行者名 | チーム名・組織名 |
 | `apimSkuName` | APIM料金プラン | `Consumption`（開発時推奨） |
-| `functionAppSkuName` | Functions料金プラン | `Y1`（Consumption） |
+| `containerAppSkuName` | Container Apps料金プラン | `Consumption`（従量課金） |
 | `pythonVersion` | Pythonバージョン | `3.11` |
 
 ### Bicepのバリデーション（デプロイ前の検証）
@@ -1614,8 +1587,8 @@ az deployment group create `
     "provisioningState": "Succeeded",
     "outputs": {
       "resourceGroupName": { "value": "rg-ic-test-ai-prod" },
-      "functionAppName": { "value": "func-ic-test-ai-prod-xxxxxx" },
-      "functionAppUrl": { "value": "https://func-ic-test-ai-prod-xxxxxx.azurewebsites.net" },
+      "containerAppName": { "value": "ca-ic-test-ai-prod-xxxxxx" },
+      "containerAppUrl": { "value": "https://ca-ic-test-ai-prod-xxxxxx.japaneast.azurecontainerapps.io" },
       "keyVaultName": { "value": "kv-ic-test-ai-xxxxxxxx" },
       "keyVaultUri": { "value": "https://kv-ic-test-ai-xxxxxxxx.vault.azure.net/" },
       "apimName": { "value": "apim-ic-test-ai-prod-xxxxxx" },
@@ -1651,8 +1624,8 @@ Name                              ResourceGroup        Location    Type
 log-ic-test-ai-prod-xxxxxx       rg-ic-test-ai-prod   japaneast   Microsoft.OperationalInsights/workspaces
 appi-ic-test-ai-prod-xxxxxx      rg-ic-test-ai-prod   japaneast   Microsoft.Insights/components
 stictestaiprodxxxxxx              rg-ic-test-ai-prod   japaneast   Microsoft.Storage/storageAccounts
-asp-ic-test-ai-prod-xxxxxx       rg-ic-test-ai-prod   japaneast   Microsoft.Web/serverfarms
-func-ic-test-ai-prod-xxxxxx      rg-ic-test-ai-prod   japaneast   Microsoft.Web/sites
+cae-ic-test-ai-prod-xxxxxx      rg-ic-test-ai-prod   japaneast   Microsoft.App/managedEnvironments
+ca-ic-test-ai-prod-xxxxxx       rg-ic-test-ai-prod   japaneast   Microsoft.App/containerApps
 kv-ic-test-ai-xxxxxxxx           rg-ic-test-ai-prod   japaneast   Microsoft.KeyVault/vaults
 apim-ic-test-ai-prod-xxxxxx      rg-ic-test-ai-prod   japaneast   Microsoft.ApiManagement/service
 ```
@@ -1678,15 +1651,24 @@ az keyvault secret set --vault-name $KV_NAME --name "AZURE-DOCUMENT-INTELLIGENCE
 ```
 
 ```powershell
-# 2. Function Appにコードをデプロイ
-$FUNC_NAME = az deployment group show `
+# 2. Container Appにコンテナイメージをデプロイ
+$CA_NAME = az deployment group show `
   --resource-group rg-ic-test-ai-prod `
   --name ic-test-ai-deployment `
-  --query "properties.outputs.functionAppName.value" `
+  --query "properties.outputs.containerAppName.value" `
   --output tsv
 
-cd platforms/azure
-func azure functionapp publish $FUNC_NAME
+# Dockerイメージをビルド＆ACRにプッシュ（セクション5参照）
+docker build -t ic-test-ai-agent .
+docker tag ic-test-ai-agent crictestaiprod.azurecr.io/ic-test-ai-agent:latest
+az acr login --name crictestaiprod
+docker push crictestaiprod.azurecr.io/ic-test-ai-agent:latest
+
+# Container Appを更新
+az containerapp update `
+  --name $CA_NAME `
+  --resource-group rg-ic-test-ai-prod `
+  --image crictestaiprod.azurecr.io/ic-test-ai-agent:latest
 ```
 
 ---
@@ -1737,7 +1719,7 @@ curl -H "Ocp-Apim-Subscription-Key: $SUB_KEY" "$APIM_URL/api/health"
     "provider": "AZURE",
     "configured": true
   },
-  "platform": "Azure Functions"
+  "platform": "Azure Container Apps"
 }
 ```
 
@@ -1836,7 +1818,7 @@ Azureの無料枠と、本プロジェクトの各サービスのコストを把
 
 | サービス | 無料枠 | 超過時の料金（概算） |
 |---------|--------|---------------------|
-| Azure Functions | **月100万回実行 + 40万GB-秒** | $0.20/100万回 |
+| Azure Container Apps | **月180,000 vCPU秒 + 360,000 GiB秒** | $0.000024/vCPU秒 |
 | API Management (Consumption) | **月100万回** | $3.50/100万回 |
 | Application Insights | **月5GBまで** | $2.30/GB |
 | Storage Account | **5GB (LRS)** | $0.018/GB/月 |
@@ -1850,7 +1832,7 @@ Azureの無料枠と、本プロジェクトの各サービスのコストを把
 
 | サービス | 想定利用量 | 月額コスト（概算） |
 |---------|-----------|------------------|
-| Azure Functions | 1万回/月 | **無料** |
+| Azure Container Apps | 少量利用/月 | **無料** |
 | APIM (Consumption) | 1万回/月 | **無料** |
 | Application Insights | 1GB/月 | **無料** |
 | Storage Account | 1GB | **$0.02** |
@@ -1863,7 +1845,7 @@ Azureの無料枠と、本プロジェクトの各サービスのコストを把
 
 ### コスト削減のヒント
 
-1. **Consumptionプランを使う**: Functions、APIMともに従量課金で無駄がない
+1. **Consumptionプランを使う**: Container Apps、APIMともに従量課金で無駄がない
 2. **Application Insightsのサンプリング**: 本番環境ではサンプリング率を10~20%に設定
 3. **Log Analytics保持期間**: 30日（無料枠）を超えないよう設定
 4. **GPT-5 Nanoの活用**: 単純な評価にはGPT-5 Nano（高速・低コスト）を使用
@@ -1911,7 +1893,7 @@ az group delete --name rg-ic-test-ai-prod --yes --no-wait
 |---|------------|--------------|
 | 1 | Azure CLIによるクラウドリソース管理 | セクション3 |
 | 2 | リソースグループによるリソースの論理的管理 | セクション4 |
-| 3 | サーバーレスアーキテクチャ（Azure Functions） | セクション5 |
+| 3 | コンテナアーキテクチャ（Azure Container Apps） | セクション5 |
 | 4 | AIサービスの設定と利用（GPT-5 Nano） | セクション6 |
 | 5 | 文書OCR処理（Document Intelligence） | セクション7 |
 | 6 | API Gatewayの構築と認証（APIM） | セクション8 |
@@ -1931,8 +1913,8 @@ az group delete --name rg-ic-test-ai-prod --yes --no-wait
 │                                                                 │
 │  ┌──────────┐    ┌──────────────┐    ┌───────────────────┐     │
 │  │  APIM    │───→│ Azure        │───→│ Azure AI Foundry  │     │
-│  │ (Gateway)│    │ Functions    │    │ (GPT-5 Nano)      │     │
-│  └──────────┘    │ (Python 3.11)│    └───────────────────┘     │
+│  │ (Gateway)│    │ Container   │    │ (GPT-5 Nano)      │     │
+│  └──────────┘    │ Apps (Docker)│    └───────────────────┘     │
 │       ↑          └──────┬───────┘    ┌───────────────────┐     │
 │       │                 │       └───→│ Document          │     │
 │  Subscription     ┌─────┴─────┐      │ Intelligence      │     │
@@ -1956,7 +1938,7 @@ az group delete --name rg-ic-test-ai-prod --yes --no-wait
 | リソース | URL |
 |---------|-----|
 | Azure CLI リファレンス | https://learn.microsoft.com/ja-jp/cli/azure/ |
-| Azure Functions Python開発者ガイド | https://learn.microsoft.com/ja-jp/azure/azure-functions/functions-reference-python |
+| Azure Container Apps ドキュメント | https://learn.microsoft.com/ja-jp/azure/container-apps/ |
 | Azure AI Foundry ドキュメント | https://learn.microsoft.com/ja-jp/azure/ai-services/openai/ |
 | Document Intelligence ドキュメント | https://learn.microsoft.com/ja-jp/azure/ai-services/document-intelligence/ |
 | API Management ドキュメント | https://learn.microsoft.com/ja-jp/azure/api-management/ |

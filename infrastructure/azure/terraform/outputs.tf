@@ -37,17 +37,32 @@ output "log_analytics_workspace_id" {
 }
 
 # ------------------------------------------------------------------------------
-# Function App
+# Container Apps
 # ------------------------------------------------------------------------------
 
-output "function_app_name" {
-  description = "Function App名"
-  value       = azurerm_linux_function_app.main.name
+output "container_app_name" {
+  description = "Container App名"
+  value       = azurerm_container_app.main.name
 }
 
-output "function_app_url" {
-  description = "Function AppのエンドポイントURL"
-  value       = "https://${azurerm_linux_function_app.main.default_hostname}"
+output "container_app_fqdn" {
+  description = "Container AppのFQDN"
+  value       = azurerm_container_app.main.ingress[0].fqdn
+}
+
+output "container_app_url" {
+  description = "Container AppのエンドポイントURL"
+  value       = "https://${azurerm_container_app.main.ingress[0].fqdn}"
+}
+
+output "acr_login_server" {
+  description = "ACRログインサーバー"
+  value       = azurerm_container_registry.main.login_server
+}
+
+output "acr_name" {
+  description = "ACR名"
+  value       = azurerm_container_registry.main.name
 }
 
 # ------------------------------------------------------------------------------

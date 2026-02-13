@@ -135,9 +135,9 @@ az monitor app-insights component show \
   --query "connectionString"
 
 # 環境変数設定確認
-az functionapp config appsettings list \
-  --name <FUNCTION_NAME> --resource-group <RG> \
-  | grep APPLICATIONINSIGHTS_CONNECTION_STRING
+az containerapp show \
+  --name <CONTAINER_APP_NAME> --resource-group <RG> \
+  --query "properties.configuration.secrets"
 ```
 
 **注意**: 10%サンプリング設定により、全リクエストが記録されるわけではありません。
@@ -150,15 +150,15 @@ az functionapp config appsettings list \
 
 **解決策**:
 ```bash
-# Lambda実行ロールにX-Ray権限追加
+# App Runnerインスタンスロールにx-Ray権限追加
 aws iam attach-role-policy \
-  --role-name <LAMBDA_ROLE> \
+  --role-name <APPRUNNER_INSTANCE_ROLE> \
   --policy-arn arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
 
-# Lambda関数でX-Ray有効化確認
-aws lambda get-function-configuration \
-  --function-name <FUNCTION_NAME> \
-  --query "TracingConfig"
+# App Runnerサービスの設定確認
+aws apprunner describe-service \
+  --service-arn <SERVICE_ARN> \
+  --query "Service.ObservabilityConfiguration"
 ```
 
 ---
@@ -167,26 +167,31 @@ aws lambda get-function-configuration \
 
 ### 問題: レスポンスが遅い（10秒以上）
 
-**症状**: `/api/evaluate`のレスポンスタイムが長い
+**症状**: `/evaluate`のレスポンスタイムが長い
 
 **原因**: LLM/OCR APIの処理時間
 
 **解決策**:
 1. **非同期処理に切り替え**
    ```bash
-   # /api/evaluate/submitを使用
+   # /evaluate/submitを使用
    curl -X POST <ENDPOINT>/evaluate/submit \
      -H "Content-Type: application/json" \
      -d @request.json
    ```
 
 2. **タイムアウト設定の調整**
-   ```python
-   # Azure Functions
-   # host.json
-   {
-     "functionTimeout": "00:10:00"  # 10分
-   }
+   ```bash
+   # Azure Container Apps
+   az containerapp ingress update --name <APP_NAME> \
+     --resource-group <RG> --request-timeout 600
+
+   # GCP Cloud Run
+   gcloud run deploy <SERVICE_NAME> --timeout=540
+
+   # AWS App Runner
+   aws apprunner update-service --service-arn <ARN> \
+     --health-check-configuration "Timeout=20"
    ```
 
 3. **ドキュメントサイズの制限**
@@ -200,21 +205,20 @@ aws lambda get-function-configuration \
 Process out of memory
 ```
 
-**原因**: Lambda/Functions のメモリ設定不足
+**原因**: コンテナのメモリ設定不足
 
 **解決策**:
 ```bash
-# Azure Functions
-az functionapp config set --name <FUNCTION_NAME> \
-  --resource-group <RG> --set siteConfig.memorySize=2048
+# Azure Container Apps
+az containerapp update --name <APP_NAME> \
+  --resource-group <RG> --cpu 2.0 --memory 4.0Gi
 
-# AWS Lambda
-aws lambda update-function-configuration \
-  --function-name <FUNCTION_NAME> \
-  --memory-size 2048
+# AWS App Runner
+aws apprunner update-service --service-arn <SERVICE_ARN> \
+  --instance-configuration "Cpu=2 vCPU,Memory=4 GB"
 
-# GCP Cloud Functions
-gcloud functions deploy <FUNCTION_NAME> --memory=2048MB
+# GCP Cloud Run
+gcloud run deploy <SERVICE_NAME> --memory=4Gi --cpu=2
 ```
 
 ---

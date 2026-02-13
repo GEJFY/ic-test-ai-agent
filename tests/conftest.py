@@ -313,6 +313,12 @@ def mock_graph_state():
 # 統合テストスキップ設定
 # =============================================================================
 
+def pytest_configure(config):
+    """カスタムマーカーを登録"""
+    config.addinivalue_line("markers", "integration: integration tests (requires cloud access)")
+    config.addinivalue_line("markers", "e2e: end-to-end tests (requires deployed cloud endpoints)")
+
+
 def pytest_addoption(parser):
     """pytestコマンドラインオプション追加"""
     parser.addoption(
@@ -321,14 +327,24 @@ def pytest_addoption(parser):
         default=False,
         help="Run integration tests (requires cloud access)"
     )
+    parser.addoption(
+        "--e2e",
+        action="store_true",
+        default=False,
+        help="Run E2E tests (requires deployed cloud endpoints)"
+    )
 
 
 def pytest_collection_modifyitems(config, items):
-    """統合テストマーカーを処理"""
-    if config.getoption("--integration"):
-        return
+    """統合テスト・E2Eテストマーカーを処理"""
+    run_integration = config.getoption("--integration")
+    run_e2e = config.getoption("--e2e")
 
     skip_integration = pytest.mark.skip(reason="need --integration option to run")
+    skip_e2e = pytest.mark.skip(reason="need --e2e option to run")
+
     for item in items:
-        if "integration" in item.keywords:
+        if "integration" in item.keywords and not run_integration:
             item.add_marker(skip_integration)
+        if "e2e" in item.keywords and not run_e2e:
+            item.add_marker(skip_e2e)

@@ -25,10 +25,10 @@ resource "azurerm_key_vault" "main" {
     default_action = "Allow"
   }
 
-  # Function AppのManaged Identityにシークレット読み取り権限付与
+  # Container AppのManaged Identityにシークレット読み取り権限付与
   access_policy {
     tenant_id = data.azurerm_client_config.current.tenant_id
-    object_id = azurerm_linux_function_app.main.identity[0].principal_id
+    object_id = azurerm_container_app.main.identity[0].principal_id
 
     secret_permissions = [
       "Get",
@@ -38,7 +38,7 @@ resource "azurerm_key_vault" "main" {
 
   tags = var.tags
 
-  depends_on = [azurerm_linux_function_app.main]
+  depends_on = [azurerm_container_app.main]
 }
 
 # ------------------------------------------------------------------------------

@@ -4,12 +4,12 @@ test_gcp_e2e.py - GCP全体フローのエンドツーエンドテスト
 ================================================================================
 
 【概要】
-VBA → Apigee → Cloud Functions → Vertex AI の完全フローをテストします。
+VBA → Apigee → Cloud Run → Vertex AI の完全フローをテストします。
 実際のGCP環境へのデプロイが必要です。
 
 【前提条件】
 1. GCP環境にリソースがデプロイ済み
-   - Cloud Functions
+   - Cloud Run (FastAPI/Docker)
    - Apigee API Gateway
    - Cloud Logging
    - Cloud Trace
@@ -34,33 +34,6 @@ import time
 import uuid
 import os
 from typing import Dict, Any
-
-
-# ================================================================================
-# Pytest設定
-# ================================================================================
-
-def pytest_addoption(parser):
-    parser.addoption(
-        "--e2e",
-        action="store_true",
-        default=False,
-        help="Run E2E tests (requires deployed GCP environment)"
-    )
-
-
-def pytest_configure(config):
-    config.addinivalue_line("markers", "e2e: mark test as end-to-end test")
-
-
-def pytest_collection_modifyitems(config, items):
-    if config.getoption("--e2e"):
-        return
-
-    skip_e2e = pytest.mark.skip(reason="need --e2e option to run")
-    for item in items:
-        if "e2e" in item.keywords:
-            item.add_marker(skip_e2e)
 
 
 # ================================================================================
@@ -114,7 +87,7 @@ def test_gcp_e2e_evaluate_with_correlation_id(
     test_item: Dict[str, Any]
 ):
     """
-    GCP E2E: VBA模擬 → Apigee → Cloud Functions → Vertex AI
+    GCP E2E: VBA模擬 → Apigee → Cloud Run → Vertex AI
     相関IDが全ログに記録されることを確認
     """
     # 1. VBA模擬リクエスト送信

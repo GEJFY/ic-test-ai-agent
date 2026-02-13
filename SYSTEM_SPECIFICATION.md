@@ -132,7 +132,7 @@
     │    クライアント     │ ──────▶ │     サーバー        │
     │  （あなたのPC）     │ ◀────── │  （クラウド上）     │
     └────────────────────┘         └────────────────────┘
-        Excel + VBA                Azure Functions
+        Excel + VBA                Container Apps
 
     ・クライアント: リクエストを送る側（ユーザーのPC）
     ・サーバー: リクエストを処理する側（クラウド上のAI）
@@ -153,14 +153,14 @@
     │  PowerShell (CallCloudApi.ps1)                                  │
     │    ├── EvidenceLinkフォルダからファイル収集                     │
     │    ├── ファイル → Base64変換                                    │
-    │    └── Azure Functions API呼び出し                              │
+    │    └── Azure Container Apps API呼び出し                              │
     └───────────────────────────┬─────────────────────────────────────┘
                                 │ HTTPS POST（暗号化通信）
                                 ▼
     ┌─────────────────────────────────────────────────────────────────┐
-    │               サーバー側（クラウド Functions）                   │
+    │               サーバー側（クラウド コンテナ）                     │
     ├─────────────────────────────────────────────────────────────────┤
-    │  function_app.py (エントリポイント)                             │
+    │  main.py (エントリポイント: platforms/local/main.py)            │
     │    ├── /api/evaluate - 評価エンドポイント                       │
     │    ├── /api/health - ヘルスチェック                             │
     │    └── /api/config - 設定状態確認                               │
@@ -197,7 +197,7 @@
     | -------------- | ---- | ---- |
     | Excel VBA | テストデータの入出力、ユーザーインターフェース | VBA マクロ |
     | PowerShell | ファイル収集、API通信 | PowerShell 5.1+ |
-    | Azure Functions | API エンドポイント、リクエスト処理 | Python 3.11 |
+    | Container Apps / App Runner / Cloud Run | API エンドポイント、リクエスト処理 | Python 3.11 (Docker) |
     | LLM Factory | AIモデルの切り替え管理 | LangChain |
     | Auditor Agent | 監査タスクのオーケストレーション | LangGraph |
     | Tasks (A1-A8) | 個別の監査評価ロジック | Python |
@@ -307,31 +307,20 @@
     │           ├── gcp_firestore.py     # GCP Firestore
     │           └── gcp_tasks.py         # GCP Cloud Tasks
     │
-    ├── platforms/               # プラットフォーム別エントリーポイント
+    ├── platforms/               # プラットフォーム別設定（共通Dockerイメージ使用）
     │   ├── README.md            # プラットフォーム選択ガイド
-    │   ├── azure/               # Azure Functions
-    │   │   ├── function_app.py      # エントリーポイント
-    │   │   ├── host.json            # Functions設定
-    │   │   ├── requirements.txt     # Azure用依存関係
+    │   ├── azure/               # Azure Container Apps デプロイ設定
     │   │   ├── deploy.ps1           # デプロイスクリプト
-    │   │   ├── local.settings.json  # ローカル開発設定（Git除外）
-    │   │   ├── .funcignore          # デプロイ除外設定
     │   │   └── README.md            # Azure固有の手順書
-    │   ├── gcp/                 # GCP Cloud Functions
-    │   │   ├── main.py              # エントリーポイント
-    │   │   ├── requirements.txt     # GCP用依存関係
+    │   ├── gcp/                 # GCP Cloud Run デプロイ設定
     │   │   ├── deploy.ps1           # デプロイスクリプト
-    │   │   ├── .gcloudignore        # デプロイ除外設定
     │   │   └── README.md            # GCP固有の手順書
-    │   ├── aws/                 # AWS Lambda
-    │   │   ├── lambda_handler.py    # エントリーポイント
-    │   │   ├── requirements.txt     # AWS用依存関係
+    │   ├── aws/                 # AWS App Runner デプロイ設定
     │   │   ├── deploy.ps1           # デプロイスクリプト
-    │   │   ├── .lambdaignore        # デプロイ除外設定
     │   │   └── README.md            # AWS固有の手順書
     │   └── local/               # ローカル/オンプレミス
-    │       ├── main.py              # エントリーポイント（FastAPI）
-    │       └── requirements.txt     # ローカル用依存関係
+    │       ├── main.py              # 共通エントリーポイント（FastAPI/Uvicorn）
+    │       └── requirements.txt     # 依存関係
     │
     ├── scripts/                 # ユーティリティスクリプト
     │   ├── setup-azure-ad-auth.ps1  # Azure AD認証設定
@@ -476,9 +465,9 @@
         },
         "api": {
             "provider": "AZURE",
-            "endpoint": "https://func-ic-test-evaluation.azurewebsites.net/api/evaluate",
-            "apiKey": "your-function-key",
-            "authHeader": "x-functions-key"
+            "endpoint": "https://ca-ic-test-evaluation.azurecontainerapps.io/api/evaluate",
+            "apiKey": "your-api-key",  # pragma: allowlist secret
+            "authHeader": "x-api-key"
         },
         "responseMapping": {
             "evaluationResult": "F",
@@ -505,7 +494,7 @@
 
     ---
 
-    ### 4.4 function_app.py（Azure Functions）
+    ### 4.4 main.py（共通エントリーポイント / FastAPI + Uvicorn）
 
     #### エンドポイント
 
@@ -577,8 +566,8 @@
     # アイテム単位のタイムアウト
     timeout_seconds = 90
 
-    # Functions全体のタイムアウト（host.json）
-    "functionTimeout": "00:10:00"  # 10分
+    # コンテナ全体のタイムアウト
+    # Uvicorn: --timeout-keep-alive 600  # 10分
     ```
 
     ---
@@ -742,7 +731,7 @@
 
     ### 6.1 同期モードと非同期モード
 
-    Azure Functions等のサーバーレス環境では、230秒のタイムアウト制限があります。
+    Azure Container Apps等のコンテナ環境では、デフォルトのタイムアウト制限があります。
     複数のテスト項目を評価する場合、この制限を超える可能性があるため、非同期モードを推奨します。
 
     ```text
@@ -908,7 +897,7 @@
     | ソフトウェア | バージョン | 用途 | インストール方法 |
     | ------------ | ---------- | ---- | ---------------- |
     | Python | 3.11以上 | サーバーサイド実行 | python.org からダウンロード |
-    | Azure Functions Core Tools | v4以上 | ローカル開発・デプロイ | npm または直接インストール |
+    | Docker | 最新版 | コンテナビルド・ローカル実行 | docker.com からダウンロード |
     | PowerShell | 5.1以上 | API呼び出しスクリプト | Windows標準搭載 |
     | Excel | 2016以上 | VBAマクロ実行 | Microsoft Office |
     | Git | 最新版 | ソースコード管理 | git-scm.com |
@@ -920,9 +909,9 @@
     python --version
     # 出力例: Python 3.11.5
 
-    # Azure Functions Core Toolsバージョン確認
-    func --version
-    # 出力例: 4.0.5455
+    # Dockerバージョン確認
+    docker --version
+    # 出力例: Docker version 24.0.7
 
     # PowerShellバージョン確認
     $PSVersionTable.PSVersion
@@ -1012,39 +1001,33 @@
     AZURE_DOC_INTELLIGENCE_KEY=your-key-here
     ```
 
-    #### ステップ5: Azure Functionsランタイム設定
+    #### ステップ5: ローカル実行の準備
 
     ```powershell
-    # platforms/azureディレクトリに移動
-    cd platforms\azure
+    # platforms/localディレクトリに移動
+    cd platforms\local
 
-    # local.settings.jsonを作成
-    @"
-    {
-        "IsEncrypted": false,
-        "Values": {
-            "AzureWebJobsStorage": "UseDevelopmentStorage=true",
-            "FUNCTIONS_WORKER_RUNTIME": "python"
-        }
-    }
-    "@ | Out-File -FilePath local.settings.json -Encoding utf8
+    # 依存パッケージをインストール（仮想環境内で）
+    pip install -r requirements.txt
     ```
 
     #### ステップ6: ローカルサーバーの起動
 
     ```powershell
-    # Azure Functionsをローカルで起動
-    func start
+    # FastAPI/Uvicornでローカルサーバーを起動
+    python platforms/local/main.py
 
     # 正常起動時の出力例:
-    # Azure Functions Core Tools
-    # Core Tools Version: 4.0.5455
-    # Function Runtime Version: 4.27.5.21554
+    # INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
     #
-    # Functions:
-    #   evaluate: [POST] http://localhost:7071/api/evaluate
-    #   health: [GET] http://localhost:7071/api/health
-    #   config: [GET] http://localhost:7071/api/config
+    # エンドポイント:
+    #   evaluate: [POST] http://localhost:8000/api/evaluate
+    #   health: [GET] http://localhost:8000/api/health
+    #   config: [GET] http://localhost:8000/api/config
+
+    # または Docker で起動:
+    # docker build -t ic-test-ai-agent .
+    # docker run -p 8000:8000 --env-file .env ic-test-ai-agent
     ```
 
     #### ステップ7: 動作確認
@@ -1053,10 +1036,10 @@
     # 別のPowerShellウィンドウを開いて実行
 
     # ヘルスチェック
-    Invoke-RestMethod -Uri "http://localhost:7071/api/health" -Method GET
+    Invoke-RestMethod -Uri "http://localhost:8000/api/health" -Method GET
 
     # 設定確認
-    Invoke-RestMethod -Uri "http://localhost:7071/api/config" -Method GET
+    Invoke-RestMethod -Uri "http://localhost:8000/api/config" -Method GET
     ```
 
     ### 7.3 Azureへのデプロイ（詳細手順）
@@ -1077,42 +1060,38 @@
         --location japaneast `
         --sku Standard_LRS
 
-    # Function Appを作成
-    az functionapp create `
-        --name func-ic-test-evaluation `
+    # Container Apps環境を作成
+    az containerapp env create `
+        --name cae-ic-test-evaluation `
         --resource-group rg-ic-test-evaluation `
-        --storage-account stictestevaluation `
-        --consumption-plan-location japaneast `
-        --runtime python `
-        --runtime-version 3.11 `
-        --functions-version 4
+        --location japaneast
     ```
 
     #### ステップ2: 環境変数の設定
 
     ```powershell
-    # 環境変数を設定
-    az functionapp config appsettings set `
-        --name func-ic-test-evaluation `
-        --resource-group rg-ic-test-evaluation `
-        --settings `
-            LLM_PROVIDER=AZURE_FOUNDRY `
-            AZURE_FOUNDRY_ENDPOINT=https://your-project.openai.azure.com/ `
-            AZURE_FOUNDRY_API_KEY=your-api-key `
-            AZURE_FOUNDRY_MODEL=gpt-5-nano
+    # 環境変数はContainer App作成時に設定（ステップ3参照）
     ```
 
     #### ステップ3: デプロイ
 
     ```powershell
-    # platforms/azureディレクトリから実行
-    cd platforms\azure
-
-    # デプロイ
-    func azure functionapp publish func-ic-test-evaluation
+    # Dockerイメージをビルド＆プッシュ後、Container Appを作成
+    az containerapp create `
+        --name ca-ic-test-evaluation `
+        --resource-group rg-ic-test-evaluation `
+        --environment cae-ic-test-evaluation `
+        --image your-registry.azurecr.io/ic-test-ai-agent:latest `
+        --target-port 8000 `
+        --ingress external `
+        --env-vars `
+            LLM_PROVIDER=AZURE_FOUNDRY `
+            AZURE_FOUNDRY_ENDPOINT=https://your-project.openai.azure.com/ `
+            AZURE_FOUNDRY_API_KEY=your-api-key `
+            AZURE_FOUNDRY_MODEL=gpt-5-nano
 
     # デプロイ確認
-    az functionapp show --name func-ic-test-evaluation --resource-group rg-ic-test-evaluation
+    az containerapp show --name ca-ic-test-evaluation --resource-group rg-ic-test-evaluation
     ```
 
     ---
@@ -1192,9 +1171,9 @@
         },
         "api": {
             "provider": "AZURE",
-            "endpoint": "https://func-ic-test-evaluation.azurewebsites.net/api/evaluate",
-            "apiKey": "your-function-key",
-            "authHeader": "x-functions-key"
+            "endpoint": "https://ca-ic-test-evaluation.azurecontainerapps.io/api/evaluate",
+            "apiKey": "your-api-key",  # pragma: allowlist secret
+            "authHeader": "x-api-key"
         },
         "responseMapping": {
             "evaluationResult": "F",
@@ -1244,10 +1223,9 @@
 
     【対策】
     1. setting.json の batchSize を減らす（10 → 5）
-    2. host.json の functionTimeout を延長:
-    {
-        "functionTimeout": "00:10:00"  // 10分に延長
-    }
+    2. コンテナのタイムアウト設定を延長:
+       Container Apps: az containerapp update --request-timeout 600
+       App Runner: HealthCheckConfiguration.Timeout を延長
     3. エビデンスファイルを軽量化（PDFの最適化等）
     ```
 
@@ -1262,7 +1240,7 @@
 
     【対策】
     1. setting.json の api.apiKey を確認
-    2. Azure Portalで Function App のキーを再取得
+    2. Azure Portalで Container App の設定を再確認
     3. .env の LLM関連キーを確認
     ```
 
@@ -1300,17 +1278,17 @@
     #### ローカル環境
 
     ```powershell
-    # func start のコンソール出力を確認
+    # Uvicornのコンソール出力を確認
     # または Application Insights をローカルに設定
     ```
 
     #### Azure環境
 
     ```powershell
-    # Azure Portal → Function App → ログストリーム
+    # Azure Portal → Container App → ログストリーム
 
     # または CLI で確認
-    az functionapp log tail --name func-ic-test-evaluation --resource-group rg-ic-test-evaluation
+    az containerapp logs show --name ca-ic-test-evaluation --resource-group rg-ic-test-evaluation
     ```
 
     ---
@@ -1334,11 +1312,11 @@
     # シークレットの追加
     az keyvault secret set --vault-name kv-ic-test-eval --name "LLM-API-KEY" --value "your-key"
 
-    # Function AppにKey Vault参照を設定
-    az functionapp config appsettings set `
-        --name func-ic-test-evaluation `
+    # Container AppにKey Vault参照を設定
+    az containerapp secret set `
+        --name ca-ic-test-evaluation `
         --resource-group rg-ic-test-evaluation `
-        --settings "AZURE_FOUNDRY_API_KEY=@Microsoft.KeyVault(SecretUri=https://kv-ic-test-eval.vault.azure.net/secrets/LLM-API-KEY/)"
+        --secrets "llm-api-key=keyvaultref:https://kv-ic-test-eval.vault.azure.net/secrets/LLM-API-KEY,identityref:system"
     ```
 
     ### 10.2 データ保護
@@ -1356,17 +1334,17 @@
     ### 10.4 Azure AD認証によるアクセス制御（推奨・本番環境必須）
 
     本システムでは、**Azure AD認証のみ**によるセキュアなアクセス制御を推奨しています。
-    Functions Keyは使用せず、Azure ADで認証・認可を一元管理します。
+    APIキーは使用せず、Azure ADで認証・認可を一元管理します。
 
     #### 10.4.1 認証方式の比較
 
     | 認証方式 | セキュリティ | 管理性 | 推奨環境 |
     | -------- | ----------- | ------ | -------- |
-    | Functions Key のみ | 低 | 簡単 | ローカル開発のみ |
+    | APIキー のみ | 低 | 簡単 | ローカル開発のみ |
     | **Azure AD のみ** | **高** | **中程度** | **本番環境（推奨）** |
-    | Azure AD + Functions Key | 中 | 複雑 | 非推奨（Key流出リスク） |
+    | Azure AD + APIキー | 中 | 複雑 | 非推奨（Key流出リスク） |
 
-    > **重要**: Functions Keyは設定ファイルに記載するため、流出リスクがあります。
+    > **重要**: APIキーは設定ファイルに記載するため、流出リスクがあります。
     > 本番環境では必ずAzure AD認証を使用してください。
 
     #### 10.4.2 Azure AD認証の仕組み
@@ -1409,7 +1387,7 @@
     │  ⑤ API呼び出し（Authorization: Bearer {token}）                 │
     │      │                                                          │
     │      ▼                                                          │
-    │  Azure Functions（AuthLevel.ANONYMOUS）                         │
+    │  Azure Container Apps（Azure AD認証で保護）                           │
     │      │                                                          │
     │      ├── ⑥ Azure ADプラットフォーム認証でトークン検証           │
     │      │                                                          │
@@ -1498,7 +1476,7 @@
     ```text
     Azure Portal → Microsoft Entra ID → アプリの登録 → 新規登録
 
-    名前: func-ic-test-evaluation-auth（任意）
+    名前: ca-ic-test-evaluation-auth（任意）
     サポートされているアカウントの種類: この組織ディレクトリのみ
     リダイレクトURI: （空欄のまま）
     ```
@@ -1564,10 +1542,10 @@
        → IC-Test-Users グループを選択
     ```
 
-    **ステップ6: Function Appの認証設定**
+    **ステップ6: Container Appの認証設定**
 
     ```text
-    Azure Portal → Function App → 認証 → IDプロバイダーの追加
+    Azure Portal → Container App → 認証 → IDプロバイダーの追加
 
     IDプロバイダー: Microsoft
     アプリの登録の種類: 既存のアプリの登録の詳細を指定する
@@ -1581,15 +1559,10 @@
     トークンストア: 有効
     ```
 
-    **ステップ7: Function Appコードの設定**
+    **ステップ7: Container Appの認証設定**
 
-    `platforms/azure/function_app.py` で `AuthLevel.ANONYMOUS` を設定：
-
-    ```python
-    # Azure ADによるプラットフォームレベル認証を使用
-    # Functions Keyは不要（AuthLevel.ANONYMOUS）
-    app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
-    ```
+    Azure Container Appsでは、Azure ADプラットフォーム認証を使用します。
+    アプリケーションコード側での認証設定は不要です（`platforms/local/main.py` をそのまま使用）。
 
     #### 10.4.5 Azureセットアップ手順（自動スクリプト）
 
@@ -1598,7 +1571,7 @@
     **前提条件**
 
     - Azure CLI (`az`) がインストール済み
-    - Function App が既にデプロイ済み
+    - Container App が既にデプロイ済み
     - 適切な権限（Application Administrator または Global Administrator）
 
     **実行方法**
@@ -1609,7 +1582,7 @@
 
     # スクリプトを実行
     .\scripts\setup-azure-ad-auth.ps1 `
-        -FunctionAppName "func-ic-test-evaluation" `
+        -ContainerAppName "ca-ic-test-evaluation" `
         -ResourceGroup "rg-ic-test" `
         -GroupName "IC-Test-Users"
     ```
@@ -1617,7 +1590,7 @@
     **スクリプトが行う処理**
 
     1. Azure CLIログイン確認
-    2. Function App存在確認
+    2. Container App存在確認
     3. App Registration作成（または既存を使用）
     4. API識別子URIとスコープ設定
     5. **リダイレクトURI設定（localhost:8400-8409）**
@@ -1627,7 +1600,7 @@
     9. Azure ADグループ作成（または既存を使用）
     10. 現在のユーザーをグループに追加
     11. グループをアプリに割り当て
-    12. Function App認証設定
+    12. Container App認証設定
     13. 設定情報の出力
 
     **出力例**
@@ -1643,7 +1616,7 @@
         "api": {
             "provider": "AZURE",
             "authType": "azureAd",
-            "endpoint": "https://func-ic-test-evaluation.azurewebsites.net/api/evaluate"
+            "endpoint": "https://ca-ic-test-evaluation.azurecontainerapps.io/api/evaluate"
         },
         "azureAd": {
             "tenantId": "1f6ccb61-70c2-46fa-bab8-55e19b2fcc9b",
@@ -1662,7 +1635,7 @@
         "pollingIntervalSec": 5,
         "api": {
             "provider": "AZURE",
-            "endpoint": "https://func-ic-test-evaluation.azurewebsites.net/api/evaluate",
+            "endpoint": "https://ca-ic-test-evaluation.azurecontainerapps.io/api/evaluate",
             "authType": "azureAd"
         },
         "azureAd": {
@@ -1766,7 +1739,7 @@
     .\scripts\test-azure-ad-auth.ps1 `
         -TenantId "1f6ccb61-70c2-46fa-bab8-55e19b2fcc9b" `
         -ClientId "262cd06b-dcd2-4237-9eb3-4c0536a665b1" `
-        -FunctionUrl "https://func-ic-test-evaluation.azurewebsites.net/api/health" `
+        -FunctionUrl "https://ca-ic-test-evaluation.azurecontainerapps.io/api/health" `
         -Scope "api://262cd06b-dcd2-4237-9eb3-4c0536a665b1/user_impersonation openid offline_access"
     ```
 
@@ -1791,7 +1764,7 @@
     | ------ | ---- | ---- |
     | AADSTS7000218 | Public Client Flow未有効 | App Registration → 認証 → パブリッククライアントフロー: はい |
     | AADSTS90009 | スコープ形式エラー | `api://{clientId}/user_impersonation` 形式を使用 |
-    | 401 Unauthorized | トークン対象不一致 | Function App認証の許可されるトークン対象ユーザーに `api://{clientId}` と `{clientId}` の両方を追加 |
+    | 401 Unauthorized | トークン対象不一致 | Container App認証の許可されるトークン対象ユーザーに `api://{clientId}` と `{clientId}` の両方を追加 |
     | 403 Forbidden | グループ未割り当て | Enterprise App → ユーザーとグループ でグループを割り当て |
 
     #### 10.4.10 セキュリティのベストプラクティス
@@ -1800,10 +1773,10 @@
     【推奨構成】
 
     ┌────────────────────────────────────────────────────────────┐
-    │  Azure Functions                                           │
+    │  Azure Container Apps                                          │
     │                                                            │
-    │  function_app.py:                                          │
-    │    AuthLevel.ANONYMOUS  ← Functions Keyを使用しない        │
+    │  共通エントリーポイント:                                    │
+    │    platforms/local/main.py (FastAPI/Uvicorn)               │
     │                                                            │
     │  認証設定:                                                  │
     │    ・Azure ADプラットフォーム認証: 有効                    │
@@ -1819,7 +1792,7 @@
     【セキュリティメリット】
 
     1. 認証情報の流出リスク低減
-       - Functions Keyを設定ファイルに記載不要
+       - APIキーを設定ファイルに記載不要
        - トークンは一時的（1時間）で自動失効
 
     2. アクセス制御の一元管理
@@ -1927,9 +1900,9 @@
     ├── test_job_storage_aws_gcp.py # ジョブストレージ（AWS/GCP）
     │
     │  # --- プラットフォーム UT ---
-    ├── test_platform_azure.py      # Azure Functions エントリポイント
-    ├── test_platform_aws.py        # AWS Lambda エントリポイント
-    ├── test_platform_gcp.py        # GCP Cloud Functions エントリポイント
+    ├── test_platform_azure.py      # Azure Container Apps デプロイ設定
+    ├── test_platform_aws.py        # AWS App Runner デプロイ設定
+    ├── test_platform_gcp.py        # GCP Cloud Run デプロイ設定
     ├── test_local_platform.py      # ローカルサーバー
     │
     │  # --- E2E / 統合テスト ---
@@ -1956,9 +1929,9 @@
     | `infrastructure/llm_factory.py` | test_llm_factory.py | LLMProvider, LLMFactory |
     | `infrastructure/ocr_factory.py` | test_ocr_factory.py | OCRProvider, OCRFactory |
     | `infrastructure/job_storage/` | test_job_storage.py, test_job_storage_aws_gcp.py | Memory/Azure/AWS/GCPストレージ・キュー |
-    | `platforms/azure/` | test_platform_azure.py | Azure Functions エントリポイント |
-    | `platforms/aws/` | test_platform_aws.py | Lambda ヘルパー・ルーティング・エンドポイント |
-    | `platforms/gcp/` | test_platform_gcp.py | Cloud Functions エントリポイント |
+    | `platforms/azure/` | test_platform_azure.py | Azure Container Apps デプロイ設定 |
+    | `platforms/aws/` | test_platform_aws.py | AWS App Runner デプロイ設定 |
+    | `platforms/gcp/` | test_platform_gcp.py | GCP Cloud Run デプロイ設定 |
 
     ### 11.4 テストマーカー
 
@@ -2051,12 +2024,12 @@
     .\scripts\test-azure-ad-auth.ps1 `
         -TenantId "your-tenant-id" `
         -ClientId "your-client-id" `
-        -FunctionUrl "https://your-function.azurewebsites.net/api/health"
+        -AppUrl "https://your-app.azurecontainerapps.io/api/health"
     ```
 
     **テスト内容**:
     - Azure ADトークン取得
-    - Function AppへのAPI呼び出し
+    - Container AppへのAPI呼び出し
     - 認証エラーの診断
 
     ### 11.8 VBA/Excelテスト
@@ -2173,8 +2146,8 @@
     │  │      Azure       │  │       GCP        │  │       AWS        │      │
     │  ├──────────────────┤  ├──────────────────┤  ├──────────────────┤      │
     │  │ 【計算リソース】   │  │ 【計算リソース】   │  │ 【計算リソース】   │      │
-    │  │  Azure Functions │  │  Cloud Functions │  │   AWS Lambda    │      │
-    │  │                  │  │                  │  │  + API Gateway  │      │
+    │  │  Container Apps  │  │   Cloud Run     │  │   App Runner    │      │
+    │  │  (Docker共通)    │  │  (Docker共通)    │  │  (Docker共通)    │      │
     │  ├──────────────────┤  ├──────────────────┤  ├──────────────────┤      │
     │  │ 【AIサービス】    │  │ 【AIサービス】    │  │ 【AIサービス】    │      │
     │  │  Azure AI Foundry│  │   Vertex AI      │  │  Amazon Bedrock │      │
@@ -2243,16 +2216,16 @@
     AZURE_FOUNDRY_API_VERSION=2025-01-01-preview
     ```
 
-    #### 12.2.2 Azure Functions
+    #### 12.2.2 Azure Container Apps
 
-    **Azure Functionsとは？**
+    **Azure Container Appsとは？**
 
-    Azure Functionsは、サーバーレスコンピューティングサービスです。
-    「サーバーレス」とは、サーバーの管理が不要という意味で、
-    コードを書くだけで自動的にスケールする環境を提供します。
+    Azure Container Appsは、コンテナベースのアプリケーションホスティングサービスです。
+    Dockerコンテナをデプロイするだけで、自動スケーリングや負荷分散を提供します。
+    サーバーの管理は不要で、コンテナイメージを用意するだけで運用できます。
 
     ```text
-    【従来のサーバー vs サーバーレス】
+    【従来のサーバー vs コンテナサービス】
 
     従来のサーバー:
     ┌─────────────────────────────────────────────────────────────────┐
@@ -2263,14 +2236,14 @@
     │  + コード開発                                                   │
     └─────────────────────────────────────────────────────────────────┘
 
-    サーバーレス (Azure Functions):
+    コンテナサービス (Azure Container Apps):
     ┌─────────────────────────────────────────────────────────────────┐
     │  Azureが管理（あなたは気にしなくてOK）                            │
     │  ┌─────────────────────────────────────────────────────────┐   │
     │  │  OS更新 │ セキュリティパッチ │ スケーリング │ 監視 │ 冗長化 │   │
     │  └─────────────────────────────────────────────────────────┘   │
     ├─────────────────────────────────────────────────────────────────┤
-    │  あなたの責任範囲: コード開発のみ！                              │
+    │  あなたの責任範囲: Dockerイメージのビルドのみ！                   │
     └─────────────────────────────────────────────────────────────────┘
     ```
 
@@ -2278,10 +2251,10 @@
 
     | リソース名 | 説明 | 設定値 |
     |-----------|------|--------|
-    | Function App | アプリケーションホスト | `func-ic-test-evaluation` |
-    | ランタイム | 実行環境 | Python 3.11 |
+    | Container App | アプリケーションホスト | `ca-ic-test-evaluation` |
+    | コンテナイメージ | FastAPI/Uvicorn (platforms/local/main.py) | Docker |
     | プラン | 課金モデル | 従量課金（Consumption） |
-    | タイムアウト | 最大実行時間 | 10分 |
+    | ポート | リッスンポート | 8000 |
 
     **エンドポイント一覧**
 
@@ -2369,7 +2342,7 @@
     2. ジョブIDをQueueに追加 ──▶ [job-001] [job-002] [job-003] ...
     3. 即座にジョブIDを返却      │
                                 ▼ キュートリガーが自動起動
-    4. Azure Functionsワーカーがメッセージを取得
+    4. Container Appsワーカーがメッセージを取得
     5. ジョブを処理
     6. 結果をTable Storageに保存
     ```
@@ -2407,7 +2380,7 @@
     │                                                                 │
     │  【特徴】                                                       │
     │  - IAMによる認証（AWSの標準認証）                               │
-    │  - Lambda等AWSサービスとのシームレスな連携                       │
+    │  - App Runner等AWSサービスとのシームレスな連携                    │
     │  - Inference Profile（推論プロファイル）によるリージョン最適化   │
     │                                                                 │
     └─────────────────────────────────────────────────────────────────┘
@@ -2447,32 +2420,24 @@
     AWS_BEDROCK_MODEL_ID=jp.anthropic.claude-sonnet-4-5-20250929-v1:0
     ```
 
-    #### 12.3.2 AWS Lambda
+    #### 12.3.2 AWS App Runner
 
-    **AWS Lambdaとは？**
+    **AWS App Runnerとは？**
 
-    AWS Lambdaは、AWSのサーバーレスコンピューティングサービスです。
-    Azure Functionsと同様、コードを書くだけで自動スケールする環境を提供します。
-
-    **API Gateway連携**
-
-    LambdaはHTTPリクエストを直接受け取れないため、
-    API Gatewayと組み合わせて使用します。
+    AWS App Runnerは、AWSのコンテナベースアプリケーションホスティングサービスです。
+    Azure Container Appsと同様、Dockerコンテナをデプロイするだけで自動スケールする環境を提供します。
+    API Gatewayは不要で、App Runnerが直接HTTPリクエストを受け付けます。
 
     ```text
-    【AWS Lambda + API Gateway 構成】
+    【AWS App Runner 構成】
 
     クライアント
         │
         ▼ HTTPS
     ┌──────────────────┐
-    │   API Gateway    │ ← HTTPリクエストを受信、認証、ルーティング
-    └────────┬─────────┘
-             │
-             ▼
-    ┌──────────────────┐
-    │   AWS Lambda     │ ← 実際の処理を実行
-    │ lambda_handler.py│
+    │  AWS App Runner  │ ← Dockerコンテナで直接HTTPリクエストを処理
+    │  (FastAPI/       │
+    │   Uvicorn)       │
     └──────────────────┘
     ```
 
@@ -2480,10 +2445,10 @@
 
     | 設定項目 | 値 | 説明 |
     |---------|-----|------|
-    | ランタイム | Python 3.11 | 実行環境 |
+    | コンテナイメージ | Docker (FastAPI/Uvicorn) | 共通イメージ |
     | メモリ | 1024 MB | 割り当てメモリ |
-    | タイムアウト | 300秒 | 最大実行時間 |
-    | ハンドラー | `lambda_handler.handler` | エントリポイント |
+    | ポート | 8000 | リッスンポート |
+    | エントリーポイント | `platforms/local/main.py` | FastAPI起動 |
 
     #### 12.3.3 AWS DynamoDB
 
@@ -2599,21 +2564,22 @@
     GCP_MODEL_NAME=gemini-3-pro-preview
     ```
 
-    #### 12.4.2 GCP Cloud Functions
+    #### 12.4.2 GCP Cloud Run
 
-    **Cloud Functionsとは？**
+    **Cloud Runとは？**
 
-    Cloud Functionsは、GCPのサーバーレスコンピューティングサービスです。
-    Azure Functions、AWS Lambdaと同様の役割を果たします。
+    Cloud Runは、GCPのコンテナベースアプリケーションホスティングサービスです。
+    Azure Container Apps、AWS App Runnerと同様の役割を果たします。
+    Dockerコンテナをデプロイするだけで、自動スケーリングとHTTPSエンドポイントを提供します。
 
     **本システムでの使用**
 
     | 設定項目 | 値 | 説明 |
     |---------|-----|------|
-    | ランタイム | Python 3.11 | 実行環境 |
+    | コンテナイメージ | Docker (FastAPI/Uvicorn) | 共通イメージ |
     | メモリ | 1024 MB | 割り当てメモリ |
     | タイムアウト | 540秒 | 最大実行時間 |
-    | フレームワーク | functions-framework | HTTPトリガー |
+    | ポート | 8000 | リッスンポート |
 
     #### 12.4.3 GCP Firestore
 
@@ -2654,15 +2620,15 @@
 
     ### 12.5 プロバイダー比較表
 
-    #### 12.5.1 サーバーレスコンピューティング
+    #### 12.5.1 コンテナコンピューティング
 
-    | 機能 | Azure Functions | AWS Lambda | GCP Cloud Functions |
+    | 機能 | Azure Container Apps | AWS App Runner | GCP Cloud Run |
     |------|-----------------|------------|---------------------|
-    | 最大タイムアウト | 10分（Premium: 無制限） | 15分 | 9分（Gen2: 60分） |
-    | メモリ範囲 | 128MB - 14GB | 128MB - 10GB | 128MB - 32GB |
-    | 課金単位 | 100ms | 1ms | 100ms |
-    | コールドスタート | 約1-3秒 | 約0.5-2秒 | 約0.5-2秒 |
-    | ローカル開発ツール | Azure Functions Core Tools | SAM / localstack | functions-framework |
+    | 最大タイムアウト | 無制限（Consumption: 30分） | 120秒（ALB: 無制限） | 60分 |
+    | メモリ範囲 | 0.5GB - 4GB | 0.5GB - 12GB | 128MB - 32GB |
+    | 課金単位 | 秒単位 | 秒単位 | 100ms |
+    | コールドスタート | 約2-5秒 | 約2-5秒 | 約0.5-2秒 |
+    | ローカル開発ツール | Docker + Uvicorn | Docker + Uvicorn | Docker + Uvicorn |
 
     #### 12.5.2 NoSQLデータベース
 
@@ -2680,7 +2646,7 @@
     |------|---------------------|------------|-----------------|
     | 最大メッセージサイズ | 64KB | 256KB | 100KB |
     | 保持期間 | 7日 | 14日 | 31日 |
-    | ファンクショントリガー | ネイティブ対応 | Lambda統合 | HTTP呼び出し |
+    | トリガー連携 | ネイティブ対応 | SNS/EventBridge連携 | HTTP呼び出し |
     | FIFO対応 | なし | オプション | なし |
 
     #### 12.5.4 AIモデルサービス
@@ -2702,7 +2668,7 @@
     | Azure Document Intelligence | 高精度OCR、レイアウト解析対応 | ◎ | ○ | ○ | `AZURE` |
     | AWS Textract | 表抽出・フォーム解析に強い | × | × | × | `AWS` |
     | GCP Document AI | 多言語対応、カスタムモデル可 | ○ | △ | ○ | `GCP` |
-    | Tesseract | OSS、Docker/Lambda実行可 | ○ | ◎ | ◎ | `TESSERACT` |
+    | Tesseract | OSS、Dockerコンテナ実行可 | ○ | ◎ | ◎ | `TESSERACT` |
     | YomiToku-Pro | 日本語特化、AWS Marketplace | ◎ | × | × | `YOMITOKU` |
 
     **凡例**: ◎ 高精度対応 / ○ 対応 / △ 限定対応 / × 非対応
@@ -2731,7 +2697,7 @@
 
     **Tesseract（Docker版）について**:
     ```text
-    AWS Lambda上でTesseractを使用する場合、Dockerコンテナでデプロイします。
+    コンテナ環境上でTesseractを使用する場合、Dockerイメージに含めてデプロイします。
     ルートの Dockerfile に設定例があります。
 
     【対応言語】
@@ -2781,24 +2747,24 @@
         --resource-group rg-ic-test-evaluation
     ```
 
-    **ステップ3: Function Appの作成**
+    **ステップ3: Container Appの作成**
 
     ```powershell
-    # Function App作成
-    az functionapp create `
-        --name func-ic-test-evaluation `
+    # Container Apps環境の作成
+    az containerapp env create `
+        --name cae-ic-test-evaluation `
         --resource-group rg-ic-test-evaluation `
-        --storage-account stictestevaluation `
-        --consumption-plan-location japaneast `
-        --runtime python `
-        --runtime-version 3.11 `
-        --functions-version 4
+        --location japaneast
 
-    # 環境変数設定
-    az functionapp config appsettings set `
-        --name func-ic-test-evaluation `
+    # Container App作成（Dockerイメージをプッシュ後）
+    az containerapp create `
+        --name ca-ic-test-evaluation `
         --resource-group rg-ic-test-evaluation `
-        --settings `
+        --environment cae-ic-test-evaluation `
+        --image your-registry.azurecr.io/ic-test-ai-agent:latest `
+        --target-port 8000 `
+        --ingress external `
+        --env-vars `
             LLM_PROVIDER=AZURE_FOUNDRY `
             AZURE_FOUNDRY_ENDPOINT=https://your-project.openai.azure.com/ `
             AZURE_FOUNDRY_API_KEY=your-api-key `
@@ -2811,7 +2777,7 @@
     2. 新しいプロジェクトを作成
     3. Model Catalogからモデルをデプロイ（gpt-5-nano推奨）
     4. エンドポイントとAPIキーを取得
-    5. .envまたはFunction App設定に反映
+    5. .envまたはContainer App設定に反映
 
     #### 12.6.2 AWS セットアップ
 
@@ -2822,44 +2788,27 @@
     3. 「Model access」でClaudeモデルへのアクセスをリクエスト
     4. 承認を待つ（通常は数分〜数時間）
 
-    **ステップ2: Lambda関数の作成**
+    **ステップ2: DockerイメージのビルドとECRへのプッシュ**
 
     ```powershell
-    # 依存パッケージをインストール
-    cd platforms/aws
-    mkdir package
-    pip install -r requirements.txt -t package/
+    # ECRリポジトリの作成
+    aws ecr create-repository --repository-name ic-test-ai-agent
 
-    # ソースコードをコピー
-    Copy-Item -Recurse ..\..\src\* package\
-    Copy-Item lambda_handler.py package\
+    # Dockerイメージのビルド
+    docker build -t ic-test-ai-agent .
 
-    # ZIPファイル作成
-    Compress-Archive -Path package\* -DestinationPath deployment.zip
-
-    # Lambda関数作成（AWS CLI）
-    aws lambda create-function `
-        --function-name ic-test-evaluate `
-        --runtime python3.11 `
-        --handler lambda_handler.handler `
-        --zip-file fileb://deployment.zip `
-        --role arn:aws:iam::123456789:role/lambda-bedrock-role `
-        --timeout 300 `
-        --memory-size 1024 `
-        --environment Variables='{
-            "LLM_PROVIDER":"AWS",
-            "AWS_REGION":"ap-northeast-1",
-            "AWS_BEDROCK_MODEL_ID":"jp.anthropic.claude-sonnet-4-5-20250929-v1:0"
-        }'
+    # ECRにログイン＆プッシュ
+    aws ecr get-login-password --region ap-northeast-1 | docker login --username AWS --password-stdin 123456789.dkr.ecr.ap-northeast-1.amazonaws.com
+    docker tag ic-test-ai-agent:latest 123456789.dkr.ecr.ap-northeast-1.amazonaws.com/ic-test-ai-agent:latest
+    docker push 123456789.dkr.ecr.ap-northeast-1.amazonaws.com/ic-test-ai-agent:latest
     ```
 
-    **ステップ3: API Gatewayの設定**
+    **ステップ3: App Runnerサービスの作成**
 
-    1. AWS ConsoleでAPI Gatewayを開く
-    2. HTTP APIを作成
-    3. Lambda統合を追加
-    4. ルートを設定（/evaluate, /health等）
-    5. ステージをデプロイしてエンドポイントURLを取得
+    1. AWS ConsoleでApp Runnerを開く
+    2. ソースにECRイメージを指定
+    3. ポート8000、環境変数を設定（LLM_PROVIDER, AWS_REGION, AWS_BEDROCK_MODEL_ID等）
+    4. サービスを作成してエンドポイントURLを取得
 
     #### 12.6.3 GCP セットアップ
 
@@ -2899,22 +2848,18 @@
         --iam-account=ic-test-sa@ic-test-ai-agent.iam.gserviceaccount.com
     ```
 
-    **ステップ3: Cloud Functionsのデプロイ**
+    **ステップ3: Cloud Runへのデプロイ**
 
     ```bash
-    cd platforms/gcp
-
-    # src/をコピー
-    cp -r ../../src .
-
-    # デプロイ
-    gcloud functions deploy evaluate `
-        --runtime python311 `
-        --trigger-http `
+    # プロジェクトルートからDockerイメージをビルド＆デプロイ
+    # Cloud Run は Dockerfile から直接ビルド可能
+    gcloud run deploy ic-test-evaluate `
+        --source . `
+        --region us-central1 `
+        --port 8000 `
         --allow-unauthenticated `
-        --entry-point evaluate `
+        --memory 1024Mi `
         --timeout 540 `
-        --memory 1024MB `
         --set-env-vars "LLM_PROVIDER=GCP,GCP_PROJECT_ID=ic-test-ai-agent,GCP_LOCATION=global,GCP_MODEL_NAME=gemini-3-pro-preview"
     ```
 
@@ -2937,7 +2882,7 @@
     │                                                                 │
     │  【API層】                                                      │
     │  ┌──────────────────────────────────────────────────────┐      │
-    │  │  Azure Functions / GCP Cloud Functions / AWS Lambda  │      │
+    │  │  Container Apps / Cloud Run / App Runner (共通Docker)    │      │
     │  │  ┌────────────────────────────────────────────────┐  │      │
     │  │  │  Python 3.11 + async/await                     │  │      │
     │  │  └────────────────────────────────────────────────┘  │      │
@@ -3046,24 +2991,24 @@
     | API | エーピーアイ | Application Programming Interface。システム間の通信規約 |
     | API Gateway | エーピーアイ ゲートウェイ | APIリクエストのルーティング・認証を行うサービス |
     | Azure AI Foundry | アジュール エーアイ ファウンドリー | Microsoft統合AIプラットフォーム。複数モデルを統一APIで利用可能 |
-    | Azure Functions | アジュール ファンクションズ | Microsoftのサーバーレスコンピューティングサービス |
+    | Azure Container Apps | アジュール コンテナ アップス | Microsoftのコンテナベースアプリケーションホスティングサービス |
     | Base64 | ベースろくじゅうよん | バイナリデータをテキストに変換するエンコード方式 |
     | Blob Storage | ブロブ ストレージ | ファイルを保存するためのクラウドストレージ |
     | Claude | クロード | Anthropic社が開発したAIモデル。Opus、Sonnet、Haiku等 |
-    | Cloud Functions | クラウド ファンクションズ | GCPのサーバーレスコンピューティングサービス |
+    | Cloud Run | クラウド ラン | GCPのコンテナベースアプリケーションホスティングサービス |
     | Cloud Tasks | クラウド タスクス | GCPの非同期タスク実行サービス |
     | DynamoDB | ダイナモディービー | AWSのNoSQLデータベース |
     | Endpoint | エンドポイント | APIの接続先URL |
     | Factory Pattern | ファクトリーパターン | オブジェクト生成を専用クラスに委譲するデザインパターン |
     | Firestore | ファイアストア | GCPのNoSQLデータベース。リアルタイム同期対応 |
-    | Functions Core Tools | ファンクションズ コアツールズ | Azure Functionsのローカル開発ツール |
+    | Docker | ドッカー | コンテナ仮想化プラットフォーム。全プラットフォーム共通のビルド・デプロイに使用 |
     | Gemini | ジェミニ | Google社が開発したAIモデル。3.x、2.5シリーズ等 |
     | GPT | ジーピーティー | OpenAI社が開発したAIモデル。GPT-5シリーズ等 |
     | IAM | アイアム | Identity and Access Management。AWSの認証・認可サービス |
     | Inference Profile | インファレンス プロファイル | AWS Bedrockの推論設定。リージョン最適化に使用 |
     | JSON | ジェイソン | JavaScript Object Notation。データ交換形式 |
     | Key Vault | キーボルト | Azureのシークレット管理サービス |
-    | Lambda | ラムダ | AWSのサーバーレスコンピューティングサービス |
+    | App Runner | アップ ランナー | AWSのコンテナベースアプリケーションホスティングサービス |
     | LangChain | ラングチェーン | LLMアプリケーション開発フレームワーク |
     | LangGraph | ラングラフ | AIワークフロー定義ライブラリ |
     | LLM | エルエルエム | Large Language Model。大規模言語モデル |
@@ -3072,7 +3017,7 @@
     | Orchestrator | オーケストレーター | 複数の処理を統括・調整するコンポーネント |
     | PowerShell | パワーシェル | Windowsのスクリプト実行環境 |
     | Queue Storage | キュー ストレージ | メッセージキューサービス。非同期処理に使用 |
-    | Serverless | サーバーレス | サーバー管理不要のクラウドサービス形態 |
+    | Container Apps | コンテナ アップス | コンテナベースのマネージドアプリケーションホスティングサービス |
     | SoD | エスオーディー | Segregation of Duties。職務分掌 |
     | SQS | エスキューエス | Amazon Simple Queue Service。AWSのメッセージキュー |
     | Table Storage | テーブル ストレージ | AzureのNoSQLデータベース |
@@ -3089,5 +3034,5 @@
     | 2026-02-08 | 1.2.0 | クラウドリソース詳細ドキュメント追加（セクション12）、マルチクラウドアーキテクチャ図解、各プロバイダー（Azure/AWS/GCP）のリソース詳細解説、最新モデル情報更新（Gemini 3 global設定、AWS Inference Profile ID、GPT-5 Nano等）、初心者向け学習コンテンツ追加 |
     | 2026-01-30 | 1.1.2 | pytestベースのユニットテスト・統合テストスイート追加（156件）、Azure Blob/Queue統合テスト追加、テストドキュメント整備 |
     | 2026-01-30 | 1.1.1 | Azure Table Storage 64KB制限対策を強化（全証跡ファイルをBlob Storageに保存） |
-    | 2026-01-30 | 1.1.0 | Azure AD認証のみ方式に変更（Functions Key廃止）、トークンキャッシュ機能追加、セットアップスクリプト整備 |
+    | 2026-01-30 | 1.1.0 | Azure AD認証のみ方式に変更（APIキー廃止）、トークンキャッシュ機能追加、セットアップスクリプト整備 |
     | 2026-01-29 | 1.0.0 | 初版リリース |

@@ -18,9 +18,9 @@
 
 ### クラウドプラットフォーム別
 
-- [AZURE_SETUP.md](AZURE_SETUP.md) - Azure環境セットアップ（Functions、AI Foundry、APIM、Key Vault等）
-- [AWS_SETUP.md](AWS_SETUP.md) - AWS環境セットアップ（Lambda、Bedrock、API Gateway、Secrets Manager等）
-- [GCP_SETUP.md](GCP_SETUP.md) - GCP環境セットアップ（Cloud Functions、Vertex AI、Apigee、Secret Manager等）
+- [AZURE_SETUP.md](AZURE_SETUP.md) - Azure環境セットアップ（Container Apps、AI Foundry、APIM、Key Vault等）
+- [AWS_SETUP.md](AWS_SETUP.md) - AWS環境セットアップ（App Runner、Bedrock、API Gateway、Secrets Manager等）
+- [GCP_SETUP.md](GCP_SETUP.md) - GCP環境セットアップ（Cloud Run、Vertex AI、Apigee、Secret Manager等）
 
 ### クライアント・CI/CD
 
