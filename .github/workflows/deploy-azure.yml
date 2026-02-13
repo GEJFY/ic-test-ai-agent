@@ -63,15 +63,22 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Deploy Functions
+      # デプロイパッケージ作成: platforms/azure/ + 共有src/
+      - name: Prepare deployment package
         run: |
-          cd platforms/azure
+          mkdir -p deploy-package
+          cp platforms/azure/function_app.py deploy-package/
+          cp platforms/azure/host.json deploy-package/
+          cp platforms/azure/requirements.txt deploy-package/
+          cp platforms/azure/.funcignore deploy-package/ 2>/dev/null || true
+          cp -r src deploy-package/src
+          cd deploy-package
           pip install -r requirements.txt -t .python_packages/lib/site-packages
 
       - uses: Azure/functions-action@v1
         with:
           app-name: ${{ secrets.AZURE_FUNCTION_APP_NAME }}
-          package: ./platforms/azure
+          package: ./deploy-package
 
   validate:
     runs-on: ubuntu-latest
