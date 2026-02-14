@@ -1,7 +1,7 @@
 # システムアーキテクチャ設計書
 
 **文書名**: 内部統制テスト評価AIシステム アーキテクチャ設計書
-**バージョン**: 3.1.0-multiplatform
+**バージョン**: 3.2.0-multiplatform
 **最終更新日**: 2026-02-14
 **対象読者**: 開発者、インフラ担当者、アーキテクト
 
@@ -226,7 +226,7 @@ platforms/
 | タスクID | タスク名 | 用途 |
 |---------|---------|------|
 | A1 | 意味検索 (Semantic Search) | 統制記述と証跡の意味的一致を検索 |
-| A2 | 画像認識 (Image Recognition) | PDF/画像から承認印・日付・署名を検出 |
+| A2 | 画像認識 (Image Recognition) | PDF/画像から承認印・日付・署名を検出 + システム画面・フォーム分析（4MBサイズ制限・自動リサイズ） |
 | A3 | データ抽出 (Data Extraction) | 構造化データ（表・数値）の抽出 |
 | A4 | 段階的推論 (Stepwise Reasoning) | 複雑な統制の段階的な検証 |
 | A5 | 意味的推論 (Semantic Reasoning) | 統制要件と実施記録の整合性評価（デフォルト） |
@@ -444,7 +444,8 @@ Monitoring (相関IDでログ横断検索)
 
 ```mermaid
 flowchart TB
-    Start([開始]) --> CP[create_plan<br/>計画作成]
+    Start([開始]) --> SE[screen_evidence<br/>証憑スクリーニング]
+    SE --> CP[create_plan<br/>計画作成]
     CP --> RP[review_plan<br/>計画レビュー]
     RP -->|承認| ET[execute_tasks<br/>タスク実行]
     RP -->|要修正| FP[refine_plan<br/>計画修正]
@@ -456,6 +457,7 @@ flowchart TB
     FJ --> RJ
     OUT --> End([終了])
 
+    style SE fill:#00BCD4,color:#fff
     style CP fill:#4CAF50,color:#fff
     style RP fill:#FF9800,color:#fff
     style ET fill:#2196F3,color:#fff
@@ -479,13 +481,16 @@ class AuditGraphState(TypedDict):
     judgment_review: Optional[Dict]   # 判断レビュー結果
     judgment_revision_count: int      # 判断修正回数
     final_result: Optional[Dict]      # 最終出力
+    evidence_validation: Optional[Dict]  # 証憑バリデーション結果（Layer 0）
+    screening_summary: Optional[Dict]    # スクリーニング結果（Layer 3）
 ```
 
 ### 5.3 各ノードの詳細
 
 | ノード | 入力 | 処理 | 出力 |
 |--------|------|------|------|
-| **create_plan** | context | LLMに統制記述・テスト手続き・証跡情報を渡し、実行計画（使用タスク・順序・確認項目）を生成 | execution_plan |
+| **screen_evidence** | context | 証憑ファイルの関連性をキーワードマッチで評価し、無関係ファイルを除外。テキストプレビューをキャッシュ | screening_summary |
+| **create_plan** | context | LLMに統制記述・テスト手続き・証跡情報（テキストプレビュー付き）を渡し、実行計画を生成 | execution_plan |
 | **review_plan** | context, execution_plan | LLMが計画の網羅性・効率性をレビュー。「承認」または「要修正」を判定 | plan_review |
 | **refine_plan** | execution_plan, plan_review | レビューのフィードバックに基づき計画を修正。最大修正回数は`MAX_PLAN_REVISIONS`（デフォルト1） | execution_plan (修正版) |
 | **execute_tasks** | context, execution_plan | 計画に基づきA1-A8タスクを並列実行。`asyncio.gather()`で同時実行 | task_results |
@@ -505,17 +510,66 @@ class AuditGraphState(TypedDict):
 | `MAX_JUDGMENT_REVISIONS` | `1` | 判断レビューの最大修正回数（0でレビュースキップ） |
 
 **フルモード（デフォルト）:**
-```
-create_plan -> review_plan -> (refine_plan ->) execute_tasks
+
+```text
+screen_evidence -> create_plan -> review_plan -> (refine_plan ->) execute_tasks
 -> aggregate_results -> review_judgment -> (refine_judgment ->) output
 ```
 
 **高速モード（全スキップ）:**
-```
-execute_tasks -> aggregate_results -> output
+
+```text
+screen_evidence -> execute_tasks -> aggregate_results -> output
 ```
 
-### 5.5 品質保証メカニズム
+**スクリーニング無効時（ENABLE_EVIDENCE_SCREENING=false）:**
+
+```text
+create_plan -> review_plan -> (refine_plan ->) execute_tasks
+-> aggregate_results -> review_judgment -> (refine_judgment ->) output
+```
+
+### 5.5 証憑処理パイプライン
+
+証憑ファイルは以下の多段フィルタを経て処理される。各レイヤーで除外・スキップされたファイルは `test_coverage` として最終出力に記録される。
+
+```
+VBA (全ファイルBase64化)
+  ↓
+Layer 0: 入力制御 (_validate_evidence_files)
+  - 単一ファイルサイズ上限: 10MB/件（MAX_EVIDENCE_FILE_SIZE_MB）
+  - ファイル件数上限: 20件（MAX_EVIDENCE_FILE_COUNT）
+  - 合計サイズ上限: 50MB（MAX_EVIDENCE_TOTAL_SIZE_MB）
+  - 超過ファイルはスキップ＋警告記録
+  ↓
+Layer 3: Evidence Screening (_node_screen_evidence)
+  - Stage 1: キーワードマッチ（LLMコスト0）
+    - 統制記述・テスト手続きからキーワード抽出
+    - ファイル名＋テキスト内容でスコアリング（0.0〜1.0）
+    - 閾値未満のファイルを除外
+  - Stage 2（オプション）: LLMによる精密判定
+  ↓
+Planner (内容プレビュー付きでタスク選択)
+  - テキストプレビュー（先頭200文字）を含むファイル情報提供
+  ↓
+A1-A8 タスク実行 (テキスト切り詰め: 5K-10K文字/ファイル)
+  - A2: 画像4MB上限・自動リサイズ（Pillow）
+  ↓
+test_coverage (検査範囲・除外ファイルの透明性記録)
+```
+
+**test_coverage 出力フィールド:**
+
+| フィールド | 説明 |
+| --------- | ---- |
+| `files_received` | VBAから受信した全ファイル数 |
+| `files_after_validation` | Layer 0通過後のファイル数 |
+| `files_after_screening` | Layer 3通過後のファイル数 |
+| `files_excluded` | 除外ファイルリスト（ファイル名・理由） |
+| `files_skipped_validation` | サイズ超過でスキップされたファイル数 |
+| `coverage_warning` | 未検査ファイルがある場合の警告文 |
+
+### 5.6 品質保証メカニズム
 
 1. **計画レビュー**: 網羅性スコア（/10）と効率性スコア（/10）で計画を評価
 2. **矛盾検出**: 判断根拠と評価結果の矛盾を事前検出（禁止フレーズ、否定/肯定表現の不整合）
@@ -683,7 +737,21 @@ class SecretProvider(ABC):
 
 APIMポリシーにより、リクエストボディのサイズを10MB以下に制限する。超過した場合は`413 Payload Too Large`を返却する。
 
-### 7.6 入力バリデーション
+### 7.6 証憑ファイル制限
+
+`graph_orchestrator.py`のLayer 0入力制御により、証憑ファイルのサイズ・件数を制限する。
+
+| 制限項目 | デフォルト | 環境変数 | 範囲 |
+| -------- | --------- | -------- | ---- |
+| 単一ファイルサイズ | 10MB | `MAX_EVIDENCE_FILE_SIZE_MB` | 1〜50 |
+| ファイル件数 | 20件 | `MAX_EVIDENCE_FILE_COUNT` | 1〜100 |
+| 合計サイズ | 50MB | `MAX_EVIDENCE_TOTAL_SIZE_MB` | 5〜200 |
+| A2画像サイズ | 4MB | （定数） | - |
+| A2画像最大辺 | 2048px | （定数） | - |
+
+超過ファイルはスキップされ、`test_coverage.files_excluded`に理由とともに記録される。A2タスクでは4MB超の画像をPillowで自動リサイズし、リサイズ不可の場合はスキップする。
+
+### 7.7 入力バリデーション
 
 ジョブ投入時にシステム境界で入力を検証し、不正データの侵入を防止する。
 
@@ -693,7 +761,7 @@ APIMポリシーにより、リクエストボディのサイズを10MB以下に
 | `items` 型 | `list[dict]` のみ | `ValueError` |
 | `items` 件数 | 1〜1,000件 | `ValueError` |
 
-### 7.7 スレッドセーフティ
+### 7.8 スレッドセーフティ
 
 シングルトンインスタンス（`AsyncJobManager`、`SecretProvider`）の初期化にdouble-checked lockingパターンを採用し、並行リクエスト時の競合状態を防止する。
 
@@ -710,7 +778,7 @@ def get_instance():
     return _instance
 ```
 
-### 7.8 コンテナセキュリティ
+### 7.9 コンテナセキュリティ
 
 | 項目 | 設定 |
 | ---- | ---- |
@@ -719,7 +787,7 @@ def get_instance():
 | **ファイル権限** | `chmod -R 755`（必要最小限） |
 | **ヘルスチェック** | curl ベース（30秒間隔、起動猶予15秒） |
 
-### 7.9 環境変数バリデーション
+### 7.10 環境変数バリデーション
 
 `infrastructure/config.py` モジュールが型安全な環境変数読み取りを提供する。不正な値が設定された場合、起動時に `ConfigError` を発生させる。
 
@@ -858,6 +926,7 @@ ic-test-ai-agent/
 |   |
 |   |-- infrastructure/              # インフラ抽象化層
 |   |   |-- __init__.py
+|   |   |-- config.py                # 環境変数バリデーション + 証憑制限定数
 |   |   |-- llm_factory.py           # LLMプロバイダーファクトリー
 |   |   |-- ocr_factory.py           # OCRプロバイダーファクトリー
 |   |   |-- logging_config.py        # ログ設定（ローテーション対応）
@@ -973,10 +1042,15 @@ ic-test-ai-agent/
 | `SKIP_PLAN_CREATION` | 計画作成スキップ | `false` |
 | `JOB_STORAGE_PROVIDER` | ジョブストレージプロバイダー | `memory` |
 | `DEBUG` | デバッグモード | `false` |
+| `MAX_EVIDENCE_FILE_SIZE_MB` | 単一証憑ファイルの最大サイズ（MB） | `10` |
+| `MAX_EVIDENCE_FILE_COUNT` | 1テスト項目あたりの最大ファイル数 | `20` |
+| `MAX_EVIDENCE_TOTAL_SIZE_MB` | 全ファイル合計の最大サイズ（MB） | `50` |
+| `ENABLE_EVIDENCE_SCREENING` | 証憑スクリーニング（関連性フィルタ）の有効/無効 | `true` |
+| `EVIDENCE_SCREENING_USE_LLM` | スクリーニングにLLMを使用するか | `false` |
 
 ### B. APIバージョン
 
-現行バージョン: **2.5.0**
+現行バージョン: **3.2.0-multiplatform**
 
 ### C. 参照文書
 

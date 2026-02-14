@@ -118,3 +118,25 @@ def get_env_str(
         )
 
     return value
+
+
+# =============================================================================
+# 証憑ファイル制限のデフォルト値
+# =============================================================================
+# 環境変数で上書き可能。graph_orchestrator.py で参照される。
+
+MAX_EVIDENCE_FILE_SIZE_MB = get_env_int(
+    "MAX_EVIDENCE_FILE_SIZE_MB", default=10, min_val=1, max_val=50
+)
+MAX_EVIDENCE_FILE_COUNT = get_env_int(
+    "MAX_EVIDENCE_FILE_COUNT", default=20, min_val=1, max_val=100
+)
+MAX_EVIDENCE_TOTAL_SIZE_MB = get_env_int(
+    "MAX_EVIDENCE_TOTAL_SIZE_MB", default=50, min_val=5, max_val=200
+)
+ENABLE_EVIDENCE_SCREENING = get_env_bool(
+    "ENABLE_EVIDENCE_SCREENING", default=True
+)
+EVIDENCE_SCREENING_USE_LLM = get_env_bool(
+    "EVIDENCE_SCREENING_USE_LLM", default=False
+)
