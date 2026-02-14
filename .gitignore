@@ -46,6 +46,13 @@ local.settings.json
 # -----------------------------------------------------------------------------
 # Cloud platform specific
 # -----------------------------------------------------------------------------
+# Terraform state and plans
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+tfplan
+
 # Common deployment directories (created by deploy.ps1)
 platforms/*/.deploy/
 

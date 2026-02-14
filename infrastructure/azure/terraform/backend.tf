@@ -33,13 +33,12 @@ terraform {
     }
   }
 
-  # Azure Blob Storageバックエンド設定（初回デプロイ後にコメント解除）
-  # backend "azurerm" {
-  #   resource_group_name  = "rg-terraform-state"
-  #   storage_account_name = "stictestaiterraformstate"
-  #   container_name       = "tfstate"
-  #   key                  = "prod/azure.tfstate"
-  # }
+  backend "azurerm" {
+    resource_group_name  = "rg-terraform-state"
+    storage_account_name = "stictestaiterraformst"
+    container_name       = "tfstate"
+    key                  = "prod/azure.tfstate"
+  }
 }
 
 provider "azurerm" {
