@@ -586,8 +586,10 @@ curl -s "${SERVICE_URL}/api/health" | python -m json.tool
 ```json
 {
     "status": "healthy",
-    "platform": "gcp",
-    "version": "1.0.0"
+    "version": "3.1.0-multiplatform",
+    "response_time_ms": 45.2,
+    "timestamp": "2026-02-14T12:00:00",
+    "platform": "gcp"
 }
 ```
 
@@ -1526,8 +1528,10 @@ curl -s "${SERVICE_URL%/evaluate}/health" | python -m json.tool
 ```json
 {
     "status": "healthy",
+    "version": "3.1.0-multiplatform",
+    "response_time_ms": 45.2,
+    "timestamp": "2026-02-14T12:00:00",
     "platform": "gcp",
-    "version": "1.0.0",
     "llm_provider": "GCP",
     "ocr_provider": "GCP"
 }

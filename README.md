@@ -186,6 +186,14 @@ python -m pytest tests/unit/ -v
 
 ## 更新履歴
 
+### Version 3.1.0-multiplatform (2026-02-14)
+
+- コードベース堅牢化（スレッドセーフ・入力バリデーション・Dockerセキュリティ）
+- CI品質ゲート強化（flake8ブロッキング/情報分離）
+- ヘルスチェック拡張（degradedステータス・response_time_ms・timestamp）
+- 環境変数バリデーションヘルパー（ConfigError）追加
+- 依存パッケージバージョン上限制約追加
+
 ### Version 2.6.0 (2026-02-13)
 
 - プラットフォーム間コード重複を統合（platforms/azure/src/ 削除、共有src/に一本化）

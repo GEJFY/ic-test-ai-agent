@@ -163,9 +163,12 @@ GET /health
 ```json
 {
   "status": "healthy",
+  "version": "3.1.0-multiplatform",
   "llm_configured": true,
   "platform": "Local/On-Premise (FastAPI)",
-  "ollama_status": "connected"
+  "ollama_status": "connected",
+  "response_time_ms": 12,
+  "timestamp": "2026-02-14T10:30:00Z"
 }
 ```
 

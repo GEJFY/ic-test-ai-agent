@@ -990,7 +990,9 @@ curl -H "Ocp-Apim-Subscription-Key: <YOUR_SUBSCRIPTION_KEY>" `
 ```json
 {
   "status": "healthy",
-  "version": "2.4.0-multiplatform",
+  "version": "3.1.0-multiplatform",
+  "response_time_ms": 45.2,
+  "timestamp": "2026-02-14T12:00:00",
   "llm": {"provider": "AZURE", "configured": true},
   "platform": "Azure Container Apps"
 }
@@ -1709,7 +1711,9 @@ curl -H "Ocp-Apim-Subscription-Key: $SUB_KEY" "$APIM_URL/api/health"
 ```json
 {
   "status": "healthy",
-  "version": "2.4.0-multiplatform",
+  "version": "3.1.0-multiplatform",
+  "response_time_ms": 45.2,
+  "timestamp": "2026-02-14T12:00:00",
   "llm": {
     "provider": "AZURE",
     "configured": true,

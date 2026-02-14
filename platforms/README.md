@@ -833,9 +833,13 @@ curl http://localhost:8000/health
 ```json
 {
   "status": "healthy",
-  "llm_configured": true,
-  "platform": "Local/On-Premise (FastAPI)",
-  "ollama_status": "connected"
+  "version": "3.1.0-multiplatform",
+  "response_time_ms": 32.5,
+  "llm": {
+    "provider": "OLLAMA",
+    "configured": true
+  },
+  "platform": "Local/Unknown"
 }
 ```
 
@@ -1117,9 +1121,11 @@ curl https://your-container-app.japaneast.azurecontainerapps.io/health
 ```json
 {
     "status": "healthy",
-    "version": "2.4.0-multiplatform",
+    "version": "3.1.0-multiplatform",
+    "response_time_ms": 45.2,
+    "timestamp": "2026-02-14T12:00:00",
     "llm": {
-        "provider": "AZURE_FOUNDRY",
+        "provider": "AZURE",
         "configured": true
     },
     "ocr": {

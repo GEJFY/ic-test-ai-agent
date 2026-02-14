@@ -24,10 +24,10 @@ langchain-core>=1.2.9,<2.0.0
 langgraph>=1.0.8,<2.0.0              # LangGraph for workflow orchestration
 
 # Cloud LLM providers（メジャーバージョン固定）
-langchain-openai>=0.3.0,<1.0.0      # Azure AI Foundry (GPT-5.x)
+langchain-openai>=1.0.0,<2.0.0      # Azure AI Foundry (GPT-5.x)
 langchain-google-vertexai>=3.0.0,<4.0.0  # GCP Vertex AI (Gemini 3.x)
-langchain-aws>=0.3.0,<1.0.0         # AWS Bedrock (Claude Opus 4.x)
-langchain-ollama>=0.3.0,<1.0.0      # Ollama (ローカルLLM)
+langchain-aws>=1.0.0,<2.0.0         # AWS Bedrock (Claude Opus 4.x)
+langchain-ollama>=1.0.0,<2.0.0      # Ollama (ローカルLLM)
 
 # Utilities
 python-dotenv>=1.0.0,<2.0.0

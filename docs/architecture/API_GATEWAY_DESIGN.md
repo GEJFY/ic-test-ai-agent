@@ -1,8 +1,8 @@
 # API Gateway 設計書
 
 **文書名**: 内部統制テスト評価AIシステム API Gateway 設計書
-**バージョン**: 2.4.0-multiplatform
-**最終更新日**: 2026-02-11
+**バージョン**: 3.1.0-multiplatform
+**最終更新日**: 2026-02-14
 **対象読者**: インフラ担当者、セキュリティ担当者、開発者
 
 ---
@@ -836,9 +836,11 @@ resource "google_apigee_product" "ic_test_ai" {
 ```json
 {
     "status": "healthy",
-    "version": "2.4.0-multiplatform",
+    "version": "3.1.0-multiplatform",
+    "response_time_ms": 45.2,
+    "timestamp": "2026-02-14T12:00:00",
     "llm": {
-        "provider": "azure_foundry",
+        "provider": "azure",
         "configured": true,
         "model": "gpt-5-nano"
     },
