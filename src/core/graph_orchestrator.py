@@ -389,27 +389,22 @@ class GraphAuditOrchestrator:
 
     def _load_config(self):
         """
-        環境変数から設定を読み込む
+        環境変数から設定を読み込む（型安全・範囲チェック付き）
 
         【設定項目】
-        - MAX_PLAN_REVISIONS: 計画レビューの最大修正回数（0でレビュースキップ）
-        - MAX_JUDGMENT_REVISIONS: 判断レビューの最大修正回数（0でレビュースキップ）
+        - MAX_PLAN_REVISIONS: 計画レビューの最大修正回数（0でレビュースキップ、最大5）
+        - MAX_JUDGMENT_REVISIONS: 判断レビューの最大修正回数（0でレビュースキップ、最大5）
         - SKIP_PLAN_CREATION: 計画作成を省略（true/false）
         """
-        # 計画レビューの最大修正回数（デフォルト: 1）
-        try:
-            self.MAX_PLAN_REVISIONS = int(os.environ.get("MAX_PLAN_REVISIONS", "1"))
-        except ValueError:
-            self.MAX_PLAN_REVISIONS = 1
+        from infrastructure.config import get_env_int, get_env_bool
 
-        # 判断レビューの最大修正回数（デフォルト: 1）
-        try:
-            self.MAX_JUDGMENT_REVISIONS = int(os.environ.get("MAX_JUDGMENT_REVISIONS", "1"))
-        except ValueError:
-            self.MAX_JUDGMENT_REVISIONS = 1
-
-        # 計画作成を省略するか（デフォルト: false）
-        self.SKIP_PLAN_CREATION = os.environ.get("SKIP_PLAN_CREATION", "false").lower() == "true"
+        self.MAX_PLAN_REVISIONS = get_env_int(
+            "MAX_PLAN_REVISIONS", default=1, min_val=0, max_val=5
+        )
+        self.MAX_JUDGMENT_REVISIONS = get_env_int(
+            "MAX_JUDGMENT_REVISIONS", default=1, min_val=0, max_val=5
+        )
+        self.SKIP_PLAN_CREATION = get_env_bool("SKIP_PLAN_CREATION", default=False)
 
     # =========================================================================
     # LangGraph構築

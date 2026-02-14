@@ -333,13 +333,17 @@ class AsyncJobManager:
         self.queue = queue
         logger.info("[AsyncJobManager] Initialized")
 
+    # ジョブ投入時の制限値
+    MAX_ITEMS_PER_JOB = 1000
+    MAX_TENANT_ID_LENGTH = 255
+
     async def submit_job(
         self,
         tenant_id: str,
         items: List[Dict[str, Any]]
     ) -> JobSubmitResponse:
         """
-        新規ジョブを送信
+        新規ジョブを送信（入力バリデーション付き）
 
         Args:
             tenant_id: テナント識別子
@@ -347,7 +351,37 @@ class AsyncJobManager:
 
         Returns:
             JobSubmitResponse
+
+        Raises:
+            ValueError: 入力が不正な場合
         """
+        # 入力バリデーション
+        if not tenant_id or len(tenant_id) > self.MAX_TENANT_ID_LENGTH:
+            raise ValueError(
+                f"tenant_idは1〜{self.MAX_TENANT_ID_LENGTH}文字で指定してください"
+            )
+
+        if not isinstance(items, list):
+            raise ValueError(
+                f"itemsはリストで指定してください（{type(items).__name__}が渡されました）"
+            )
+
+        if len(items) == 0:
+            raise ValueError("itemsは空にできません")
+
+        if len(items) > self.MAX_ITEMS_PER_JOB:
+            raise ValueError(
+                f"items数が上限を超えています: {len(items)} "
+                f"（最大: {self.MAX_ITEMS_PER_JOB}）"
+            )
+
+        for idx, item in enumerate(items):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"items[{idx}]は辞書で指定してください"
+                    f"（{type(item).__name__}が渡されました）"
+                )
+
         # ジョブを作成
         job = await self.storage.create_job(tenant_id, items)
 

@@ -103,18 +103,25 @@ except ImportError:
 
 
 # =============================================================================
-# 定数定義
+# 定数定義（環境変数で上書き可能）
 # =============================================================================
 
-# デフォルトのタイムアウト時間（秒）
-DEFAULT_TIMEOUT_SECONDS = 300
-
-# 同時実行する評価処理の最大数
-# LLM APIのレート制限に依存。Azure AI Foundryは通常10-20リクエスト/分が安全
-MAX_CONCURRENT_EVALUATIONS = 10
+try:
+    from infrastructure.config import get_env_int
+    # デフォルトのタイムアウト時間（秒）- 環境変数で変更可能
+    DEFAULT_TIMEOUT_SECONDS = get_env_int(
+        "EVALUATION_TIMEOUT_SECONDS", default=300, min_val=60, max_val=900
+    )
+    # 同時実行する評価処理の最大数
+    MAX_CONCURRENT_EVALUATIONS = get_env_int(
+        "MAX_CONCURRENT_EVALUATIONS", default=10, min_val=1, max_val=50
+    )
+except (ImportError, Exception):
+    DEFAULT_TIMEOUT_SECONDS = 300
+    MAX_CONCURRENT_EVALUATIONS = 10
 
 # APIバージョン
-API_VERSION = "2.4.0-multiplatform"
+API_VERSION = "3.1.0-multiplatform"
 
 
 # =============================================================================
@@ -738,10 +745,16 @@ def handle_health() -> Dict[str, Any]:
     # プラットフォームを判定
     platform = _detect_platform()
 
+    # ヘルスステータスを判定（LLM未設定ならdegraded）
+    llm_configured = llm_status.get("configured", False)
+    health_status = "healthy" if llm_configured else "degraded"
+
     # レスポンスを構築
+    elapsed = time.time() - start_time
     response = {
-        "status": "healthy",
+        "status": health_status,
         "version": API_VERSION,
+        "response_time_ms": round(elapsed * 1000, 1),
         "llm": llm_status,
         "ocr": ocr_status,
         "document_processor": dp_status,
@@ -750,11 +763,11 @@ def handle_health() -> Dict[str, Any]:
             "multi_cloud_ocr": True,
             "multi_cloud_llm": True,
         },
-        "platform": platform
+        "platform": platform,
+        "timestamp": datetime.utcnow().isoformat()
     }
 
-    elapsed = time.time() - start_time
-    logger.info(f"[API] ヘルスチェック完了 ({elapsed*1000:.1f}ms)")
+    logger.info(f"[API] ヘルスチェック完了: {health_status} ({elapsed*1000:.1f}ms)")
     logger.debug(f"[API] ヘルス詳細: {json.dumps(response, ensure_ascii=False)[:200]}...")
 
     return response

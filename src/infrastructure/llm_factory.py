@@ -639,24 +639,23 @@ class LLMFactory:
             return llm
 
         except ImportError as e:
-            # LangChainの依存ライブラリがない場合
             logger.error(
-                f"[LLMFactory] 必要なライブラリがインストールされていません: {e}"
-            )
-            logger.info(
-                f"[LLMFactory] 以下のコマンドでインストールしてください:\n"
-                f"  pip install langchain-openai  (Azure/Azure Foundry用)\n"
-                f"  pip install langchain-google-vertexai  (GCP用)\n"
-                f"  pip install langchain-aws  (AWS用)"
+                f"[LLMFactory] 必要なライブラリがインストールされていません: "
+                f"provider={provider.value}, error={e}. "
+                f"pip install -r requirements.txt を実行してください"
             )
             raise
 
+        except LLMConfigError:
+            raise
+
         except Exception as e:
-            # その他のエラー
             logger.error(
-                f"[LLMFactory] チャットモデル作成エラー: {type(e).__name__}: {e}"
+                f"[LLMFactory] チャットモデル作成エラー: "
+                f"provider={provider.value}, model={model or 'default'}, "
+                f"{type(e).__name__}: {e}",
+                exc_info=True
             )
-            logger.debug(f"[LLMFactory] トレースバック:\n{traceback.format_exc()}")
             raise
 
     @classmethod
