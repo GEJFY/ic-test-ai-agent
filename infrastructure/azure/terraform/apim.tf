@@ -232,6 +232,7 @@ resource "azurerm_api_management_api_diagnostic" "appinsights" {
 resource "azurerm_api_management_subscription" "ic_test_ai" {
   api_management_name = azurerm_api_management.main.name
   resource_group_name = data.azurerm_resource_group.main.name
+  subscription_id     = "ic-test-ai-subscription"
   display_name        = "IC Test AI Subscription"
   api_id              = azurerm_api_management_api.ic_test_ai.id
   state               = "active"
