@@ -112,6 +112,13 @@ from .prompts import (
     JUDGMENT_REFINE_PROMPT,
 )
 from .highlighting_service import HighlightingService
+from infrastructure.config import (
+    MAX_EVIDENCE_FILE_SIZE_MB,
+    MAX_EVIDENCE_FILE_COUNT,
+    MAX_EVIDENCE_TOTAL_SIZE_MB,
+    ENABLE_EVIDENCE_SCREENING,
+    EVIDENCE_SCREENING_USE_LLM,
+)
 
 # =============================================================================
 # ログ設定
@@ -148,6 +155,10 @@ class AuditGraphState(TypedDict):
     """
     # 入力データ
     context: Dict[str, Any]           # 監査コンテキスト情報
+
+    # 証憑バリデーション・スクリーニング
+    evidence_validation: Optional[Dict]   # 入力制御の結果（P1）
+    screening_summary: Optional[Dict]     # スクリーニング結果（P2）
 
     # 計画関連
     execution_plan: Optional[Dict]    # 実行計画
@@ -429,6 +440,11 @@ class GraphAuditOrchestrator:
         # StateGraphを作成
         workflow = StateGraph(AuditGraphState)
 
+        # Evidence Screeningノード（有効時のみ）
+        use_screening = ENABLE_EVIDENCE_SCREENING
+        if use_screening:
+            workflow.add_node("screen_evidence", self._node_screen_evidence)
+
         # ノードを追加（使用するノードのみ）
         if not self.SKIP_PLAN_CREATION:
             workflow.add_node("create_plan", self._node_create_plan)
@@ -447,12 +463,20 @@ class GraphAuditOrchestrator:
 
         # フローを構築
         if self.SKIP_PLAN_CREATION:
-            # 計画作成スキップ: execute_tasks から開始
-            logger.info("[GraphOrchestrator] 高速モード: 計画作成をスキップ")
-            workflow.set_entry_point("execute_tasks")
+            if use_screening:
+                workflow.set_entry_point("screen_evidence")
+                workflow.add_edge("screen_evidence", "execute_tasks")
+                logger.info("[GraphOrchestrator] 高速モード + スクリーニング有効")
+            else:
+                logger.info("[GraphOrchestrator] 高速モード: 計画作成をスキップ")
+                workflow.set_entry_point("execute_tasks")
         else:
-            # 通常: create_plan から開始
-            workflow.set_entry_point("create_plan")
+            if use_screening:
+                # スクリーニング → 計画作成
+                workflow.set_entry_point("screen_evidence")
+                workflow.add_edge("screen_evidence", "create_plan")
+            else:
+                workflow.set_entry_point("create_plan")
 
             if self.MAX_PLAN_REVISIONS > 0:
                 # 計画レビューあり
@@ -558,6 +582,207 @@ class GraphAuditOrchestrator:
     # =========================================================================
     # ノード実装
     # =========================================================================
+
+    async def _node_screen_evidence(self, state: AuditGraphState) -> Dict:
+        """
+        証憑スクリーニングノード（Layer 3）
+
+        統制記述・テスト手続きとの関連性に基づいて証憑ファイルをフィルタリング。
+        Stage 1: ローカルテキスト抽出 + キーワードマッチ（LLMコスト0）
+        Stage 2: LLMによる精密判定（オプション、環境変数で制御）
+        """
+        logger.info("[ノード] screen_evidence: 証憑スクリーニング開始...")
+
+        context = state["context"]
+        evidence_files = context.get("evidence_files", [])
+        control_desc = context.get("control_description", "")
+        test_procedure = context.get("test_procedure", "")
+
+        if not evidence_files:
+            logger.info("[ノード] screen_evidence: 証憑ファイルなし、スキップ")
+            return {"screening_summary": {"screened": 0, "excluded": 0}}
+
+        # ファイルが少数なら全通過（スクリーニング不要）
+        if len(evidence_files) <= 3:
+            logger.info(
+                f"[ノード] screen_evidence: ファイル数{len(evidence_files)}件、"
+                "スクリーニング省略（全件処理）"
+            )
+            # テキストプレビューのみ付与
+            for ef in evidence_files:
+                ef["text_preview"] = self._extract_text_preview(ef)
+            return {
+                "screening_summary": {
+                    "screened": len(evidence_files),
+                    "excluded": 0,
+                    "excluded_files": [],
+                    "skipped_screening": True,
+                }
+            }
+
+        # キーワードを抽出（統制記述 + テスト手続きから）
+        keywords = self._extract_screening_keywords(control_desc, test_procedure)
+        logger.debug(f"[ノード] screen_evidence: キーワード = {keywords[:10]}")
+
+        screened = []
+        excluded = []
+
+        for ef in evidence_files:
+            # Stage 1: ローカルテキスト抽出 + キーワードマッチ
+            text_preview = self._extract_text_preview(ef)
+            ef["text_preview"] = text_preview
+
+            score = self._calculate_relevance_score(
+                ef.get("file_name", ""),
+                text_preview,
+                keywords,
+                test_procedure,
+            )
+            ef["relevance_score"] = score
+
+            if score >= 0.2:
+                screened.append(ef)
+            else:
+                excluded.append(ef)
+
+        # 除外ファイルの記録
+        excluded_info = [
+            {
+                "file_name": ef.get("file_name", ""),
+                "relevance_score": ef.get("relevance_score", 0),
+                "reason": "関連性スコアが閾値未満",
+            }
+            for ef in excluded
+        ]
+
+        logger.info(
+            f"[ノード] screen_evidence: "
+            f"{len(screened)}件を処理対象、{len(excluded)}件を除外"
+        )
+
+        # コンテキストを更新（スクリーニング済みファイルのみ残す）
+        context["evidence_files"] = screened
+
+        return {
+            "context": context,
+            "screening_summary": {
+                "screened": len(screened),
+                "excluded": len(excluded),
+                "excluded_files": excluded_info,
+                "keywords_used": keywords[:20],
+            },
+        }
+
+    def _extract_text_preview(self, ef_dict: dict, max_chars: int = 500) -> str:
+        """
+        証憑ファイルからテキストプレビューをローカル抽出する（LLMコスト0）
+
+        Args:
+            ef_dict: evidence_fileの辞書
+            max_chars: プレビューの最大文字数
+
+        Returns:
+            先頭max_chars文字のテキストプレビュー
+        """
+        try:
+            from .document_processor import DocumentProcessor
+
+            result = DocumentProcessor.extract_text(
+                file_name=ef_dict.get("file_name", ""),
+                extension=ef_dict.get("extension", ""),
+                base64_content=ef_dict.get("base64_content", ""),
+                mime_type=ef_dict.get("mime_type"),
+                use_di=False,  # ローカル抽出のみ（OCRサービス非使用）
+            )
+            text = result.text_content if result else ""
+            return text[:max_chars]
+        except Exception as e:
+            logger.debug(f"[screen_evidence] テキスト抽出失敗: {ef_dict.get('file_name')} - {e}")
+            return ""
+
+    def _extract_screening_keywords(
+        self, control_desc: str, test_procedure: str
+    ) -> list:
+        """
+        統制記述・テスト手続きからスクリーニング用キーワードを抽出する
+
+        日本語テキストから重要な名詞・固有名詞をキーワード化。
+        """
+        text = f"{control_desc} {test_procedure}"
+
+        # 不要語を除去してキーワード候補を抽出
+        stop_words = {
+            "する", "こと", "ため", "おり", "また", "および", "より",
+            "なお", "いる", "ある", "れる", "られる", "について",
+            "において", "による", "に対して", "として", "の", "は",
+            "を", "に", "が", "で", "と", "から", "まで", "へ",
+            "確認", "実施", "テスト", "手続き", "以下", "上記",
+        }
+
+        # 文字列をトークン化（簡易的に助詞・句読点で分割）
+        import re
+        tokens = re.split(r'[、。\s・（）()「」\[\]【】,./]', text)
+        keywords = []
+        for token in tokens:
+            token = token.strip()
+            if len(token) >= 2 and token not in stop_words:
+                keywords.append(token.lower())
+
+        # 重複除去しつつ順序保持
+        seen = set()
+        unique_keywords = []
+        for kw in keywords:
+            if kw not in seen:
+                seen.add(kw)
+                unique_keywords.append(kw)
+
+        return unique_keywords
+
+    def _calculate_relevance_score(
+        self,
+        file_name: str,
+        text_preview: str,
+        keywords: list,
+        test_procedure: str,
+    ) -> float:
+        """
+        証憑ファイルの関連性スコアを計算する（0.0〜1.0）
+
+        Args:
+            file_name: ファイル名
+            text_preview: テキストプレビュー
+            keywords: 統制・手続き由来のキーワード
+            test_procedure: テスト手続き全文
+
+        Returns:
+            関連性スコア（0.0=無関係、1.0=高関連）
+        """
+        score = 0.0
+        name_lower = file_name.lower()
+        text_lower = text_preview.lower() if text_preview else ""
+
+        # 1. ファイル名のキーワードマッチ（重み高）
+        name_matches = sum(1 for kw in keywords if kw in name_lower)
+        score += min(0.4, name_matches * 0.15)
+
+        # 2. テキスト内容のキーワードマッチ
+        if text_lower:
+            text_matches = sum(1 for kw in keywords if kw in text_lower)
+            score += min(0.4, text_matches * 0.08)
+
+        # 3. テキストが空でなければ最低限のスコアを付与
+        #    （テキスト抽出できた＝何かしらの文書）
+        if text_preview and len(text_preview) > 50:
+            score += 0.1
+
+        # 4. 承認系テストで画像/PDFなら追加スコア
+        approval_keywords = ["承認", "押印", "署名", "決裁", "印影"]
+        if any(kw in test_procedure for kw in approval_keywords):
+            img_exts = (".pdf", ".png", ".jpg", ".jpeg")
+            if any(name_lower.endswith(ext) for ext in img_exts):
+                score += 0.15
+
+        return min(1.0, score)
 
     async def _node_create_plan(self, state: AuditGraphState) -> Dict:
         """計画作成ノード"""
@@ -1135,6 +1360,9 @@ class GraphAuditOrchestrator:
             judgment.get("evaluation_result", False)
         )
 
+        # テスト範囲の透明性情報を構築
+        test_coverage = self._build_test_coverage(state)
+
         final_result = {
             "item_id": context.get("item_id", ""),
             "evaluation_result": judgment.get("evaluation_result", False),
@@ -1145,6 +1373,7 @@ class GraphAuditOrchestrator:
             "control_effectiveness": judgment.get("control_effectiveness", {}),
             "plan_review_summary": plan_review_summary,
             "judgment_review_summary": judgment_review_summary,
+            "test_coverage": test_coverage,
         }
 
         logger.info(f"[ノード] output: 最終結果生成完了 - "
@@ -1171,7 +1400,15 @@ class GraphAuditOrchestrator:
         logger.info("=" * 60)
         logger.info(f"[GraphOrchestrator] 評価開始: {context.item_id}")
 
-        # コンテキストを辞書形式に変換
+        # 証憑ファイルのバリデーション（Layer 0: 入力制御）
+        validated_files, validation_result = self._validate_evidence_files(
+            context.evidence_files
+        )
+        if validation_result.get("warnings"):
+            for w in validation_result["warnings"]:
+                logger.warning(f"[GraphOrchestrator] 証憑バリデーション: {w}")
+
+        # コンテキストを辞書形式に変換（検証済みファイルのみ使用）
         context_dict = {
             "item_id": context.item_id,
             "control_description": context.control_description,
@@ -1184,13 +1421,15 @@ class GraphAuditOrchestrator:
                     "extension": ef.extension,
                     "base64_content": ef.base64_content
                 }
-                for ef in context.evidence_files
+                for ef in validated_files
             ]
         }
 
         # 初期状態を設定
         initial_state: AuditGraphState = {
             "context": context_dict,
+            "evidence_validation": validation_result,
+            "screening_summary": None,
             "execution_plan": None,
             "plan_review": None,
             "plan_revision_count": 0,
@@ -1290,6 +1529,156 @@ class GraphAuditOrchestrator:
         return result
 
     # =========================================================================
+    # 証憑バリデーション（Layer 0: 入力制御）
+    # =========================================================================
+
+    def _validate_evidence_files(
+        self, evidence_files: list
+    ) -> tuple:
+        """
+        証憑ファイルのサイズ・件数バリデーション
+
+        超過ファイルを除外し、警告リストを返す。
+
+        Args:
+            evidence_files: EvidenceFileオブジェクトのリスト
+
+        Returns:
+            (検証済みファイルリスト, バリデーション結果dict)
+        """
+        max_file_bytes = MAX_EVIDENCE_FILE_SIZE_MB * 1024 * 1024
+        max_total_bytes = MAX_EVIDENCE_TOTAL_SIZE_MB * 1024 * 1024
+
+        accepted = []
+        warnings = []
+        skipped_files = []
+        total_bytes = 0
+        original_count = len(evidence_files)
+
+        for ef in evidence_files:
+            # Base64 → バイナリサイズの概算
+            b64_len = len(ef.base64_content) if ef.base64_content else 0
+            file_bytes = (b64_len * 3) // 4
+
+            # 個別ファイルサイズチェック
+            if file_bytes > max_file_bytes:
+                size_mb = file_bytes / (1024 * 1024)
+                msg = (
+                    f"ファイルサイズ超過: {ef.file_name} "
+                    f"({size_mb:.1f}MB > {MAX_EVIDENCE_FILE_SIZE_MB}MB)"
+                )
+                warnings.append(msg)
+                skipped_files.append({
+                    "file_name": ef.file_name,
+                    "reason": f"サイズ超過 ({size_mb:.1f}MB)",
+                    "size_mb": round(size_mb, 1),
+                })
+                logger.warning(f"[Evidence Validation] {msg}")
+                continue
+
+            # 合計サイズチェック
+            if total_bytes + file_bytes > max_total_bytes:
+                size_mb = file_bytes / (1024 * 1024)
+                msg = (
+                    f"合計サイズ超過のため除外: {ef.file_name} "
+                    f"(累計が{MAX_EVIDENCE_TOTAL_SIZE_MB}MB超)"
+                )
+                warnings.append(msg)
+                skipped_files.append({
+                    "file_name": ef.file_name,
+                    "reason": f"合計サイズ超過",
+                    "size_mb": round(size_mb, 1),
+                })
+                logger.warning(f"[Evidence Validation] {msg}")
+                continue
+
+            # 件数チェック
+            if len(accepted) >= MAX_EVIDENCE_FILE_COUNT:
+                msg = (
+                    f"ファイル件数超過のため除外: {ef.file_name} "
+                    f"(上限{MAX_EVIDENCE_FILE_COUNT}件)"
+                )
+                warnings.append(msg)
+                skipped_files.append({
+                    "file_name": ef.file_name,
+                    "reason": f"件数上限超過",
+                })
+                logger.warning(f"[Evidence Validation] {msg}")
+                continue
+
+            accepted.append(ef)
+            total_bytes += file_bytes
+
+        validation_result = {
+            "original_count": original_count,
+            "accepted_count": len(accepted),
+            "skipped_count": len(skipped_files),
+            "skipped_files": skipped_files,
+            "total_size_mb": round(total_bytes / (1024 * 1024), 1),
+            "warnings": warnings,
+        }
+
+        if skipped_files:
+            logger.info(
+                f"[Evidence Validation] {original_count}件中{len(accepted)}件を処理対象、"
+                f"{len(skipped_files)}件をスキップ"
+            )
+
+        return accepted, validation_result
+
+    # =========================================================================
+    # テスト範囲の透明性
+    # =========================================================================
+
+    def _build_test_coverage(self, state: AuditGraphState) -> dict:
+        """
+        テスト範囲の透明性情報を構築する
+
+        バリデーション・スクリーニング・タスク実行の結果を統合し、
+        何を検査し、何を検査しなかったかを明確にする。
+        """
+        evidence_validation = state.get("evidence_validation") or {}
+        screening_summary = state.get("screening_summary") or {}
+        context = state.get("context", {})
+        task_results = state.get("task_results", [])
+
+        # 受信ファイル数（バリデーション前の元の件数）
+        original_count = evidence_validation.get("original_count", 0)
+        # バリデーション後の件数
+        validated_count = evidence_validation.get("accepted_count", original_count)
+        # スクリーニング後の処理件数
+        screened_count = screening_summary.get("screened", validated_count)
+        # 現在のコンテキスト内の件数
+        current_files = context.get("evidence_files", [])
+
+        # 除外ファイル情報を統合
+        files_skipped_validation = evidence_validation.get("skipped_files", [])
+        files_excluded_screening = screening_summary.get("excluded_files", [])
+
+        # 警告メッセージの構築
+        warnings = []
+        if files_skipped_validation:
+            warnings.append(
+                f"{len(files_skipped_validation)}件のファイルがサイズ/件数制限により除外されました"
+            )
+        if files_excluded_screening:
+            warnings.append(
+                f"{len(files_excluded_screening)}件のファイルが関連性スクリーニングにより除外されました"
+            )
+
+        coverage_warning = "。".join(warnings) if warnings else None
+
+        return {
+            "files_received": original_count,
+            "files_after_validation": validated_count,
+            "files_after_screening": screened_count,
+            "files_processed": len(current_files),
+            "files_skipped_validation": files_skipped_validation,
+            "files_excluded_screening": files_excluded_screening,
+            "coverage_warning": coverage_warning,
+        }
+
+    # =========================================================================
     # ユーティリティメソッド
     # =========================================================================
 
@@ -1349,14 +1738,31 @@ class GraphAuditOrchestrator:
         )
 
     def _summarize_evidence(self, evidence_files: list) -> str:
-        """証跡ファイル情報をサマリー化"""
+        """
+        証跡ファイル情報をサマリー化
+
+        text_previewがある場合（スクリーニング済み）はプレビューを含める。
+        プランナーがファイル内容を理解した上でタスク選択できるようにする。
+        """
         if not evidence_files:
             return "エビデンスファイルなし"
 
         parts = []
         for ef in evidence_files:
             if isinstance(ef, dict):
-                parts.append(f"- {ef.get('file_name', 'N/A')} ({ef.get('mime_type', 'N/A')})")
+                name = ef.get('file_name', 'N/A')
+                mime = ef.get('mime_type', 'N/A')
+                preview = ef.get('text_preview', '')
+                score = ef.get('relevance_score')
+
+                line = f"- {name} ({mime})"
+                if score is not None:
+                    line += f" [関連性: {score:.2f}]"
+                if preview:
+                    # プレビューは先頭200文字に制限
+                    truncated = preview[:200].replace('\n', ' ')
+                    line += f"\n  内容概要: {truncated}"
+                parts.append(line)
             else:
                 parts.append(f"- {ef.file_name} ({ef.mime_type})")
 

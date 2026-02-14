@@ -940,3 +940,426 @@ class TestExecuteTasksNode:
         }
         result = await self.orch._node_execute_tasks(state)
         assert result["task_results"] == []
+
+
+# =============================================================================
+# 証憑バリデーション（Layer 0）テスト
+# =============================================================================
+
+class TestEvidenceValidation:
+    """_validate_evidence_files メソッドのテスト"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        """各テストの前にオーケストレーターを初期化"""
+        with patch("core.graph_orchestrator.StateGraph") as mock_sg:
+            mock_sg.return_value = MagicMock()
+            mock_sg.return_value.compile.return_value = MagicMock()
+            self.orch = GraphAuditOrchestrator(llm=None, vision_llm=None)
+
+    def _make_evidence_file(self, name, size_mb=1.0):
+        """テスト用EvidenceFileを作成（指定MBのBase64コンテンツ付き）"""
+        # Base64は4文字→3バイトなので、n MBに必要な文字数を計算
+        byte_count = int(size_mb * 1024 * 1024)
+        b64_char_count = (byte_count * 4) // 3
+        return EvidenceFile(
+            file_name=name,
+            extension=".pdf",
+            mime_type="application/pdf",
+            base64_content="A" * b64_char_count,
+        )
+
+    def test_all_files_accepted(self):
+        """全ファイルが制限内"""
+        files = [self._make_evidence_file("a.pdf", 1.0)]
+        accepted, result = self.orch._validate_evidence_files(files)
+        assert len(accepted) == 1
+        assert result["skipped_count"] == 0
+
+    def test_oversized_file_skipped(self):
+        """個別ファイルサイズ超過"""
+        files = [
+            self._make_evidence_file("small.pdf", 1.0),
+            self._make_evidence_file("big.pdf", 15.0),  # 10MB上限超過
+        ]
+        accepted, result = self.orch._validate_evidence_files(files)
+        assert len(accepted) == 1
+        assert accepted[0].file_name == "small.pdf"
+        assert result["skipped_count"] == 1
+        assert result["skipped_files"][0]["file_name"] == "big.pdf"
+
+    def test_file_count_limit(self):
+        """ファイル件数超過"""
+        # 21件作成（上限20件）
+        files = [self._make_evidence_file(f"file_{i}.pdf", 0.1) for i in range(21)]
+        accepted, result = self.orch._validate_evidence_files(files)
+        assert len(accepted) == 20
+        assert result["skipped_count"] == 1
+
+    def test_empty_files(self):
+        """空のファイルリスト"""
+        accepted, result = self.orch._validate_evidence_files([])
+        assert len(accepted) == 0
+        assert result["skipped_count"] == 0
+
+    def test_validation_result_structure(self):
+        """バリデーション結果の構造"""
+        files = [self._make_evidence_file("a.pdf", 1.0)]
+        _, result = self.orch._validate_evidence_files(files)
+        assert "original_count" in result
+        assert "accepted_count" in result
+        assert "skipped_count" in result
+        assert "skipped_files" in result
+        assert "total_size_mb" in result
+        assert "warnings" in result
+
+    def test_exact_boundary_file_accepted(self):
+        """個別ファイルサイズがちょうど上限の場合は受理"""
+        files = [self._make_evidence_file("exact.pdf", 10.0)]  # 10MB = 上限
+        accepted, result = self.orch._validate_evidence_files(files)
+        assert len(accepted) == 1
+        assert result["skipped_count"] == 0
+
+    def test_total_size_limit(self):
+        """合計サイズ超過で後半ファイルが除外される"""
+        # 各9MB × 6 = 54MB > 50MB上限
+        files = [self._make_evidence_file(f"f{i}.pdf", 9.0) for i in range(6)]
+        accepted, result = self.orch._validate_evidence_files(files)
+        # 9MB × 5 = 45MB < 50MB OK、6番目で54MB > 50MBとなり除外
+        assert len(accepted) == 5
+        assert result["skipped_count"] == 1
+        assert "合計サイズ超過" in result["skipped_files"][0]["reason"]
+
+    def test_mixed_validation_failures(self):
+        """サイズ超過 + 件数超過が混在するケース"""
+        files = [
+            self._make_evidence_file("big.pdf", 15.0),  # サイズ超過
+        ] + [
+            self._make_evidence_file(f"f{i}.pdf", 0.1) for i in range(21)  # 件数超過
+        ]
+        accepted, result = self.orch._validate_evidence_files(files)
+        # big.pdf=スキップ, f0-f19=受理(20件), f20=件数超過
+        assert len(accepted) == 20
+        assert result["skipped_count"] == 2
+
+    def test_empty_base64_content(self):
+        """base64_contentが空文字のファイルは受理される（サイズ0）"""
+        ef = EvidenceFile(
+            file_name="empty.txt",
+            extension=".txt",
+            mime_type="text/plain",
+            base64_content="",
+        )
+        accepted, result = self.orch._validate_evidence_files([ef])
+        assert len(accepted) == 1
+
+
+# =============================================================================
+# Evidence Screeningテスト
+# =============================================================================
+
+class TestEvidenceScreening:
+    """_node_screen_evidence および関連メソッドのテスト"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        """各テストの前にオーケストレーターを初期化"""
+        with patch("core.graph_orchestrator.StateGraph") as mock_sg:
+            mock_sg.return_value = MagicMock()
+            mock_sg.return_value.compile.return_value = MagicMock()
+            self.orch = GraphAuditOrchestrator(llm=None, vision_llm=None)
+
+    def test_extract_screening_keywords(self):
+        """キーワード抽出"""
+        keywords = self.orch._extract_screening_keywords(
+            "月次の取締役会議事録を作成",
+            "議事録を閲覧し、承認印を確認する"
+        )
+        # 句読点・スペース・記号で分割されるため、助詞「の」「を」では分割されない
+        # 分割結果: ["月次の取締役会議事録を作成", "議事録を閲覧し", "承認印を確認する"]
+        assert len(keywords) >= 1
+        # ストップワード「する」は単独トークンでないと除去されない
+        # キーワードが空でないことを確認
+        assert all(len(kw) >= 2 for kw in keywords)
+
+    def test_calculate_relevance_score_matching(self):
+        """関連性スコア: ファイル名にキーワードが含まれる"""
+        score = self.orch._calculate_relevance_score(
+            file_name="取締役会議事録_2025Q4.pdf",
+            text_preview="取締役会議事録 2025年第4四半期",
+            keywords=["取締役会議事録", "承認印", "2025"],
+            test_procedure="取締役会議事録を閲覧し、承認印を確認する",
+        )
+        assert score > 0.3  # 高い関連性
+
+    def test_calculate_relevance_score_unrelated(self):
+        """関連性スコア: 無関係なファイル"""
+        score = self.orch._calculate_relevance_score(
+            file_name="会社案内パンフレット.pdf",
+            text_preview="",
+            keywords=["取締役会議事録", "承認印"],
+            test_procedure="取締役会議事録を閲覧する",
+        )
+        assert score < 0.2  # 低い関連性
+
+    def test_calculate_relevance_score_approval_bonus(self):
+        """関連性スコア: 承認系テストで画像にボーナス"""
+        score = self.orch._calculate_relevance_score(
+            file_name="document.pdf",
+            text_preview="",
+            keywords=[],
+            test_procedure="承認印を確認する",
+        )
+        # 承認系テスト + PDF形式のボーナスが付与される
+        assert score >= 0.15
+
+    @pytest.mark.asyncio
+    async def test_screen_evidence_few_files_pass_all(self):
+        """スクリーニング: 3件以下は全通過"""
+        state = {
+            "context": {
+                "control_description": "テスト",
+                "test_procedure": "手続き",
+                "evidence_files": [
+                    {"file_name": "a.pdf", "extension": ".pdf",
+                     "mime_type": "application/pdf", "base64_content": ""},
+                ],
+            }
+        }
+        with patch.object(self.orch, "_extract_text_preview", return_value=""):
+            result = await self.orch._node_screen_evidence(state)
+        assert result["screening_summary"]["screened"] == 1
+        assert result["screening_summary"]["excluded"] == 0
+
+    @pytest.mark.asyncio
+    async def test_screen_evidence_empty(self):
+        """スクリーニング: 証憑なし"""
+        state = {
+            "context": {
+                "control_description": "テスト",
+                "test_procedure": "手続き",
+                "evidence_files": [],
+            }
+        }
+        result = await self.orch._node_screen_evidence(state)
+        assert result["screening_summary"]["screened"] == 0
+
+    @pytest.mark.asyncio
+    async def test_screen_evidence_excludes_unrelated(self):
+        """スクリーニング: 無関係ファイルが除外される"""
+        state = {
+            "context": {
+                "control_description": "月次の取締役会議事録を作成",
+                "test_procedure": "議事録を閲覧し、承認印を確認する",
+                "evidence_files": [
+                    {"file_name": "取締役会議事録_2025Q4.pdf", "extension": ".pdf",
+                     "mime_type": "application/pdf", "base64_content": ""},
+                    {"file_name": "社内旅行写真.jpg", "extension": ".jpg",
+                     "mime_type": "image/jpeg", "base64_content": ""},
+                    {"file_name": "会社案内パンフレット.pdf", "extension": ".pdf",
+                     "mime_type": "application/pdf", "base64_content": ""},
+                    {"file_name": "月次レポート承認済.pdf", "extension": ".pdf",
+                     "mime_type": "application/pdf", "base64_content": ""},
+                ],
+            }
+        }
+        with patch.object(self.orch, "_extract_text_preview", return_value=""):
+            result = await self.orch._node_screen_evidence(state)
+
+        summary = result["screening_summary"]
+        # 議事録とレポートは通過、写真とパンフレットは除外（スコア依存）
+        assert summary["screened"] + summary["excluded"] == 4
+        assert summary["excluded"] >= 1  # 少なくとも1件は除外
+
+    def test_calculate_relevance_score_capped_at_one(self):
+        """関連性スコアが1.0を超えない"""
+        # ファイル名 + テキスト + 承認ボーナスを全て最大にする
+        score = self.orch._calculate_relevance_score(
+            file_name="取締役会議事録_承認_月次_レビュー_売上.pdf",
+            text_preview="取締役会議事録 承認 月次 レビュー 売上 " * 20,
+            keywords=["取締役会議事録", "承認", "月次", "レビュー", "売上"],
+            test_procedure="承認印を確認する",
+        )
+        assert score <= 1.0
+
+    def test_calculate_relevance_score_empty_keywords(self):
+        """キーワードが空のケース"""
+        score = self.orch._calculate_relevance_score(
+            file_name="report.pdf",
+            text_preview="何かのテキスト内容",
+            keywords=[],
+            test_procedure="手続き",
+        )
+        # キーワードマッチ0 + テキストあり0.1 = 0.1
+        assert score >= 0.0
+        assert score <= 1.0
+
+    def test_extract_screening_keywords_empty_input(self):
+        """空文字列からのキーワード抽出"""
+        keywords = self.orch._extract_screening_keywords("", "")
+        assert isinstance(keywords, list)
+        assert len(keywords) == 0
+
+    def test_extract_screening_keywords_deduplication(self):
+        """同一キーワードが重複しない"""
+        keywords = self.orch._extract_screening_keywords(
+            "売上報告書の売上確認", "売上報告書を閲覧"
+        )
+        # "売上報告書" は1回のみ
+        assert keywords.count("売上報告書") <= 1
+
+
+# =============================================================================
+# _summarize_evidence 強化テスト
+# =============================================================================
+
+class TestSummarizeEvidence:
+    """_summarize_evidence の強化テスト"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        with patch("core.graph_orchestrator.StateGraph") as mock_sg:
+            mock_sg.return_value = MagicMock()
+            mock_sg.return_value.compile.return_value = MagicMock()
+            self.orch = GraphAuditOrchestrator(llm=None, vision_llm=None)
+
+    def test_empty_evidence(self):
+        """証拠なしでメッセージを返す"""
+        result = self.orch._summarize_evidence([])
+        assert "なし" in result
+
+    def test_dict_with_preview(self):
+        """dict形式でtext_previewとrelevance_scoreを含む"""
+        files = [
+            {
+                "file_name": "report.pdf",
+                "mime_type": "application/pdf",
+                "text_preview": "月次売上報告書の承認済みコピー",
+                "relevance_score": 0.85,
+            }
+        ]
+        result = self.orch._summarize_evidence(files)
+        assert "report.pdf" in result
+        assert "関連性: 0.85" in result
+        assert "月次売上報告書" in result
+
+    def test_dict_without_preview(self):
+        """dict形式でtext_previewがない場合"""
+        files = [
+            {"file_name": "data.csv", "mime_type": "text/csv"}
+        ]
+        result = self.orch._summarize_evidence(files)
+        assert "data.csv" in result
+        assert "内容概要" not in result
+
+    def test_evidence_file_object(self):
+        """EvidenceFileオブジェクト形式"""
+        ef = EvidenceFile(
+            file_name="doc.pdf",
+            extension=".pdf",
+            mime_type="application/pdf",
+            base64_content="dGVzdA==",
+        )
+        result = self.orch._summarize_evidence([ef])
+        assert "doc.pdf" in result
+
+    def test_preview_truncated_to_200_chars(self):
+        """テキストプレビューが200文字に制限される"""
+        long_text = "あ" * 300
+        files = [
+            {
+                "file_name": "long.pdf",
+                "mime_type": "application/pdf",
+                "text_preview": long_text,
+            }
+        ]
+        result = self.orch._summarize_evidence(files)
+        # "内容概要: " + 200文字以内
+        assert "あ" * 201 not in result
+
+
+# =============================================================================
+# テスト範囲の透明性テスト
+# =============================================================================
+
+class TestTestCoverage:
+    """_build_test_coverage メソッドのテスト"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        """各テストの前にオーケストレーターを初期化"""
+        with patch("core.graph_orchestrator.StateGraph") as mock_sg:
+            mock_sg.return_value = MagicMock()
+            mock_sg.return_value.compile.return_value = MagicMock()
+            self.orch = GraphAuditOrchestrator(llm=None, vision_llm=None)
+
+    def test_coverage_no_issues(self):
+        """テスト範囲: 問題なし"""
+        state = {
+            "evidence_validation": {
+                "original_count": 3,
+                "accepted_count": 3,
+                "skipped_files": [],
+            },
+            "screening_summary": {
+                "screened": 3,
+                "excluded": 0,
+                "excluded_files": [],
+            },
+            "context": {
+                "evidence_files": [
+                    {"file_name": "a.pdf"},
+                    {"file_name": "b.pdf"},
+                    {"file_name": "c.pdf"},
+                ],
+            },
+            "task_results": [],
+        }
+        coverage = self.orch._build_test_coverage(state)
+        assert coverage["files_received"] == 3
+        assert coverage["files_processed"] == 3
+        assert coverage["coverage_warning"] is None
+
+    def test_coverage_with_exclusions(self):
+        """テスト範囲: 除外あり"""
+        state = {
+            "evidence_validation": {
+                "original_count": 5,
+                "accepted_count": 4,
+                "skipped_files": [{"file_name": "big.pdf", "reason": "サイズ超過"}],
+            },
+            "screening_summary": {
+                "screened": 2,
+                "excluded": 2,
+                "excluded_files": [
+                    {"file_name": "unrelated.pdf", "reason": "関連性低"}
+                ],
+            },
+            "context": {
+                "evidence_files": [
+                    {"file_name": "a.pdf"},
+                    {"file_name": "b.pdf"},
+                ],
+            },
+            "task_results": [],
+        }
+        coverage = self.orch._build_test_coverage(state)
+        assert coverage["files_received"] == 5
+        assert coverage["files_after_validation"] == 4
+        assert coverage["files_after_screening"] == 2
+        assert coverage["files_processed"] == 2
+        assert coverage["coverage_warning"] is not None
+        assert "サイズ" in coverage["coverage_warning"]
+        assert "スクリーニング" in coverage["coverage_warning"]
+
+    def test_coverage_empty_state(self):
+        """テスト範囲: 空のstate"""
+        state = {
+            "evidence_validation": None,
+            "screening_summary": None,
+            "context": {"evidence_files": []},
+            "task_results": [],
+        }
+        coverage = self.orch._build_test_coverage(state)
+        assert coverage["files_received"] == 0
+        assert coverage["files_processed"] == 0

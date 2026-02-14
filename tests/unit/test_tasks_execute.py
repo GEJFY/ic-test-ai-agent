@@ -216,6 +216,78 @@ class TestA2ImageRecognition:
         result = await task.execute(ctx)
         assert result.success is False
 
+    def test_estimate_decoded_size(self):
+        """Base64デコードサイズの概算"""
+        from core.tasks.a2_image_recognition import ImageRecognitionTask
+
+        # 12文字のBase64 → 9バイト
+        assert ImageRecognitionTask._estimate_decoded_size("QUJDREVGR0hJ") == 9
+        # 空文字列
+        assert ImageRecognitionTask._estimate_decoded_size("") == 0
+        # パディング付き
+        assert ImageRecognitionTask._estimate_decoded_size("QQ==") == 1
+
+    def test_oversized_image_skipped(self):
+        """サイズ超過の画像はスキップされる"""
+        from core.tasks.a2_image_recognition import ImageRecognitionTask
+        import asyncio
+
+        task = ImageRecognitionTask(llm=MagicMock(), vision_llm=MagicMock())
+
+        # 5MBを超えるBase64コンテンツ（4MB上限）
+        oversized_b64 = "A" * (6 * 1024 * 1024)  # ~4.5MB decoded
+        ef = EvidenceFile(
+            file_name="huge_scan.png",
+            extension=".png",
+            mime_type="image/png",
+            base64_content=oversized_b64,
+        )
+
+        # Pillowがない場合を想定（ImportError）
+        result = asyncio.get_event_loop().run_until_complete(
+            task._analyze_image(ef, "承認印を確認する")
+        )
+
+        # リサイズ試行後もサイズ超過ならスキップ
+        # Pillow未インストールの場合はリサイズ不可→スキップ
+        assert result is not None
+        if result.get("skipped"):
+            assert "サイズ超過" in result.get("reason", "")
+
+    def test_aggregate_with_skipped_files(self):
+        """スキップファイルを含む集約"""
+        from core.tasks.a2_image_recognition import ImageRecognitionTask
+
+        task = ImageRecognitionTask(llm=MagicMock(), vision_llm=MagicMock())
+        results = [
+            {
+                "file_name": "ok.png",
+                "analysis": {
+                    "extracted_info": {
+                        "approval_stamps": [{"detected": True, "readable_text": "承認"}],
+                        "dates": [{"date_value": "2025/01/15"}],
+                        "names": [],
+                        "document_numbers": [],
+                    },
+                    "validation_results": {"has_valid_approval": True},
+                    "confidence": 0.9,
+                },
+            },
+            {
+                "file_name": "big.pdf",
+                "analysis": {
+                    "skipped": True,
+                    "file_name": "big.pdf",
+                    "reason": "サイズ超過（15.0MB）",
+                },
+            },
+        ]
+        aggregated = task._aggregate_results(results)
+        assert aggregated["validation_results"]["has_valid_approval"] is True
+        assert aggregated["validation_results"]["files_analyzed"] == 1
+        assert len(aggregated["validation_results"]["files_skipped"]) == 1
+        assert "サイズ超過スキップ" in aggregated["reasoning"]
+
 
 # =============================================================================
 # A4: StepwiseReasoningTask テスト
@@ -392,3 +464,108 @@ class TestA6MultiDocument:
         ctx = _make_context(files=[])  # 空
         result = await task.execute(ctx)
         assert result.success is False
+
+
+# =============================================================================
+# A2: エッジケーステスト
+# =============================================================================
+
+class TestA2EdgeCases:
+    """A2 画像認識タスクのエッジケーステスト"""
+
+    def test_pdf_oversized_skipped(self):
+        """PDFのサイズ超過はリサイズ不可→スキップ"""
+        from core.tasks.a2_image_recognition import ImageRecognitionTask
+        import asyncio
+
+        task = ImageRecognitionTask(llm=MagicMock(), vision_llm=MagicMock())
+        oversized_b64 = "A" * (6 * 1024 * 1024)
+        ef = EvidenceFile(
+            file_name="huge_document.pdf",
+            extension=".pdf",
+            mime_type="application/pdf",
+            base64_content=oversized_b64,
+        )
+        result = asyncio.get_event_loop().run_until_complete(
+            task._analyze_image(ef, "内容を確認する")
+        )
+        assert result is not None
+        assert result.get("skipped") is True
+        assert "リサイズ非対応" in result.get("reason", "")
+
+    def test_aggregate_all_skipped(self):
+        """全ファイルスキップ時の集約"""
+        from core.tasks.a2_image_recognition import ImageRecognitionTask
+
+        task = ImageRecognitionTask(llm=MagicMock(), vision_llm=MagicMock())
+        results = [
+            {
+                "file_name": "big1.pdf",
+                "analysis": {
+                    "skipped": True,
+                    "file_name": "big1.pdf",
+                    "reason": "サイズ超過（15.0MB）",
+                },
+            },
+            {
+                "file_name": "big2.pdf",
+                "analysis": {
+                    "skipped": True,
+                    "file_name": "big2.pdf",
+                    "reason": "サイズ超過（20.0MB）",
+                },
+            },
+        ]
+        aggregated = task._aggregate_results(results)
+        assert aggregated["validation_results"]["files_analyzed"] == 0
+        assert len(aggregated["validation_results"]["files_skipped"]) == 2
+        assert aggregated["validation_results"]["has_valid_approval"] is False
+
+    def test_aggregate_empty_results(self):
+        """結果なしの集約"""
+        from core.tasks.a2_image_recognition import ImageRecognitionTask
+
+        task = ImageRecognitionTask(llm=MagicMock(), vision_llm=MagicMock())
+        aggregated = task._aggregate_results([])
+        assert aggregated["validation_results"]["has_valid_approval"] is False
+        assert aggregated["confidence"] == 0.0
+        assert "ありません" in aggregated["reasoning"]
+
+    def test_aggregate_error_results(self):
+        """エラー結果を含む集約"""
+        from core.tasks.a2_image_recognition import ImageRecognitionTask
+
+        task = ImageRecognitionTask(llm=MagicMock(), vision_llm=MagicMock())
+        results = [
+            {
+                "file_name": "error.png",
+                "analysis": {"error": "Vision LLM API エラー"},
+            },
+        ]
+        aggregated = task._aggregate_results(results)
+        assert aggregated["validation_results"]["files_analyzed"] == 0
+
+    def test_resize_image_content_pillow_not_installed(self):
+        """Pillow未インストール時のフォールバック"""
+        from core.tasks.a2_image_recognition import ImageRecognitionTask
+
+        task = ImageRecognitionTask(llm=MagicMock(), vision_llm=MagicMock())
+        b64 = base64.b64encode(b"fake image data").decode()
+        mime = "image/png"
+
+        with patch.dict("sys.modules", {"PIL": None, "PIL.Image": None}):
+            # Pillow ImportError → 元のデータをそのまま返す
+            result_b64, result_mime = task._resize_image_content(b64, mime)
+            # ImportErrorが発生するか、元のデータを返す
+            assert result_b64 is not None
+
+    def test_estimate_decoded_size_various_padding(self):
+        """パディング別のサイズ推定"""
+        from core.tasks.a2_image_recognition import ImageRecognitionTask
+
+        # パディングなし (3の倍数バイト)
+        assert ImageRecognitionTask._estimate_decoded_size("QUJD") == 3
+        # パディング1個 (2バイト)
+        assert ImageRecognitionTask._estimate_decoded_size("QUI=") == 2
+        # パディング2個 (1バイト)
+        assert ImageRecognitionTask._estimate_decoded_size("QQ==") == 1

@@ -43,9 +43,10 @@ if result.success:
 
 ================================================================================
 """
+import io
 import logging
 import base64
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import JsonOutputParser
@@ -106,6 +107,11 @@ class ImageRecognitionTask(BaseAuditTask):
     # 対応ファイル形式
     SUPPORTED_IMAGE_TYPES = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
     SUPPORTED_DOC_TYPES = ['.pdf']
+
+    # サイズ制限
+    MAX_IMAGE_BYTES = 4 * 1024 * 1024   # 4MB（Base64デコード後のバイナリサイズ上限）
+    MAX_IMAGE_DIMENSION = 2048          # 画像の最大辺（px）- リサイズ時の上限
+    MAX_PDF_PAGES_FOR_VISION = 5        # PDFをVision LLMに送る際の最大ページ数
 
     def __init__(self, llm=None, vision_llm=None):
         """
@@ -229,11 +235,72 @@ class ImageRecognitionTask(BaseAuditTask):
 
         return processable
 
+    @staticmethod
+    def _estimate_decoded_size(base64_content: str) -> int:
+        """Base64文字列からデコード後のバイナリサイズを概算する"""
+        # Base64は4文字 → 3バイトにデコードされる（パディング考慮）
+        content_len = len(base64_content)
+        padding = base64_content.count('=') if content_len > 0 else 0
+        return (content_len * 3) // 4 - padding
+
+    def _resize_image_content(
+        self, base64_content: str, mime_type: str
+    ) -> Tuple[str, str]:
+        """
+        画像をリサイズしてBase64で返す
+
+        長辺がMAX_IMAGE_DIMENSIONを超える場合、アスペクト比を保持して縮小する。
+
+        Args:
+            base64_content: 元のBase64エンコード画像
+            mime_type: 元のMIMEタイプ
+
+        Returns:
+            Tuple[str, str]: (リサイズ後のBase64, MIMEタイプ)
+        """
+        try:
+            from PIL import Image
+
+            raw_bytes = base64.b64decode(base64_content)
+            img = Image.open(io.BytesIO(raw_bytes))
+
+            width, height = img.size
+            max_dim = self.MAX_IMAGE_DIMENSION
+
+            if width <= max_dim and height <= max_dim:
+                # リサイズ不要だがサイズ超過 → JPEG圧縮で削減
+                pass
+            else:
+                # アスペクト比を保持して縮小
+                ratio = min(max_dim / width, max_dim / height)
+                new_size = (int(width * ratio), int(height * ratio))
+                img = img.resize(new_size, Image.LANCZOS)
+                logger.info(
+                    f"[A2] リサイズ: {width}x{height} → {new_size[0]}x{new_size[1]}"
+                )
+
+            # JPEG形式で圧縮してBase64化
+            buffer = io.BytesIO()
+            # RGBA→RGB変換（JPEG保存用）
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            img.save(buffer, format="JPEG", quality=85)
+            resized_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+            return resized_b64, "image/jpeg"
+
+        except ImportError:
+            logger.warning("[A2] Pillowが未インストールのためリサイズをスキップ")
+            return base64_content, mime_type
+        except Exception as e:
+            logger.warning(f"[A2] リサイズ失敗: {e}")
+            return base64_content, mime_type
+
     async def _analyze_image(self, evidence_file: EvidenceFile, test_procedure: str) -> Optional[dict]:
         """
         単一の画像ファイルを分析
 
         Vision LLMを使用して画像から承認印・日付・署名等を抽出します。
+        サイズ超過の場合は自動リサイズを試みます。
 
         Args:
             evidence_file (EvidenceFile): 証跡ファイル
@@ -262,6 +329,49 @@ class ImageRecognitionTask(BaseAuditTask):
 
             logger.debug(f"[A2] {evidence_file.file_name}: MIMEタイプ = {mime_type}")
 
+            # Base64コンテンツのサイズチェック
+            b64_content = evidence_file.base64_content
+            decoded_size = self._estimate_decoded_size(b64_content)
+            size_mb = decoded_size / (1024 * 1024)
+
+            if decoded_size > self.MAX_IMAGE_BYTES:
+                logger.warning(
+                    f"[A2] {evidence_file.file_name}: サイズ超過 "
+                    f"({size_mb:.1f}MB > {self.MAX_IMAGE_BYTES / (1024*1024):.0f}MB)"
+                )
+
+                if mime_type.startswith("image/"):
+                    # 画像 → リサイズを試みる
+                    b64_content, mime_type = self._resize_image_content(
+                        b64_content, mime_type
+                    )
+                    new_size = self._estimate_decoded_size(b64_content)
+                    if new_size > self.MAX_IMAGE_BYTES:
+                        logger.warning(
+                            f"[A2] {evidence_file.file_name}: "
+                            f"リサイズ後もサイズ超過 ({new_size / (1024*1024):.1f}MB)、スキップ"
+                        )
+                        return {
+                            "skipped": True,
+                            "file_name": evidence_file.file_name,
+                            "reason": f"サイズ超過（{size_mb:.1f}MB）、リサイズ後も上限超過",
+                        }
+                    logger.info(
+                        f"[A2] {evidence_file.file_name}: リサイズ成功 "
+                        f"({size_mb:.1f}MB → {new_size / (1024*1024):.1f}MB)"
+                    )
+                else:
+                    # PDF等 → リサイズ不可、スキップ
+                    logger.warning(
+                        f"[A2] {evidence_file.file_name}: "
+                        f"PDF/文書のサイズ超過（{size_mb:.1f}MB）、スキップ"
+                    )
+                    return {
+                        "skipped": True,
+                        "file_name": evidence_file.file_name,
+                        "reason": f"サイズ超過（{size_mb:.1f}MB）、リサイズ非対応形式",
+                    }
+
             # Vision LLM用のメッセージを作成
             message = HumanMessage(
                 content=[
@@ -272,7 +382,7 @@ class ImageRecognitionTask(BaseAuditTask):
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": f"data:{mime_type};base64,{evidence_file.base64_content}"
+                            "url": f"data:{mime_type};base64,{b64_content}"
                         }
                     }
                 ]
@@ -327,8 +437,19 @@ class ImageRecognitionTask(BaseAuditTask):
         total_confidence = 0.0
         analyzed_count = 0
 
+        skipped_files = []
+
         for r in results:
             analysis = r.get("analysis", {})
+
+            # サイズ超過でスキップされたファイル
+            if analysis.get("skipped"):
+                skipped_files.append({
+                    "file_name": analysis.get("file_name", "unknown"),
+                    "reason": analysis.get("reason", "不明"),
+                })
+                logger.info(f"[A2] サイズ超過スキップ: {analysis.get('file_name')}")
+                continue
 
             # エラーがあった場合はスキップ
             if "error" in analysis:
@@ -362,6 +483,17 @@ class ImageRecognitionTask(BaseAuditTask):
                    f"日付{len(all_dates)}件, "
                    f"氏名{len(all_names)}件")
 
+        # スキップ情報を含む reasoning
+        reasoning_parts = [
+            f"{analyzed_count}件のファイルを分析。",
+            f"承認印: {len(detected_stamps)}件検出。",
+            f"承認の有効性: {'確認済み' if has_valid_approval else '未確認'}。",
+        ]
+        if skipped_files:
+            reasoning_parts.append(
+                f"サイズ超過スキップ: {len(skipped_files)}件。"
+            )
+
         return {
             "extracted_info": {
                 "approval_stamps": all_stamps,
@@ -371,12 +503,9 @@ class ImageRecognitionTask(BaseAuditTask):
             },
             "validation_results": {
                 "has_valid_approval": has_valid_approval,
-                "files_analyzed": analyzed_count
+                "files_analyzed": analyzed_count,
+                "files_skipped": skipped_files,
             },
             "confidence": avg_confidence,
-            "reasoning": (
-                f"{analyzed_count}件のファイルを分析。"
-                f"承認印: {len(detected_stamps)}件検出。"
-                f"承認の有効性: {'確認済み' if has_valid_approval else '未確認'}。"
-            )
+            "reasoning": "".join(reasoning_parts),
         }

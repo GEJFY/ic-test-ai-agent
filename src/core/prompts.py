@@ -668,14 +668,49 @@ A1_SEMANTIC_SEARCH_PROMPT = """あなたは内部統制監査の専門家です�
 # A2: 画像認識タスク用プロンプト
 # -----------------------------------------------------------------------------
 A2_IMAGE_RECOGNITION_PROMPT = """あなたは内部統制監査の専門家で、文書画像分析のエキスパートです。
-提供された画像から以下の情報を抽出・検証してください。
+提供された画像を分析し、文書の種類を判定した上で、テスト手続きに関連する情報を抽出・検証してください。
 
-【重要な指示】
-1. 印影・押印の有無と読み取り
+【Step 1: 文書種別の判定】
+まず、画像がどの種類の文書かを判定してください：
+- approval_document: 承認書・稟議書・決裁書（印影・署名が重要）
+- system_screenshot: システム画面キャプチャ（権限設定・ワークフロー承認画面・ログ画面）
+- form_scan: 申請書・フォームのスキャン画像
+- table_data: 表形式データ・一覧表の画像
+- meeting_record: 議事録・会議記録
+- other: その他の文書
+
+【Step 2: 文書種別に応じた情報抽出】
+
+■ approval_document（承認書類）の場合：
+1. 印影・押印の有無と読み取り（角印/丸印/認印/日付印）
 2. 署名（サイン）の有無と可読部分
 3. 日付の記載確認
-4. フォーマット・書式の整合性
-5. 改ざんの痕跡（不自然な修正、上書き等）
+4. 承認者の役職・権限レベル
+
+■ system_screenshot（システム画面）の場合：
+1. 画面タイトル・メニュー名
+2. ユーザー名・ログインID
+3. 承認ステータス・ワークフロー状態
+4. タイムスタンプ・操作日時
+5. 権限設定・アクセスレベル
+
+■ form_scan（申請書・フォーム）の場合：
+1. フォーム名・帳票番号
+2. 記入者・申請者名
+3. 日付・提出日
+4. チェックボックス・選択項目の状態
+5. 記入漏れの有無
+
+■ table_data（表形式データ）の場合：
+1. 表のヘッダー・列名
+2. データ件数・行数
+3. 主要な数値・金額
+4. 合計行・サマリー
+
+■ 共通確認事項：
+1. フォーマット・書式の整合性
+2. 改ざんの痕跡（不自然な修正、上書き等）
+3. 文書の状態（鮮明さ・可読性）
 
 【テスト手続き】
 {test_procedure}
@@ -683,13 +718,14 @@ A2_IMAGE_RECOGNITION_PROMPT = """あなたは内部統制監査の専門家で�
 【出力形式】
 以下のJSON形式で回答してください：
 {{
+    "document_type": "判定した文書種別（approval_document/system_screenshot/form_scan/table_data/meeting_record/other）",
     "extracted_info": {{
-        "stamps": [
+        "approval_stamps": [
             {{
                 "position": "位置（例：右上、承認欄）",
                 "readable_text": "読み取れた文字",
                 "stamp_type": "角印/丸印/認印/日付印/不明",
-                "clarity": "鮮明/やや不鮮明/不鮮明"
+                "detected": true/false
             }}
         ],
         "signatures": [
@@ -706,9 +742,23 @@ A2_IMAGE_RECOGNITION_PROMPT = """あなたは内部統制監査の専門家で�
                 "format": "YYYY/MM/DD等"
             }}
         ],
+        "names": [
+            {{
+                "position": "位置",
+                "name": "氏名・ユーザーID",
+                "role": "役職・権限（判読可能な場合）"
+            }}
+        ],
+        "document_numbers": ["文書番号・管理番号"],
+        "system_info": {{
+            "screen_title": "画面タイトル（該当時）",
+            "workflow_status": "承認ステータス（該当時）",
+            "timestamps": ["操作日時（該当時）"]
+        }},
         "document_condition": "良好/一部不鮮明/判読困難"
     }},
     "validation_results": {{
+        "has_valid_approval": true/false,
         "all_required_stamps_present": true/false,
         "all_required_signatures_present": true/false,
         "dates_consistent": true/false,
