@@ -87,10 +87,7 @@ output "cloudwatch_logs_url" {
   value       = "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#logsV2:log-groups"
 }
 
-output "xray_service_map_url" {
-  description = "X-Ray Service MapURL"
-  value       = var.enable_xray_tracing ? "https://console.aws.amazon.com/xray/home?region=${var.region}#/service-map" : "X-Ray disabled"
-}
+# xray_service_map_url は cloudwatch.tf で定義
 
 # ------------------------------------------------------------------------------
 # デプロイ後の手順
