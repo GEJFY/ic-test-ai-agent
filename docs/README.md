@@ -30,9 +30,9 @@
 
 | プラットフォーム | 手順書 | 特徴 |
 |----------------|--------|------|
-| Azure | [platforms/azure/README.md](../platforms/azure/README.md) | Azure Functions、Azure AI Foundry対応 |
-| GCP | [platforms/gcp/README.md](../platforms/gcp/README.md) | Cloud Functions、Vertex AI対応 |
-| AWS | [platforms/aws/README.md](../platforms/aws/README.md) | Lambda、Bedrock対応 |
+| Azure | [platforms/azure/README.md](../platforms/azure/README.md) | Container Apps、Azure AI Foundry対応 |
+| GCP | [platforms/gcp/README.md](../platforms/gcp/README.md) | Cloud Run、Vertex AI対応 |
+| AWS | [platforms/aws/README.md](../platforms/aws/README.md) | App Runner、Bedrock対応 |
 | Local | [platforms/local/README.md](../platforms/local/README.md) | オンプレミス、Ollama + Tesseract対応 |
 
 ## 関連ファイル

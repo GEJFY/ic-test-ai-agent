@@ -138,7 +138,7 @@ flowchart TB
             Diagnostic["API診断設定<br/>(W3C, 100%サンプリング)"]
         end
 
-        NV["Named Value<br/>(backend-function-app-url)"]
+        NV["Named Value<br/>(backend-url)"]
         Backend["Backend<br/>(ic-test-ai-backend)"]
     end
 
@@ -496,7 +496,7 @@ resource "aws_api_gateway_stage" "prod" {
 
 ### 4.6 相関IDの扱い
 
-AWS API Gatewayでは、`X-Correlation-ID`ヘッダーをリクエストパラメータとして定義し、Lambda Proxy統合を通じてLambdaに転送する。
+AWS API Gatewayでは、`X-Correlation-ID`ヘッダーをリクエストパラメータとして定義し、HTTP Proxy統合（App Runner）を通じてApp Runnerに転送する。
 
 ```hcl
 resource "aws_api_gateway_method" "evaluate_post" {
@@ -964,8 +964,8 @@ terraform init
 terraform plan -var-file="production.tfvars"
 terraform apply -var-file="production.tfvars"
 
-# 4. Cloud Functions URLを取得
-terraform output cloud_functions_direct_url
+# 4. Cloud Run URLを取得
+terraform output cloud_run_service_url
 ```
 
 ### 9.3 主要パラメータ

@@ -22,7 +22,7 @@
 | システム名 | 内部統制テスト評価AIシステム |
 | バージョン | 1.0 |
 | 実行環境 | Microsoft Excel + VBA |
-| 通信先 | Azure Functions API（HTTPS） |
+| 通信先 | Azure Container Apps API（HTTPS） |
 
 ### 1.3 申請する実行モード
 
@@ -133,7 +133,7 @@ http.setOption 2, 13056  ' SXH_OPTION_IGNORE_SERVER_SSL_CERT_ERROR_FLAGS
 ' リクエスト設定
 http.Open "POST", endpoint, False
 http.setRequestHeader "Content-Type", "application/json; charset=utf-8"
-http.setRequestHeader "x-functions-key", apiKey  ' API認証
+http.setRequestHeader "Ocp-Apim-Subscription-Key", apiKey  ' API認証
 
 ' 送信
 http.send requestBody
@@ -146,7 +146,7 @@ statusCode = http.Status
 **用途:**
 | 機能 | 用途 |
 |-----|------|
-| HTTP POST | Azure Functions APIへのリクエスト送信 |
+| HTTP POST | Azure Container Apps APIへのリクエスト送信 |
 | ヘッダー設定 | 認証情報（APIキー/Bearerトークン）の付与 |
 | レスポンス取得 | AI評価結果の受信 |
 
@@ -154,8 +154,8 @@ statusCode = http.Status
 
 | No. | 通信先 | ポート | プロトコル | 用途 |
 |-----|--------|--------|-----------|------|
-| 1 | `*.azurewebsites.net` | 443 | HTTPS | Azure Functions API |
-| 2 | `*.cloudfunctions.net` | 443 | HTTPS | GCP Cloud Functions（オプション） |
+| 1 | `*.azurecontainerapps.io` | 443 | HTTPS | Azure Container Apps API |
+| 2 | `*.run.app` | 443 | HTTPS | GCP Cloud Run（オプション） |
 | 3 | `*.execute-api.amazonaws.com` | 443 | HTTPS | AWS API Gateway（オプション） |
 
 **セキュリティ対策:**
@@ -262,7 +262,7 @@ powershell.exe -ExecutionPolicy Bypass -File "CallCloudApi.ps1"
 
 **使用箇所（コード例）:**
 ```powershell
-# Azure Functions API呼び出し
+# Azure Container Apps API呼び出し
 $response = Invoke-WebRequest -Uri $Endpoint `
     -Method Post `
     -Headers $Headers `
@@ -281,9 +281,9 @@ $tokenResponse = Invoke-RestMethod -Uri $tokenUrl `
 
 | No. | 通信先 | ポート | 用途 |
 |-----|--------|--------|------|
-| 1 | `*.azurewebsites.net` | 443 | Azure Functions API |
+| 1 | `*.azurecontainerapps.io` | 443 | Azure Container Apps API |
 | 2 | `login.microsoftonline.com` | 443 | Azure AD 認証 |
-| 3 | `*.cloudfunctions.net` | 443 | GCP（オプション） |
+| 3 | `*.run.app` | 443 | GCP Cloud Run（オプション） |
 | 4 | `*.execute-api.amazonaws.com` | 443 | AWS（オプション） |
 
 **セキュリティ対策:**
@@ -532,10 +532,10 @@ if ($dsregOutput -match "AzureAdJoined\s*:\s*YES") {
     "batchSize": 10,
     "api": {
         "provider": "AZURE",
-        "endpoint": "https://your-function-app.azurewebsites.net/api/evaluate",
-        "authType": "functionsKey",
+        "endpoint": "https://your-container-app.japaneast.azurecontainerapps.io/api/evaluate",
+        "authType": "subscriptionKey",
         "apiKey": "your-api-key",
-        "authHeader": "x-functions-key"
+        "authHeader": "Ocp-Apim-Subscription-Key"
     }
 }
 ```
@@ -549,7 +549,7 @@ if ($dsregOutput -match "AzureAdJoined\s*:\s*YES") {
     "batchSize": 10,
     "api": {
         "provider": "AZURE",
-        "endpoint": "https://your-function-app.azurewebsites.net/api/evaluate",
+        "endpoint": "https://your-container-app.japaneast.azurecontainerapps.io/api/evaluate",
         "authType": "azureAd"
     },
     "azureAd": {
@@ -591,7 +591,7 @@ if ($dsregOutput -match "AzureAdJoined\s*:\s*YES") {
        │                   │                   │
        │                   │ 3. HTTPS POST     │
        │                   │──────────────────▶│
-       │                   │   (x-functions-key)│
+       │                   │   (Ocp-Apim-Subscription-Key)│
        │                   │                   │
        │                   │ 4. JSON Response  │
        │                   │◀──────────────────│

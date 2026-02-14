@@ -3,7 +3,7 @@
 > 内部統制テストAIシステム -- シークレット管理アーキテクチャと運用手順
 
 **最終更新日**: 2026-02-11
-**対象バージョン**: ic-test-ai-agent v1.x
+**対象バージョン**: ic-test-ai-agent v3.x
 **ステータス**: 本番運用ドキュメント
 
 ---
@@ -265,7 +265,7 @@ pip install azure-keyvault-secrets azure-identity
 `AzureKeyVaultProvider` は Azure SDK の `DefaultAzureCredential` を使用します。以下の順序で認証を試行します。
 
 1. **環境変数**: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`
-2. **Managed Identity**: Azure VM、App Service、Azure Functions で自動検出
+2. **Managed Identity**: Azure VM、App Service、Container Apps で自動検出
 3. **Azure CLI**: `az login` でログイン済みの場合
 4. **Visual Studio Code**: Azure拡張機能でログイン済みの場合
 5. **Azure PowerShell**: `Connect-AzAccount` でログイン済みの場合
@@ -373,7 +373,7 @@ pip install boto3
 | `AWS_ACCESS_KEY_ID` | No* | アクセスキーID | - |
 | `AWS_SECRET_ACCESS_KEY` | No* | シークレットアクセスキー | - |
 
-> *No*: IAMロールを使用する場合（EC2、ECS、Lambda等）は不要です。
+> *No*: IAMロールを使用する場合（EC2、ECS、App Runner等）は不要です。
 
 #### 認証方式
 
@@ -383,11 +383,11 @@ boto3 は以下の順序で認証情報を検索します。
 2. **環境変数**: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
 3. **共有認証情報ファイル**: `~/.aws/credentials`
 4. **AWS設定ファイル**: `~/.aws/config`
-5. **IAMロール**: EC2インスタンスプロファイル、ECSタスクロール、Lambda実行ロール
+5. **IAMロール**: EC2インスタンスプロファイル、ECSタスクロール、App Runner Instance Role
 6. **コンテナ認証情報**: ECSタスクの認証情報プロバイダー
 
 ```python
-# IAMロール認証（EC2/ECS/Lambda環境で推奨）
+# IAMロール認証（EC2/ECS/App Runner環境で推奨）
 provider = AWSSecretsManagerProvider(region_name="ap-northeast-1")
 
 # 明示的な認証情報指定（開発用途のみ）

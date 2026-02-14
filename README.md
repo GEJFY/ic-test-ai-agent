@@ -109,11 +109,11 @@ test_coverage (検査範囲・除外ファイルの透明性記録)
 ```
 VBA/PowerShell → API Gateway (APIM/API Gateway/Apigee)
                      ↓
-               Backend (Azure Functions/Lambda/Cloud Functions)
+               Backend (Container Apps/App Runner/Cloud Run)
                      ↓
-               LLM/OCR APIs (Azure AI/Bedrock/Vertex AI)
+               LLM/OCR APIs (AI Foundry/Bedrock/Vertex AI)
                      ↓
-               Monitoring (Application Insights/X-Ray/Cloud Logging)
+               Monitoring (App Insights/X-Ray/Cloud Logging)
 ```
 
 詳細は [システムアーキテクチャ](SYSTEM_SPECIFICATION.md) を参照してください。
@@ -152,7 +152,7 @@ VBA/PowerShell → API Gateway (APIM/API Gateway/Apigee)
 ## テスト
 
 ```bash
-# 全テスト実行（792テスト）
+# 全テスト実行（470テスト）
 python -m pytest tests/ -v
 
 # カバレッジレポート生成
@@ -212,6 +212,14 @@ python -m pytest tests/unit/ -v
 - 環境変数バリデーションヘルパー（ConfigError）追加
 - 依存パッケージバージョン上限制約追加
 
+### Version 3.0.0 (2026-02-14)
+
+- **コンテナベースデプロイ移行**: Azure Container Apps / AWS App Runner / GCP Cloud Run
+- Azure OpenAI → Azure AI Foundry 命名統一（AZUREプロバイダーはレガシー保持）
+- Terraform Hardening: Cognitive Services、非同期Storage（Table/Queue/DynamoDB/SQS/Firestore/Cloud Tasks）
+- CD修正: シークレット伝播問題修正、Terraformバリデーションエラー修正
+- ドキュメント全面更新: アーキテクチャ図・コスト見積もり・全16ファイル整合性統一
+
 ### Version 2.6.0 (2026-02-13)
 
 - プラットフォーム間コード重複を統合（platforms/azure/src/ 削除、共有src/に一本化）
@@ -223,7 +231,7 @@ python -m pytest tests/unit/ -v
 - 証跡ハイライト機能追加（PDF/Excel/テキスト対応）
 - クラウドコスト見積もり v9.0（為替¥152/USD）
 - セットアップガイドをアーキテクチャと整合性更新
-- 792テストケース
+- 470テストケース
 
 ### Version 2.4.0 (2026-02-11)
 

@@ -316,12 +316,13 @@ fixed_rate = 0.1  # 初期10% → 1%に削減でコスト削減
 cloudwatch_log_retention_days = 7  # 初期30日 → 7日に短縮
 ```
 
-### 3. Lambda予約同時実行数制限
+### 3. App Runner同時実行数制限
 
-`variables.tf` の `lambda_reserved_concurrency` を設定：
+`variables.tf` の App Runner auto scaling 設定：
 
 ```hcl
-lambda_reserved_concurrency = 10  # 最大10並列実行に制限
+apprunner_max_concurrency = 25  # 1インスタンスあたり最大25同時リクエスト
+apprunner_max_size        = 5   # 最大5インスタンスにスケール
 ```
 
 ## セキュリティ強化（本番環境推奨）
@@ -355,15 +356,15 @@ resource "aws_api_gateway_rest_api_policy" "ip_whitelist" {
 
 ### 2. Secrets Manager自動ローテーション
 
-将来対応：Lambda関数でシークレット自動ローテーション実装
+将来対応：App Runnerインスタンスでシークレット自動ローテーション実装
 
 ### 3. VPC統合
 
-Lambda関数をVPC内に配置（プライベートサブネット）
+App RunnerをVPCコネクタで接続（プライベートサブネット）
 
 ## 参考リンク
 
-- [AWS Lambda Terraform](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function)
+- [AWS App Runner Terraform](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/apprunner_service)
 - [AWS API Gateway Terraform](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/api_gateway_rest_api)
 - [AWS Secrets Manager Terraform](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret)
 - [AWS X-Ray ドキュメント](https://docs.aws.amazon.com/xray/)
