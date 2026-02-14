@@ -109,12 +109,19 @@ Private Type SettingConfig
     AzureAdClientId As String   ' アプリケーション（クライアント）ID
     AzureAdScope As String      ' スコープ（api://{clientId}/.default）
 
+    '--- フィードバック列マッピング（案B: 入力セクション側に配置）---
+    ColFeedback As String            ' フィードバック列（例："G"）- ユーザー入力
+    ColReevalCount As String         ' 再評価回数列（例："H"）- 自動更新
+
     '--- 出力列マッピング（APIの応答をどの列に書き込むか）---
     ColEvaluationResult As String    ' 評価結果列（True/False → 有効/不備）
     ColExecutionPlanSummary As String ' 実行計画サマリー列（テスト計画）
     ColJudgmentBasis As String       ' 判断根拠列
     ColDocumentReference As String   ' 文書参照列
     ColFileName As String            ' ファイル名列
+
+    '--- フィードバック設定 ---
+    DefaultReevalMode As String      ' 再評価モード（judgment_only/full）
 
     '--- 表示設定 ---
     BooleanDisplayTrue As String     ' Trueの表示文字列（例："有効"）
@@ -383,6 +390,240 @@ Public Sub ProcessWithApi()
         MsgBox resultMsg, vbInformation, "処理完了"
     End If
 End Sub
+
+'===============================================================================
+' フィードバック再評価処理: ProcessFeedback
+'===============================================================================
+' 【機能】
+' ユーザーがフィードバック列（G列）に入力した内容に基づき、
+' AIに再評価を依頼します。再評価結果は出力列（I-M列）に上書きされます。
+'
+' 【処理フロー】
+' 1. 設定ファイルを読み込み
+' 2. フィードバック列に入力があり、かつ評価結果が存在する行を検出
+' 3. 再評価モード選択ダイアログを表示
+' 4. フィードバック付きJSONを生成してAPIに送信
+' 5. 再評価結果をExcelに書き戻し（再評価回数をインクリメント）
+'
+' 【前提条件】
+' - 初回評価（ProcessWithApi）が完了していること
+' - フィードバック列にテキストが入力されていること
+'===============================================================================
+Public Sub ProcessFeedback()
+    Dim config As SettingConfig
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim rowIndices() As Long
+    Dim rowCount As Long
+    Dim i As Long
+    Dim feedbackText As String
+    Dim evalResult As String
+    Dim jsonText As String
+    Dim responseJson As String
+    Dim inputJsonPath As String
+    Dim outputJsonPath As String
+    Dim success As Boolean
+    Dim startTime As Double
+    Dim elapsedTime As Double
+    Dim reevalMode As String
+    Dim totalItems As Long
+    Dim processedItems As Long
+    Dim totalBatches As Long
+    Dim batchNum As Long
+    Dim startIdx As Long
+    Dim endIdx As Long
+    Dim hasError As Boolean
+
+    '--- セッション初期化 ---
+    InitializeSession
+    WriteLog LOG_LEVEL_INFO, "ProcessFeedback", "===== フィードバック再評価処理開始 ====="
+    startTime = Timer
+
+    '--- 設定ファイルの読み込み ---
+    If Not LoadSettings(config) Then
+        ShowErrorMessage ERR_SETTING_NOT_FOUND, "設定ファイルの読み込みに失敗しました。"
+        Exit Sub
+    End If
+
+    '--- フィードバック列チェック ---
+    If config.ColFeedback = "" Then
+        MsgBox "フィードバック列が設定されていません。" & vbCrLf & _
+               "setting.json の columns.Feedback を設定してください。", vbExclamation, "設定エラー"
+        Exit Sub
+    End If
+
+    '--- 対象シートの取得 ---
+    Set ws = GetTargetWorksheet(config.SheetName)
+    If ws Is Nothing Then
+        ShowErrorMessage ERR_SHEET_NOT_FOUND, "対象シートが見つかりません。"
+        Exit Sub
+    End If
+
+    '--- フィードバックがある行を検出 ---
+    lastRow = ws.Cells(ws.Rows.Count, config.ColID).End(xlUp).Row
+    ReDim rowIndices(1 To lastRow - config.DataStartRow + 1)
+    rowCount = 0
+
+    For i = config.DataStartRow To lastRow
+        If Trim(CStr(ws.Range(config.ColID & i).Value)) <> "" Then
+            feedbackText = Trim(CStr(ws.Range(config.ColFeedback & i).Value))
+            evalResult = Trim(CStr(ws.Range(config.ColEvaluationResult & i).Value))
+
+            ' フィードバックがあり、かつ評価結果が既に存在する行のみ対象
+            If feedbackText <> "" And evalResult <> "" Then
+                rowCount = rowCount + 1
+                rowIndices(rowCount) = i
+            End If
+        End If
+    Next i
+
+    If rowCount = 0 Then
+        MsgBox "再評価対象のデータがありません。" & vbCrLf & vbCrLf & _
+               "以下を確認してください：" & vbCrLf & _
+               "1. フィードバック列（" & config.ColFeedback & "列）にテキストが入力されていること" & vbCrLf & _
+               "2. 評価結果列（" & config.ColEvaluationResult & "列）に初回評価結果が存在すること", _
+               vbInformation, "対象なし"
+        Exit Sub
+    End If
+
+    ReDim Preserve rowIndices(1 To rowCount)
+    totalItems = rowCount
+
+    '--- 再評価モード選択ダイアログ ---
+    Dim modeChoice As VbMsgBoxResult
+    modeChoice = MsgBox( _
+        "フィードバック再評価を実行します。" & vbCrLf & vbCrLf & _
+        "対象件数: " & totalItems & " 件" & vbCrLf & vbCrLf & _
+        "再評価モードを選択してください：" & vbCrLf & vbCrLf & _
+        "【はい】判断のみ再評価（推奨・高速）" & vbCrLf & _
+        "  → 証憑分析結果を再利用し、判断・根拠のみ見直します" & vbCrLf & _
+        "  → 所要時間: 約10-30秒/件" & vbCrLf & vbCrLf & _
+        "【いいえ】完全再評価" & vbCrLf & _
+        "  → 証憑の読み取りからやり直します" & vbCrLf & _
+        "  → 所要時間: 約60-120秒/件" & vbCrLf & vbCrLf & _
+        "【キャンセル】中止", _
+        vbYesNoCancel + vbQuestion, "再評価モード選択")
+
+    If modeChoice = vbCancel Then
+        WriteLog LOG_LEVEL_INFO, "ProcessFeedback", "ユーザーによりキャンセル"
+        Exit Sub
+    ElseIf modeChoice = vbYes Then
+        reevalMode = "judgment_only"
+    Else
+        reevalMode = "full"
+    End If
+
+    WriteLog LOG_LEVEL_INFO, "ProcessFeedback", "再評価モード: " & reevalMode & ", 対象件数: " & totalItems
+
+    '--- バッチ処理 ---
+    totalBatches = Application.WorksheetFunction.Ceiling(totalItems / config.BatchSize, 1)
+    inputJsonPath = Environ("TEMP") & "\excel_to_api_feedback_input.json"
+    outputJsonPath = Environ("TEMP") & "\excel_to_api_feedback_output.json"
+    hasError = False
+    processedItems = 0
+
+    For batchNum = 1 To totalBatches
+        startIdx = (batchNum - 1) * config.BatchSize + 1
+        endIdx = Application.WorksheetFunction.Min(batchNum * config.BatchSize, totalItems)
+
+        Application.StatusBar = "再評価処理中... バッチ " & batchNum & "/" & totalBatches & _
+                               " (項目 " & startIdx & "-" & endIdx & " / " & totalItems & ")"
+
+        WriteLog LOG_LEVEL_INFO, "ProcessFeedback", "バッチ " & batchNum & " 開始 (項目 " & startIdx & "-" & endIdx & ")"
+
+        '--- フィードバック付きJSON生成 ---
+        jsonText = GenerateFeedbackJsonForBatch(ws, rowIndices, startIdx, endIdx, config, reevalMode)
+
+        '--- JSONファイル保存 ---
+        If Not WriteToFile(inputJsonPath, jsonText) Then
+            WriteLog LOG_LEVEL_ERROR, "ProcessFeedback", "JSONファイル作成失敗"
+            ShowErrorMessage ERR_JSON_FILE_CREATE, "JSONファイルの作成に失敗しました。"
+            hasError = True
+            Exit For
+        End If
+
+        '--- 古い出力ファイルを削除 ---
+        On Error Resume Next
+        Kill outputJsonPath
+        On Error GoTo 0
+
+        '--- API呼び出し ---
+        success = CallApi(inputJsonPath, outputJsonPath, config)
+        If Not success Then
+            WriteLog LOG_LEVEL_ERROR, "ProcessFeedback", "API呼び出し失敗 - バッチ " & batchNum
+            ShowErrorMessage ERR_API_CALL_FAILED, "API呼び出しに失敗しました。"
+            hasError = True
+            Exit For
+        End If
+
+        '--- レスポンス読み取り ---
+        responseJson = ReadFromFile(outputJsonPath)
+        If responseJson = "" Then
+            WriteLog LOG_LEVEL_ERROR, "ProcessFeedback", "レスポンス読み取り失敗"
+            ShowErrorMessage ERR_RESPONSE_READ_FAILED, "APIレスポンスの読み取りに失敗しました。"
+            hasError = True
+            Exit For
+        End If
+
+        '--- APIエラーチェック ---
+        If InStr(1, responseJson, """error"": true", vbTextCompare) > 0 Then
+            Dim feedbackApiErrorMsg As String
+            feedbackApiErrorMsg = ExtractJsonValue(responseJson, "message")
+            WriteLog LOG_LEVEL_ERROR, "ProcessFeedback", "APIエラー - " & feedbackApiErrorMsg
+            ShowErrorMessage ERR_API_RETURNED_ERROR, "APIがエラーを返しました。" & vbCrLf & feedbackApiErrorMsg
+            hasError = True
+            Exit For
+        End If
+
+        '--- Excelへの書き戻し ---
+        WriteResponseToExcel responseJson, config
+
+        processedItems = endIdx
+        WriteLog LOG_LEVEL_INFO, "ProcessFeedback", "バッチ " & batchNum & " 完了"
+        DoEvents
+    Next batchNum
+
+    '--- 後処理 ---
+    Application.StatusBar = False
+    elapsedTime = Timer - startTime
+
+    If hasError Then
+        MsgBox "再評価処理がエラーにより中断されました。" & vbCrLf & _
+               "処理済み: " & processedItems & " / " & totalItems & " 件", _
+               vbExclamation, "再評価中断"
+    Else
+        WriteLog LOG_LEVEL_INFO, "ProcessFeedback", "===== 再評価処理完了 ====="
+        MsgBox "フィードバック再評価が完了しました。" & vbCrLf & vbCrLf & _
+               "モード: " & IIf(reevalMode = "judgment_only", "判断のみ再評価", "完全再評価") & vbCrLf & _
+               "処理件数: " & totalItems & " 件" & vbCrLf & _
+               "経過時間: " & Format(elapsedTime, "0.0") & " 秒", _
+               vbInformation, "再評価完了"
+    End If
+End Sub
+
+'===============================================================================
+' フィードバック付きバッチJSON生成関数
+'===============================================================================
+' 【機能】
+' 再評価用のバッチJSONを生成します。
+'===============================================================================
+Private Function GenerateFeedbackJsonForBatch(ws As Worksheet, rowIndices() As Long, startIdx As Long, endIdx As Long, config As SettingConfig, reevalMode As String) As String
+    Dim json As String
+    Dim itemJson As String
+    Dim i As Long
+
+    json = "[" & vbCrLf
+
+    For i = startIdx To endIdx
+        itemJson = GenerateFeedbackItemJson(ws, rowIndices(i), config, reevalMode)
+        json = json & itemJson
+        If i < endIdx Then json = json & ","
+        json = json & vbCrLf
+    Next i
+
+    json = json & "]"
+    GenerateFeedbackJsonForBatch = json
+End Function
 
 '===============================================================================
 ' エクスポート処理: ProcessForExport
@@ -1082,6 +1323,15 @@ Private Sub WriteResponseToExcel(responseJson As String, config As SettingConfig
                     WriteEvidenceFilesWithLinks ws, rowNum, itemJson, config
                 End If
 
+                '--- 再評価回数の書き込み ---
+                If config.ColReevalCount <> "" Then
+                    Dim reevalRoundStr As String
+                    reevalRoundStr = ExtractJsonValue(itemJson, "reevaluationRound")
+                    If reevalRoundStr <> "" And IsNumeric(reevalRoundStr) Then
+                        ws.Range(config.ColReevalCount & rowNum).Value = CLng(reevalRoundStr)
+                    End If
+                End If
+
                 processedCount = processedCount + 1
 
                 '--- 行高さの自動調整 ---
@@ -1728,6 +1978,12 @@ Private Function LoadSettings(ByRef config As SettingConfig) As Boolean
     config.ColControlDescription = ExtractNestedJsonValue(jsonText, "columns", "ControlDescription")
     config.ColTestProcedure = ExtractNestedJsonValue(jsonText, "columns", "TestProcedure")
     config.ColEvidenceLink = ExtractNestedJsonValue(jsonText, "columns", "EvidenceLink")
+    config.ColFeedback = ExtractNestedJsonValue(jsonText, "columns", "Feedback")
+    config.ColReevalCount = ExtractNestedJsonValue(jsonText, "columns", "ReevalCount")
+
+    '--- フィードバック設定の解析 ---
+    config.DefaultReevalMode = ExtractNestedJsonValue(jsonText, "feedback", "defaultMode")
+    If config.DefaultReevalMode = "" Then config.DefaultReevalMode = "judgment_only"
 
     '--- API設定の解析 ---
     config.ApiProvider = ExtractNestedJsonValue(jsonText, "api", "provider")
@@ -2126,6 +2382,83 @@ Private Function GenerateItemJson(ws As Worksheet, rowNum As Long, config As Set
 End Function
 
 '===============================================================================
+' フィードバック付きJSON生成関数
+'===============================================================================
+' 【機能】
+' 再評価用のJSON文字列を生成します。
+' 通常のGenerateItemJsonの内容に加え、UserFeedback、ReevaluationMode、
+' PreviousResult（前回の評価結果）を含みます。
+'
+' 【引数】
+' ws: 対象ワークシート
+' rowNum: 行番号
+' config: 設定情報
+' reevalMode: 再評価モード（"judgment_only" or "full"）
+'
+' 【戻り値】
+' String: フィードバック付きJSONオブジェクト
+'===============================================================================
+Private Function GenerateFeedbackItemJson(ws As Worksheet, rowNum As Long, config As SettingConfig, reevalMode As String) As String
+    Dim json As String
+    Dim indent As String
+    Dim feedbackText As String
+    Dim prevEvalResult As String
+    Dim prevJudgmentBasis As String
+    Dim prevPlanSummary As String
+
+    indent = "    "  ' 4スペースインデント
+
+    ' フィードバックテキストを取得
+    feedbackText = ""
+    If config.ColFeedback <> "" Then
+        feedbackText = Trim(CStr(ws.Range(config.ColFeedback & rowNum).Value))
+    End If
+
+    ' 前回の評価結果を取得
+    prevEvalResult = ""
+    If config.ColEvaluationResult <> "" Then
+        prevEvalResult = Trim(CStr(ws.Range(config.ColEvaluationResult & rowNum).Value))
+    End If
+    prevJudgmentBasis = ""
+    If config.ColJudgmentBasis <> "" Then
+        prevJudgmentBasis = Trim(CStr(ws.Range(config.ColJudgmentBasis & rowNum).Value))
+    End If
+    prevPlanSummary = ""
+    If config.ColExecutionPlanSummary <> "" Then
+        prevPlanSummary = Trim(CStr(ws.Range(config.ColExecutionPlanSummary & rowNum).Value))
+    End If
+
+    json = indent & "{" & vbCrLf
+    json = json & indent & indent & """ID"": """ & EscapeJsonString(CStr(ws.Range(config.ColID & rowNum).Value)) & """," & vbCrLf
+    json = json & indent & indent & """ControlDescription"": """ & EscapeJsonString(CStr(ws.Range(config.ColControlDescription & rowNum).Value)) & """," & vbCrLf
+    json = json & indent & indent & """TestProcedure"": """ & EscapeJsonString(CStr(ws.Range(config.ColTestProcedure & rowNum).Value)) & """," & vbCrLf
+    json = json & indent & indent & """EvidenceLink"": """ & EscapeJsonString(CStr(ws.Range(config.ColEvidenceLink & rowNum).Value)) & """," & vbCrLf
+
+    ' フィードバック関連フィールド
+    json = json & indent & indent & """UserFeedback"": """ & EscapeJsonString(feedbackText) & """," & vbCrLf
+    json = json & indent & indent & """ReevaluationMode"": """ & reevalMode & """," & vbCrLf
+
+    ' 前回の評価結果
+    json = json & indent & indent & """PreviousResult"": {" & vbCrLf
+
+    ' Boolean値に変換
+    Dim prevEvalBool As String
+    If prevEvalResult = config.BooleanDisplayTrue Then
+        prevEvalBool = "true"
+    Else
+        prevEvalBool = "false"
+    End If
+    json = json & indent & indent & indent & """evaluationResult"": " & prevEvalBool & "," & vbCrLf
+    json = json & indent & indent & indent & """judgmentBasis"": """ & EscapeJsonString(prevJudgmentBasis) & """," & vbCrLf
+    json = json & indent & indent & indent & """executionPlanSummary"": """ & EscapeJsonString(prevPlanSummary) & """" & vbCrLf
+    json = json & indent & indent & "}" & vbCrLf
+
+    json = json & indent & "}"
+
+    GenerateFeedbackItemJson = json
+End Function
+
+'===============================================================================
 ' JSONエスケープ関数
 '===============================================================================
 ' 【機能】
@@ -2454,6 +2787,8 @@ Public Sub ClearEvaluationResults()
     If config.ColJudgmentBasis <> "" Then confirmMsg = confirmMsg & "・判断根拠（" & config.ColJudgmentBasis & "列）" & vbCrLf
     If config.ColDocumentReference <> "" Then confirmMsg = confirmMsg & "・文書参照（" & config.ColDocumentReference & "列）" & vbCrLf
     If config.ColFileName <> "" Then confirmMsg = confirmMsg & "・ファイル名（" & config.ColFileName & "列〜）" & vbCrLf
+    If config.ColFeedback <> "" Then confirmMsg = confirmMsg & "・フィードバック（" & config.ColFeedback & "列）" & vbCrLf
+    If config.ColReevalCount <> "" Then confirmMsg = confirmMsg & "・再評価回数（" & config.ColReevalCount & "列）" & vbCrLf
     confirmMsg = confirmMsg & vbCrLf & "対象範囲: " & config.DataStartRow & "行目〜" & lastRow & "行目" & vbCrLf & vbCrLf
     confirmMsg = confirmMsg & "よろしいですか？"
 
@@ -2503,6 +2838,18 @@ Public Sub ClearEvaluationResults()
         On Error Resume Next
         ws.Range(ws.Cells(config.DataStartRow, fileNameColNum), ws.Cells(lastRow, clearEndCol)).Hyperlinks.Delete
         On Error GoTo ErrorHandler
+        clearedCount = clearedCount + 1
+    End If
+
+    ' フィードバック列のクリア
+    If config.ColFeedback <> "" Then
+        ws.Range(config.ColFeedback & config.DataStartRow & ":" & config.ColFeedback & lastRow).ClearContents
+        clearedCount = clearedCount + 1
+    End If
+
+    ' 再評価回数列のクリア
+    If config.ColReevalCount <> "" Then
+        ws.Range(config.ColReevalCount & config.DataStartRow & ":" & config.ColReevalCount & lastRow).ClearContents
         clearedCount = clearedCount + 1
     End If
 

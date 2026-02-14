@@ -1363,3 +1363,117 @@ class TestTestCoverage:
         coverage = self.orch._build_test_coverage(state)
         assert coverage["files_received"] == 0
         assert coverage["files_processed"] == 0
+
+
+# =============================================================================
+# フィードバック再評価テスト
+# =============================================================================
+
+class TestFeedbackReeval:
+    """フィードバック再評価関連のテスト"""
+
+    def setup_method(self):
+        """テスト用オーケストレーター作成"""
+        self.orch = GraphAuditOrchestrator(llm=None, vision_llm=None)
+
+    # --- _build_feedback_section テスト ---
+
+    def test_build_feedback_section_no_feedback(self):
+        """フィードバックなしで空文字を返す"""
+        result = self.orch._build_feedback_section(None, None)
+        assert result == ""
+
+    def test_build_feedback_section_empty_string(self):
+        """空文字列フィードバックで空文字を返す"""
+        result = self.orch._build_feedback_section("", None)
+        assert result == ""
+
+    def test_build_feedback_section_with_feedback_only(self):
+        """フィードバックのみ（前回結果なし）"""
+        result = self.orch._build_feedback_section(
+            "署名を確認してください", None
+        )
+        assert "署名を確認してください" in result
+        assert "ユーザーからのフィードバック" in result
+        assert "前回の評価結果" not in result
+
+    def test_build_feedback_section_with_previous_result(self):
+        """フィードバック＋前回結果あり"""
+        prev = {
+            "evaluationResult": True,
+            "judgmentBasis": "統制は有効である",
+            "executionPlanSummary": "【A5:意味的推論】",
+        }
+        result = self.orch._build_feedback_section(
+            "根拠を修正してください", prev
+        )
+        assert "根拠を修正してください" in result
+        assert "前回の評価結果" in result
+        assert "有効" in result
+        assert "統制は有効である" in result
+
+    def test_build_feedback_section_truncates_long_basis(self):
+        """長い判断根拠は500文字で切り詰められる"""
+        prev = {
+            "evaluationResult": False,
+            "judgmentBasis": "A" * 800,
+            "executionPlanSummary": "",
+        }
+        result = self.orch._build_feedback_section("test", prev)
+        assert "..." in result
+        # 500文字 + "..." が含まれているはず
+        assert "A" * 500 in result
+
+    # --- AuditResult フィードバックフィールド テスト ---
+
+    def test_audit_result_feedback_defaults(self):
+        """AuditResult: フィードバックフィールドのデフォルト値"""
+        result = AuditResult(
+            item_id="CLC-01",
+            evaluation_result=True,
+            judgment_basis="test",
+            document_reference="",
+            file_name="test.pdf",
+        )
+        assert result.feedback_applied is False
+        assert result.reevaluation_round == 0
+        assert result.result_changed is False
+
+    def test_audit_result_feedback_fields_in_response(self):
+        """AuditResult: to_response_dictにフィードバック情報が含まれる"""
+        result = AuditResult(
+            item_id="CLC-01",
+            evaluation_result=False,
+            judgment_basis="再評価結果",
+            document_reference="",
+            file_name="test.pdf",
+            feedback_applied=True,
+            reevaluation_round=2,
+            result_changed=True,
+        )
+        response = result.to_response_dict(include_debug=False)
+        assert response["feedbackApplied"] is True
+        assert response["reevaluationRound"] == 2
+        assert response["resultChanged"] is True
+
+    def test_audit_result_no_feedback_in_response(self):
+        """AuditResult: 初回評価時のレスポンス"""
+        result = AuditResult(
+            item_id="CLC-01",
+            evaluation_result=True,
+            judgment_basis="test",
+            document_reference="",
+            file_name="test.pdf",
+        )
+        response = result.to_response_dict(include_debug=False)
+        assert response["feedbackApplied"] is False
+        assert response["reevaluationRound"] == 0
+        assert response["resultChanged"] is False
+
+    # --- AuditGraphState フィードバックフィールド テスト ---
+
+    def test_state_has_feedback_fields(self):
+        """AuditGraphStateにフィードバックフィールドが存在する"""
+        assert "user_feedback" in AuditGraphState.__annotations__
+        assert "previous_result" in AuditGraphState.__annotations__
+        assert "reevaluation_mode" in AuditGraphState.__annotations__

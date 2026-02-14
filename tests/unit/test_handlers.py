@@ -217,7 +217,7 @@ class TestEvaluateSingleItem:
         """評価タイムアウト"""
         mock_orchestrator = Mock()
 
-        async def slow_evaluate(context):
+        async def slow_evaluate(context, **kwargs):
             await asyncio.sleep(10)
 
         mock_orchestrator.evaluate = slow_evaluate
@@ -390,7 +390,7 @@ class TestHandlersIntegration:
         # 最初の呼び出しはエラー、2回目は成功
         call_count = 0
 
-        async def conditional_evaluate(context):
+        async def conditional_evaluate(context, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -422,3 +422,79 @@ class TestHandlersIntegration:
             sample_request_item
         )
         assert result2["evaluationResult"] is True
+
+
+# =============================================================================
+# フィードバック再評価テスト
+# =============================================================================
+
+class TestFeedbackReeval:
+    """フィードバック再評価のテスト"""
+
+    @pytest.mark.asyncio
+    async def test_feedback_passes_to_orchestrator(self, sample_request_item):
+        """フィードバック情報がオーケストレーターに渡される"""
+        mock_orchestrator = Mock()
+        mock_result = Mock()
+        mock_result.to_response_dict.return_value = {
+            "ID": "CLC-01",
+            "evaluationResult": True,
+            "judgmentBasis": "再評価済み",
+            "feedbackApplied": True,
+            "reevaluationRound": 1,
+            "resultChanged": False,
+        }
+        mock_orchestrator.evaluate = AsyncMock(return_value=mock_result)
+
+        item = dict(sample_request_item)
+        item["UserFeedback"] = "署名を確認してください"
+        item["ReevaluationMode"] = "judgment_only"
+        item["PreviousResult"] = {
+            "evaluationResult": True,
+            "judgmentBasis": "統制は有効",
+        }
+
+        result = await evaluate_single_item(mock_orchestrator, item)
+
+        # evaluate がフィードバック引数付きで呼ばれたことを確認
+        call_kwargs = mock_orchestrator.evaluate.call_args
+        assert call_kwargs.kwargs["user_feedback"] == "署名を確認してください"
+        assert call_kwargs.kwargs["reevaluation_mode"] == "judgment_only"
+        assert call_kwargs.kwargs["previous_result"] is not None
+        assert result["feedbackApplied"] is True
+
+    @pytest.mark.asyncio
+    async def test_no_feedback_passes_none(self, sample_request_item):
+        """フィードバックなしの場合はNoneが渡される"""
+        mock_orchestrator = Mock()
+        mock_result = Mock()
+        mock_result.to_response_dict.return_value = {
+            "ID": "CLC-01",
+            "evaluationResult": True,
+        }
+        mock_orchestrator.evaluate = AsyncMock(return_value=mock_result)
+
+        result = await evaluate_single_item(
+            mock_orchestrator, sample_request_item
+        )
+
+        call_kwargs = mock_orchestrator.evaluate.call_args
+        assert call_kwargs.kwargs["user_feedback"] is None
+        assert call_kwargs.kwargs["reevaluation_mode"] is None
+        assert call_kwargs.kwargs["previous_result"] is None
+
+    @pytest.mark.asyncio
+    async def test_empty_feedback_passes_none(self, sample_request_item):
+        """空文字列のフィードバックはNoneとして扱われる"""
+        mock_orchestrator = Mock()
+        mock_result = Mock()
+        mock_result.to_response_dict.return_value = {"ID": "CLC-01"}
+        mock_orchestrator.evaluate = AsyncMock(return_value=mock_result)
+
+        item = dict(sample_request_item)
+        item["UserFeedback"] = "   "  # 空白のみ
+
+        await evaluate_single_item(mock_orchestrator, item)
+
+        call_kwargs = mock_orchestrator.evaluate.call_args
+        assert call_kwargs.kwargs["user_feedback"] is None
