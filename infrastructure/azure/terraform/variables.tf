@@ -116,6 +116,36 @@ variable "container_image_tag" {
 }
 
 # ------------------------------------------------------------------------------
+# APIキー（デプロイ後に az containerapp secret set で更新可能）
+# ------------------------------------------------------------------------------
+
+variable "azure_openai_api_key" {
+  description = "Azure OpenAI APIキー"
+  type        = string
+  default     = "PLACEHOLDER"
+  sensitive   = true
+}
+
+variable "azure_openai_endpoint" {
+  description = "Azure OpenAI エンドポイントURL"
+  type        = string
+  default     = "https://placeholder.openai.azure.com/"
+}
+
+variable "azure_di_key" {
+  description = "Azure Document Intelligence APIキー"
+  type        = string
+  default     = "PLACEHOLDER"
+  sensitive   = true
+}
+
+variable "azure_di_endpoint" {
+  description = "Azure Document Intelligence エンドポイントURL"
+  type        = string
+  default     = "https://placeholder.cognitiveservices.azure.com/"
+}
+
+# ------------------------------------------------------------------------------
 # 監視設定
 # ------------------------------------------------------------------------------
 

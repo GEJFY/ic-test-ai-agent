@@ -54,6 +54,27 @@ resource "azurerm_container_app" "main" {
     value = azurerm_container_registry.main.admin_password
   }
 
+  # API キー（デプロイ後に az containerapp secret set で実際の値を設定）
+  secret {
+    name  = "azure-openai-api-key"
+    value = var.azure_openai_api_key
+  }
+
+  secret {
+    name  = "azure-openai-endpoint"
+    value = var.azure_openai_endpoint
+  }
+
+  secret {
+    name  = "azure-di-key"
+    value = var.azure_di_key
+  }
+
+  secret {
+    name  = "azure-di-endpoint"
+    value = var.azure_di_endpoint
+  }
+
   ingress {
     external_enabled = true
     target_port      = 8080
@@ -75,7 +96,7 @@ resource "azurerm_container_app" "main" {
       cpu    = var.container_app_cpu
       memory = var.container_app_memory
 
-      # 環境変数
+      # 環境変数（アプリが期待する変数名に合わせる）
       env {
         name  = "LLM_PROVIDER"
         value = "AZURE"
@@ -85,24 +106,24 @@ resource "azurerm_container_app" "main" {
         value = "AZURE"
       }
       env {
-        name  = "AZURE_FOUNDRY_API_KEY"
-        value = "@Microsoft.KeyVault(VaultName=${local.key_vault_name};SecretName=AZURE-FOUNDRY-API-KEY)"
+        name        = "AZURE_OPENAI_API_KEY"
+        secret_name = "azure-openai-api-key"  # pragma: allowlist secret
       }
       env {
-        name  = "AZURE_FOUNDRY_ENDPOINT"
-        value = "@Microsoft.KeyVault(VaultName=${local.key_vault_name};SecretName=AZURE-FOUNDRY-ENDPOINT)"
+        name        = "AZURE_OPENAI_ENDPOINT"
+        secret_name = "azure-openai-endpoint"  # pragma: allowlist secret
       }
       env {
-        name  = "AZURE_FOUNDRY_DEPLOYMENT_NAME"
+        name  = "AZURE_OPENAI_DEPLOYMENT_NAME"
         value = "gpt-4o"
       }
       env {
-        name  = "AZURE_DOCUMENT_INTELLIGENCE_KEY"
-        value = "@Microsoft.KeyVault(VaultName=${local.key_vault_name};SecretName=AZURE-DOCUMENT-INTELLIGENCE-KEY)"
+        name        = "AZURE_DI_KEY"
+        secret_name = "azure-di-key"  # pragma: allowlist secret
       }
       env {
-        name  = "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"
-        value = "@Microsoft.KeyVault(VaultName=${local.key_vault_name};SecretName=AZURE-DOCUMENT-INTELLIGENCE-ENDPOINT)"
+        name        = "AZURE_DI_ENDPOINT"
+        secret_name = "azure-di-endpoint"  # pragma: allowlist secret
       }
       env {
         name  = "APPLICATIONINSIGHTS_CONNECTION_STRING"
@@ -150,6 +171,7 @@ resource "azurerm_container_app" "main" {
   lifecycle {
     ignore_changes = [
       template[0].container[0].image,
+      secret,
     ]
   }
 }
