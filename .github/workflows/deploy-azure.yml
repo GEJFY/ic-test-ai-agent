@@ -63,6 +63,14 @@ jobs:
           terraform_version: 1.6.0
           terraform_wrapper: false
 
+      - name: Set Terraform auth env vars
+        run: |
+          CREDS='${{ secrets.AZURE_CREDENTIALS }}'
+          echo "ARM_CLIENT_ID=$(echo $CREDS | jq -r .clientId)" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=$(echo $CREDS | jq -r .clientSecret)" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=$(echo $CREDS | jq -r .tenantId)" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=$(echo $CREDS | jq -r .subscriptionId)" >> $GITHUB_ENV
+
       - name: Deploy Infrastructure
         working-directory: ./infrastructure/azure/terraform
         run: |
