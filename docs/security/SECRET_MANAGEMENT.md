@@ -657,7 +657,7 @@ provider = EnvironmentSecretProvider()
 
 # .env ファイルと組み合わせて使用
 # (.env ファイルは python-dotenv 等で事前にロード)
-api_key = provider.get_secret("AZURE_FOUNDRY_API_KEY")
+api_key = provider.get_secret("AZURE_API_KEY")
 
 # テスト用にシークレットを一時設定
 provider.set_secret("TEST_API_KEY", "test-value-123")
@@ -850,7 +850,7 @@ Key Vault等のシークレット名と環境変数名のマッピング:
 
 | Key Vault名 | 環境変数名 | 備考 |
 |-------------|-----------|------|
-| `azure-foundry-api-key` | `AZURE_FOUNDRY_API_KEY` | ハイフンをアンダースコアに変換、大文字化 |
+| `azure-foundry-api-key` | `AZURE_API_KEY` | ハイフンをアンダースコアに変換、大文字化 |
 | `bedrock-api-key` | `BEDROCK_API_KEY` | 同上 |
 | `vertex-ai-key` | `VERTEX_AI_KEY` | 同上 |
 
@@ -883,7 +883,7 @@ print(f"接続文字列: {connection_string}")               # 標準出力に�
 SECRET_PROVIDER=azure
 
 # 開発環境のみ: 環境変数に直接設定可
-AZURE_FOUNDRY_API_KEY=sk-dev-key-for-testing
+AZURE_API_KEY=sk-dev-key-for-testing
 ```
 
 `fallback_to_env` パラメータは開発環境での利便性のために提供されています。本番環境では `fallback_to_env=False` を指定するか、環境変数 `SECRET_PROVIDER` を正しく設定して常にクラウドプロバイダーが選択されるようにしてください。
@@ -941,7 +941,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SECRET_PROVIDER: env
-      AZURE_FOUNDRY_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
+      AZURE_API_KEY: ${{ secrets.AZURE_API_KEY }}
       BEDROCK_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
       VERTEX_AI_KEY: ${{ secrets.VERTEX_AI_KEY }}
 
@@ -1226,7 +1226,7 @@ GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa-key.json
 
 ```bash
 # ローカル開発（環境変数プロバイダー）
-export AZURE_FOUNDRY_API_KEY="sk-dev-key"  # pragma: allowlist secret
+export AZURE_API_KEY="sk-dev-key"  # pragma: allowlist secret
 python -m src.main
 
 # Azure 本番

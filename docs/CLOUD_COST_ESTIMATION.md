@@ -547,10 +547,10 @@ API呼び出し: 1,000項目 × 5回/件 = 5,000回 → 無料枠内
 
 ```env
 # LLM Provider
-LLM_PROVIDER=AZURE_FOUNDRY
-AZURE_FOUNDRY_ENDPOINT=https://your-project.japaneast.models.ai.azure.com
-AZURE_FOUNDRY_API_KEY=your-api-key
-AZURE_FOUNDRY_MODEL=gpt-5.2
+LLM_PROVIDER=AZURE
+AZURE_ENDPOINT=https://your-project.japaneast.models.ai.azure.com
+AZURE_API_KEY=your-api-key
+AZURE_MODEL=gpt-5.2
 
 # OCR Provider
 OCR_PROVIDER=AZURE

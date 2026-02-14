@@ -297,7 +297,7 @@ record_metric("evaluation_total", 1, {"task_type": "A5"})
 from infrastructure.secrets import get_secret_provider
 
 provider = get_secret_provider()  # 環境変数で自動選択
-api_key = provider.get_secret("AZURE_FOUNDRY_API_KEY")
+api_key = provider.get_secret("AZURE_API_KEY")
 ```
 
 ---
@@ -1059,7 +1059,7 @@ ic-test-ai-agent/
 | 変数名 | 説明 | デフォルト |
 |--------|------|----------|
 | `ENVIRONMENT` | 実行環境 (production/development) | `development` |
-| `LLM_PROVIDER` | LLMプロバイダー (AZURE_FOUNDRY/AWS/GCP/LOCAL) | 自動検出 |
+| `LLM_PROVIDER` | LLMプロバイダー (AZURE/AWS/GCP/LOCAL) | 自動検出 |
 | `SECRET_PROVIDER` | シークレットプロバイダー | 自動検出 |
 | `MAX_PLAN_REVISIONS` | 計画レビュー最大修正回数 | `1` |
 | `MAX_JUDGMENT_REVISIONS` | 判断レビュー最大修正回数 | `1` |

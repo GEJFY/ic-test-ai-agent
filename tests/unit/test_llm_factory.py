@@ -34,16 +34,20 @@ class TestLLMProvider:
 
     def test_all_providers_exist(self):
         """全プロバイダーが定義されているか"""
-        expected_providers = ["AZURE_FOUNDRY", "GCP", "AWS", "LOCAL"]
+        expected_providers = ["AZURE", "GCP", "AWS", "LOCAL"]
         for provider in expected_providers:
             assert hasattr(LLMProvider, provider)
 
     def test_provider_values(self):
         """プロバイダー値の確認"""
-        assert LLMProvider.AZURE_FOUNDRY.value == "AZURE_FOUNDRY"
+        assert LLMProvider.AZURE.value == "AZURE"
         assert LLMProvider.GCP.value == "GCP"
         assert LLMProvider.AWS.value == "AWS"
         assert LLMProvider.LOCAL.value == "LOCAL"
+
+    def test_azure_foundry_not_in_enum(self):
+        """AZURE_FOUNDRYはEnum値として存在しないこと"""
+        assert not hasattr(LLMProvider, "AZURE_FOUNDRY")
 
 
 # =============================================================================
@@ -70,10 +74,10 @@ class TestLLMConfigError:
         """不足変数情報付きエラー"""
         error = LLMConfigError(
             message="環境変数が不足",
-            missing_vars=["AZURE_FOUNDRY_ENDPOINT", "AZURE_FOUNDRY_API_KEY"]
+            missing_vars=["AZURE_ENDPOINT", "AZURE_API_KEY"]
         )
         assert len(error.missing_vars) == 2
-        assert "AZURE_FOUNDRY_ENDPOINT" in error.missing_vars
+        assert "AZURE_ENDPOINT" in error.missing_vars
 
 
 # =============================================================================
@@ -90,11 +94,17 @@ class TestLLMFactory:
             with pytest.raises(LLMConfigError):
                 LLMFactory.get_provider()
 
-    def test_get_provider_azure_foundry(self):
-        """Azure Foundryプロバイダー取得"""
+    def test_get_provider_azure(self):
+        """Azureプロバイダー取得"""
+        with patch.dict(os.environ, {"LLM_PROVIDER": "AZURE"}):
+            provider = LLMFactory.get_provider()
+            assert provider == LLMProvider.AZURE
+
+    def test_get_provider_azure_foundry_backward_compat(self):
+        """AZURE_FOUNDRYは後方互換でAZUREに変換される"""
         with patch.dict(os.environ, {"LLM_PROVIDER": "AZURE_FOUNDRY"}):
             provider = LLMFactory.get_provider()
-            assert provider == LLMProvider.AZURE_FOUNDRY
+            assert provider == LLMProvider.AZURE
 
     def test_get_provider_gcp(self):
         """GCPプロバイダー取得"""
@@ -121,30 +131,87 @@ class TestLLMFactory:
             assert "configured" in status
             assert "provider" in status
 
-    def test_get_config_status_azure_foundry(self):
-        """Azure Foundry設定状態の取得"""
+    def test_get_config_status_azure(self):
+        """Azure設定状態の取得（プライマリ環境変数）"""
+        env_vars = {
+            "LLM_PROVIDER": "AZURE",
+            "AZURE_ENDPOINT": "https://test.azure.com/",
+            "AZURE_API_KEY": "test-key",
+            "AZURE_MODEL": "gpt-4o-mini"
+        }
+        with patch.dict(os.environ, env_vars, clear=True):
+            status = LLMFactory.get_config_status()
+            assert status["provider"] == "AZURE"
+            assert status["configured"] is True
+
+    def test_get_config_status_azure_foundry_fallback(self):
+        """Azure設定状態の取得（AZURE_FOUNDRY_*フォールバック）"""
+        env_vars = {
+            "LLM_PROVIDER": "AZURE",
+            "AZURE_FOUNDRY_ENDPOINT": "https://test.azure.com/",
+            "AZURE_FOUNDRY_API_KEY": "test-key",
+        }
+        with patch.dict(os.environ, env_vars, clear=True):
+            status = LLMFactory.get_config_status()
+            assert status["provider"] == "AZURE"
+            assert status["configured"] is True
+
+    def test_get_config_status_azure_foundry_provider_fallback(self):
+        """AZURE_FOUNDRYプロバイダー値でも設定状態が正しく取得できる"""
         env_vars = {
             "LLM_PROVIDER": "AZURE_FOUNDRY",
             "AZURE_FOUNDRY_ENDPOINT": "https://test.azure.com/",
             "AZURE_FOUNDRY_API_KEY": "test-key",
             "AZURE_FOUNDRY_MODEL": "gpt-4o-mini"
         }
-        with patch.dict(os.environ, env_vars):
+        with patch.dict(os.environ, env_vars, clear=True):
             status = LLMFactory.get_config_status()
-            assert status["provider"] == "AZURE_FOUNDRY"
+            assert status["provider"] == "AZURE"
             assert status["configured"] is True
 
     def test_get_config_status_missing_vars(self):
         """必要変数が不足している場合"""
         env_vars = {
-            "LLM_PROVIDER": "AZURE_FOUNDRY",
-            "AZURE_FOUNDRY_ENDPOINT": "https://test.azure.com/"
-            # API_KEYとMODELが不足
+            "LLM_PROVIDER": "AZURE",
+            "AZURE_ENDPOINT": "https://test.azure.com/"
+            # API_KEYが不足
         }
         with patch.dict(os.environ, env_vars, clear=True):
             status = LLMFactory.get_config_status()
             if not status["configured"]:
                 assert "missing_vars" in status
+
+    @pytest.mark.integration
+    def test_create_chat_model_azure(self):
+        """Azure ChatModel作成（統合テスト）"""
+        env_vars = {
+            "LLM_PROVIDER": "AZURE",
+            "AZURE_ENDPOINT": "https://test.openai.azure.com/",
+            "AZURE_API_KEY": "test-key",
+            "AZURE_MODEL": "gpt-4o",
+            "AZURE_API_VERSION": "2024-02-01"
+        }
+        with patch.dict(os.environ, env_vars):
+            # 設定状態を確認
+            status = LLMFactory.get_config_status()
+            assert status["provider"] == "AZURE"
+            assert status["configured"] is True
+
+    @pytest.mark.integration
+    def test_create_vision_model_azure(self):
+        """Azure VisionModel作成（統合テスト）"""
+        env_vars = {
+            "LLM_PROVIDER": "AZURE",
+            "AZURE_ENDPOINT": "https://test.openai.azure.com/",
+            "AZURE_API_KEY": "test-key",
+            "AZURE_MODEL": "gpt-4o",
+            "AZURE_API_VERSION": "2024-02-01"
+        }
+        with patch.dict(os.environ, env_vars):
+            # 設定状態を確認
+            status = LLMFactory.get_config_status()
+            assert status["configured"] is True
+
 
     def test_create_chat_model_raises_without_config(self):
         """設定なしでChatModel作成時にエラー"""
@@ -190,7 +257,8 @@ class TestLLMFactoryIntegration:
     def test_multiple_provider_detection(self):
         """複数プロバイダーの検出"""
         providers_to_test = [
-            ("AZURE_FOUNDRY", LLMProvider.AZURE_FOUNDRY),
+            ("AZURE", LLMProvider.AZURE),
+            ("AZURE_FOUNDRY", LLMProvider.AZURE),  # 後方互換: AZUREに変換
             ("GCP", LLMProvider.GCP),
             ("AWS", LLMProvider.AWS),
             ("LOCAL", LLMProvider.LOCAL),

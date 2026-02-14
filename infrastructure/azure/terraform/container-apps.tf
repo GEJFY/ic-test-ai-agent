@@ -124,18 +124,18 @@ resource "azurerm_container_app" "main" {
       # 環境変数（アプリが期待する変数名に合わせる）
       env {
         name  = "LLM_PROVIDER"
-        value = "AZURE_FOUNDRY"
+        value = "AZURE"
       }
       env {
         name  = "OCR_PROVIDER"
         value = "AZURE"
       }
       env {
-        name        = "AZURE_FOUNDRY_API_KEY"
+        name        = "AZURE_API_KEY"
         secret_name = "azure-foundry-api-key"  # pragma: allowlist secret
       }
       env {
-        name        = "AZURE_FOUNDRY_ENDPOINT"
+        name        = "AZURE_ENDPOINT"
         secret_name = "azure-foundry-endpoint"  # pragma: allowlist secret
       }
       env {
@@ -154,12 +154,12 @@ resource "azurerm_container_app" "main" {
 
       # モデル・API設定
       env {
-        name  = "AZURE_FOUNDRY_MODEL"
-        value = var.azure_foundry_model
+        name  = "AZURE_MODEL"
+        value = var.azure_model
       }
       env {
-        name  = "AZURE_FOUNDRY_API_VERSION"
-        value = var.azure_foundry_api_version
+        name  = "AZURE_API_VERSION"
+        value = var.azure_api_version
       }
 
       # オーケストレータ・パフォーマンス設定

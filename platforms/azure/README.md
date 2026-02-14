@@ -41,10 +41,10 @@
 
 ```bash
 # LLM設定（Azure AI Foundry推奨）
-LLM_PROVIDER=AZURE_FOUNDRY
-AZURE_FOUNDRY_ENDPOINT=https://your-project.region.models.ai.azure.com
-AZURE_FOUNDRY_API_KEY=your-foundry-api-key
-AZURE_FOUNDRY_MODEL=gpt-5-nano
+LLM_PROVIDER=AZURE
+AZURE_ENDPOINT=https://your-project.region.models.ai.azure.com
+AZURE_API_KEY=your-foundry-api-key
+AZURE_MODEL=gpt-5-nano
 ```
 
 ### OCR設定（オプション）
@@ -161,10 +161,10 @@ az containerapp create `
   --cpu 1.0 --memory 2.0Gi `
   --min-replicas 0 --max-replicas 3 `
   --env-vars `
-    LLM_PROVIDER=AZURE_FOUNDRY `
-    AZURE_FOUNDRY_ENDPOINT=https://your-project.region.models.ai.azure.com `
-    AZURE_FOUNDRY_API_KEY=your-api-key `
-    AZURE_FOUNDRY_MODEL=gpt-5-nano `
+    LLM_PROVIDER=AZURE `
+    AZURE_ENDPOINT=https://your-project.region.models.ai.azure.com `
+    AZURE_API_KEY=your-api-key `
+    AZURE_MODEL=gpt-5-nano `
     OCR_PROVIDER=NONE
 ```
 

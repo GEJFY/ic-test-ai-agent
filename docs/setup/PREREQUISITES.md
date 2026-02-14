@@ -331,12 +331,12 @@ code .env
 
 ```bash
 # LLMプロバイダーの選択（いずれか一つ）
-LLM_PROVIDER=AZURE_FOUNDRY
+LLM_PROVIDER=AZURE
 
 # === Azure AI Foundry を使う場合 ===
-AZURE_FOUNDRY_ENDPOINT=https://your-project.region.models.ai.azure.com
-AZURE_FOUNDRY_API_KEY=your-foundry-api-key
-AZURE_FOUNDRY_MODEL=gpt-5.2
+AZURE_ENDPOINT=https://your-project.region.models.ai.azure.com
+AZURE_API_KEY=your-foundry-api-key
+AZURE_MODEL=gpt-5.2
 
 # === OCRプロバイダー（省略可、デフォルトはpypdf） ===
 # OCR_PROVIDER=AZURE
@@ -536,7 +536,7 @@ Swagger UI（APIドキュメント画面）が表示されます。
 
 | 変数名 | 値の例 | 説明 |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `AZURE_FOUNDRY` | LLMプロバイダーの選択。`AZURE_FOUNDRY`, `AZURE`, `GCP`, `AWS`, `LOCAL` のいずれか |
+| `LLM_PROVIDER` | `AZURE` | LLMプロバイダーの選択。`AZURE`, `GCP`, `AWS`, `LOCAL` のいずれか |
 | `OCR_PROVIDER` | `AZURE` | OCRプロバイダーの選択。`AZURE`, `AWS`, `GCP`, `TESSERACT`, `YOMITOKU`, `NONE` のいずれか |
 | `MAX_PLAN_REVISIONS` | `1` | 計画レビューの最大修正回数（0でスキップ） |
 | `MAX_JUDGMENT_REVISIONS` | `1` | 判断レビューの最大修正回数（0でスキップ） |
@@ -546,9 +546,9 @@ Swagger UI（APIドキュメント画面）が表示されます。
 
 | 変数名 | 説明 |
 | --- | --- |
-| `AZURE_FOUNDRY_ENDPOINT` | Azure AI Foundry のエンドポイントURL |
-| `AZURE_FOUNDRY_API_KEY` | Azure AI Foundry のAPIキー |
-| `AZURE_FOUNDRY_MODEL` | 使用するモデル名（例: `gpt-5-nano`） |
+| `AZURE_ENDPOINT` | Azure AI Foundry のエンドポイントURL |
+| `AZURE_API_KEY` | Azure AI Foundry のAPIキー |
+| `AZURE_MODEL` | 使用するモデル名（例: `gpt-5-nano`） |
 | `AZURE_DI_ENDPOINT` | Azure Document Intelligence のエンドポイント |
 | `AZURE_DI_KEY` | Azure Document Intelligence のキー |
 | `AZURE_STORAGE_CONNECTION_STRING` | Azure Storage の接続文字列（非同期ジョブ用） |

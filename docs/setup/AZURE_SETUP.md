@@ -442,10 +442,10 @@ ic-test-ai-agent/
 
 ```ini
 # .env ファイル
-LLM_PROVIDER=AZURE_FOUNDRY
-AZURE_FOUNDRY_API_KEY=<後で設定>
-AZURE_FOUNDRY_ENDPOINT=<後で設定>
-AZURE_FOUNDRY_MODEL=gpt-5-nano
+LLM_PROVIDER=AZURE
+AZURE_API_KEY=<後で設定>
+AZURE_ENDPOINT=<後で設定>
+AZURE_MODEL=gpt-5-nano
 ```
 
 ⚠️ **注意**: `.env` ファイルにはAPIキー等の機密情報が含まれます。`.gitignore` に必ず含めてください。
@@ -538,7 +538,7 @@ Container app created. Access your app at https://ca-ic-test-ai-prod.xxxxx.japan
 
 **Azure AI Foundry**は、GPT-5.2、Claude、Phi-4、Mistral等の複数モデルをAzureのエンタープライズ環境で統合的に利用できるプラットフォームです。
 
-**本システムではAzure AI Foundry（`LLM_PROVIDER=AZURE_FOUNDRY`）を推奨します。**
+**本システムではAzure AI Foundry（`LLM_PROVIDER=AZURE`）を推奨します。**
 
 | 観点 | OpenAI API直接 | Azure AI Foundry |
 |------|---------------|-----------------|
@@ -678,10 +678,10 @@ python test_foundry.py
 
 | 環境変数名 | 説明 | 例 |
 |-----------|------|-----|
-| `LLM_PROVIDER` | LLMプロバイダー指定 | `AZURE_FOUNDRY` |
-| `AZURE_FOUNDRY_API_KEY` | APIキー | `abcdef1234...` |
-| `AZURE_FOUNDRY_ENDPOINT` | エンドポイントURL | `https://ic-test-ai-foundry.openai.azure.com/` |
-| `AZURE_FOUNDRY_MODEL` | モデル名 | `gpt-5-nano` |
+| `LLM_PROVIDER` | LLMプロバイダー指定 | `AZURE` |
+| `AZURE_API_KEY` | APIキー | `abcdef1234...` |
+| `AZURE_ENDPOINT` | エンドポイントURL | `https://ic-test-ai-foundry.openai.azure.com/` |
+| `AZURE_MODEL` | モデル名 | `gpt-5-nano` |
 
 ### トークン使用量とコスト管理
 

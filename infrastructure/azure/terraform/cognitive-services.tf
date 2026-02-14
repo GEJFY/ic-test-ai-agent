@@ -22,18 +22,18 @@ resource "azurerm_cognitive_account" "foundry" {
 }
 
 resource "azurerm_cognitive_deployment" "llm" {
-  name                 = var.azure_foundry_model
+  name                 = var.azure_model
   cognitive_account_id = azurerm_cognitive_account.foundry.id
 
   model {
     format  = "OpenAI" # Azure APIのモデルフォーマット名（変更不可）
-    name    = var.azure_foundry_model
-    version = var.azure_foundry_model_version
+    name    = var.azure_model
+    version = var.azure_model_version
   }
 
   scale {
     type     = "GlobalStandard"
-    capacity = var.azure_foundry_capacity
+    capacity = var.azure_capacity
   }
 }
 

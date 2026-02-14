@@ -195,7 +195,7 @@ def get_llm_instances() -> Tuple[Any, Any]:
 
     【環境変数】
     LLMの設定には以下の環境変数が必要です（プロバイダーにより異なる）：
-    - AZURE_FOUNDRY_*: Azure AI Foundry用（推奨）
+    - AZURE_*: Azure AI Foundry用
     - GCP_*: Google Vertex AI用
     - AWS_*: AWS Bedrock用
 
