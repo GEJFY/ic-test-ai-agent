@@ -156,6 +156,54 @@ resource "google_cloud_run_v2_service" "ic_test_ai" {
         value = "false"
       }
 
+      # モデル設定
+      env {
+        name  = "GCP_MODEL_NAME"
+        value = var.gcp_model_name
+      }
+
+      # オーケストレータ・パフォーマンス設定
+      env {
+        name  = "USE_GRAPH_ORCHESTRATOR"
+        value = "true"
+      }
+
+      env {
+        name  = "MAX_PLAN_REVISIONS"
+        value = "1"
+      }
+
+      env {
+        name  = "MAX_JUDGMENT_REVISIONS"
+        value = "1"
+      }
+
+      env {
+        name  = "SKIP_PLAN_CREATION"
+        value = "false"
+      }
+
+      # 非同期ジョブ処理設定
+      env {
+        name  = "JOB_STORAGE_PROVIDER"
+        value = "GCP"
+      }
+
+      env {
+        name  = "JOB_QUEUE_PROVIDER"
+        value = "GCP"
+      }
+
+      env {
+        name  = "GCP_FIRESTORE_DATABASE"
+        value = google_firestore_database.evaluation_jobs.name
+      }
+
+      env {
+        name  = "GCP_CLOUD_TASKS_QUEUE"
+        value = google_cloud_tasks_queue.evaluation_queue.name
+      }
+
       # ヘルスチェック（Liveness）
       liveness_probe {
         http_get {

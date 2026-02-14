@@ -184,7 +184,7 @@ API Gatewayは外部ネットワーク（North-South）からのトラフィッ�
 | **相関ID** | set-variable + set-header ポリシー | Request Parameter Mapping | AssignMessage ポリシー |
 | **ログ** | Application Insights (W3C) | CloudWatch Logs | Cloud Logging |
 | **TLS** | TLS 1.2+のみ（SSL3.0/TLS1.0/1.1無効化） | TLS 1.2+ | TLS 1.2+ |
-| **IaC** | Bicep (apim.bicep) | Terraform (api-gateway.tf) | Terraform (apigee.tf) |
+| **IaC** | Terraform (apim.tf) | Terraform (api-gateway.tf) | Terraform (apigee.tf) |
 
 ### 3.3 バックエンド層
 
@@ -527,7 +527,7 @@ execute_tasks -> aggregate_results -> output
 
 ## 6. デプロイメントアーキテクチャ
 
-### 6.1 Azure デプロイ (Bicep)
+### 6.1 Azure デプロイ (Terraform)
 
 ```mermaid
 flowchart TB
@@ -559,24 +559,26 @@ flowchart TB
     end
 ```
 
-**Bicepファイル構成:**
+**Terraformファイル構成:**
 
 | ファイル | リソース | 説明 |
 |---------|---------|------|
-| `main.bicep` | 統合デプロイ | 全モジュールのオーケストレーション |
-| `app-insights.bicep` | Log Analytics + App Insights | 監視基盤 |
-| `container-app.bicep` | ACR + Container Apps Environment + Container App | バックエンド |
-| `key-vault.bicep` | Key Vault | シークレット管理 |
-| `apim.bicep` | API Management + API定義 + サブスクリプション | API Gateway |
-| `parameters.json` | パラメータ値 | 環境別設定値 |
+| `monitoring.tf` | Log Analytics + App Insights | 監視基盤 |
+| `container-apps.tf` | ACR + Container Apps Environment + Container App | バックエンド |
+| `cognitive-services.tf` | Azure AI Foundry + Document Intelligence | AIサービス |
+| `storage.tf` | Storage Account + Table + Queue | 非同期ジョブ処理 |
+| `key-vault.tf` | Key Vault | シークレット管理 |
+| `apim.tf` | API Management + API定義 + サブスクリプション | API Gateway |
+| `variables.tf` | 変数定義 | 環境別設定値 |
+| `terraform.tfvars` | パラメータ値 | 環境別設定値 |
 
 **デプロイコマンド:**
 ```bash
 az group create --name rg-ic-test-ai-prod --location japaneast
-az deployment group create \
-  --resource-group rg-ic-test-ai-prod \
-  --template-file infrastructure/azure/bicep/main.bicep \
-  --parameters infrastructure/azure/bicep/parameters.json
+cd infrastructure/azure/terraform
+terraform init
+terraform plan -out=tfplan -var="resource_group_name=rg-ic-test-ai-prod"
+terraform apply -auto-approve tfplan
 ```
 
 ### 6.2 AWS デプロイ (Terraform)
@@ -847,19 +849,23 @@ ic-test-ai-agent/
 |
 |-- infrastructure/                   # IaCテンプレート
 |   |-- azure/
-|   |   |-- bicep/
-|   |   |   |-- main.bicep            # 統合デプロイメント
-|   |   |   |-- apim.bicep            # API Management
-|   |   |   |-- container-app.bicep   # Container App
-|   |   |   |-- key-vault.bicep       # Key Vault
-|   |   |   |-- app-insights.bicep    # Application Insights
-|   |   |   |-- parameters.json       # パラメータ値
-|   |   |-- apim-policies.xml         # APIMポリシー定義
+|   |   |-- terraform/
+|   |   |   |-- monitoring.tf         # Log Analytics + App Insights
+|   |   |   |-- container-apps.tf     # ACR + Container Apps
+|   |   |   |-- cognitive-services.tf # Azure AI Foundry + Document Intelligence
+|   |   |   |-- storage.tf           # Storage Account (非同期ジョブ)
+|   |   |   |-- apim.tf              # API Management
+|   |   |   |-- key-vault.tf         # Key Vault
+|   |   |   |-- variables.tf         # 変数定義
+|   |   |   |-- outputs.tf           # 出力定義
+|   |   |   |-- backend.tf           # Terraformバックエンド
+|   |   |   |-- terraform.tfvars     # パラメータ値
 |   |
 |   |-- aws/
 |   |   |-- terraform/
 |   |       |-- api-gateway.tf        # API Gateway
-|   |       |-- apprunner.tf          # App Runner
+|   |       |-- app-runner.tf         # App Runner + ECR
+|   |       |-- storage.tf           # DynamoDB + SQS (非同期ジョブ)
 |   |       |-- secrets-manager.tf    # Secrets Manager
 |   |       |-- cloudwatch.tf         # CloudWatch
 |   |       |-- variables.tf
@@ -869,7 +875,8 @@ ic-test-ai-agent/
 |   |-- gcp/
 |       |-- terraform/
 |           |-- apigee.tf             # Apigee
-|           |-- cloud-run.tf          # Cloud Run
+|           |-- cloud-run.tf          # Cloud Run + Artifact Registry
+|           |-- storage.tf           # Firestore + Cloud Tasks (非同期ジョブ)
 |           |-- secret-manager.tf     # Secret Manager
 |           |-- cloud-logging.tf      # Cloud Logging
 |           |-- variables.tf
@@ -928,7 +935,6 @@ ic-test-ai-agent/
 ### C. 参照文書
 
 - [API Gateway設計書](./API_GATEWAY_DESIGN.md)
-- Azure APIM: `infrastructure/azure/bicep/apim.bicep`
-- APIMポリシー: `infrastructure/azure/apim-policies.xml`
+- Azure APIM: `infrastructure/azure/terraform/apim.tf`
 - AWS API Gateway: `infrastructure/aws/terraform/api-gateway.tf`
 - GCP Apigee: `infrastructure/gcp/terraform/apigee.tf`

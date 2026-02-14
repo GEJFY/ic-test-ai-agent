@@ -6,8 +6,8 @@
 # APIキーやシークレットを安全に管理するためのSecrets Managerシークレットを構築します。
 #
 # 【機能】
-# - シークレット管理（Bedrock API Key、OpenAI API Key等）
-# - Lambda関数からのアクセス制御（IAMポリシー）
+# - シークレット管理（OpenAI API Key等）
+# - App Runnerからのアクセス制御（IAMポリシー）
 # - 自動ローテーション機能（将来対応）
 # - 削除保護（30日間の復旧期間）
 #
@@ -19,7 +19,7 @@
 
 resource "aws_secretsmanager_secret" "bedrock_api_key" {
   name        = "${var.project_name}-${var.environment}-bedrock-api-key"
-  description = "AWS Bedrock API Key for LLM operations"
+  description = "AWS Bedrock設定（IAM認証のため不使用、将来の拡張用に保持）"
 
   recovery_window_in_days = 30
 
@@ -40,7 +40,7 @@ resource "aws_secretsmanager_secret_version" "bedrock_api_key" {
 
 resource "aws_secretsmanager_secret" "textract_api_key" {
   name        = "${var.project_name}-${var.environment}-textract-api-key"
-  description = "AWS Textract API Key for OCR operations"
+  description = "AWS Textract設定（IAM認証のため不使用、将来の拡張用に保持）"
 
   recovery_window_in_days = 30
 
@@ -77,12 +77,12 @@ resource "aws_secretsmanager_secret_version" "openai_api_key" {
 }
 
 # ------------------------------------------------------------------------------
-# Lambda IAMポリシー（Secrets Manager読み取り権限）
+# App Runner IAMポリシー（Secrets Manager読み取り権限）
 # ------------------------------------------------------------------------------
 
-resource "aws_iam_policy" "lambda_secrets_read" {
-  name        = "${var.project_name}-${var.environment}-lambda-secrets-read"
-  description = "Lambda関数がSecrets Managerからシークレットを読み取る権限"
+resource "aws_iam_policy" "apprunner_secrets_read" {
+  name        = "${var.project_name}-${var.environment}-apprunner-secrets-read"
+  description = "App RunnerがSecrets Managerからシークレットを読み取る権限"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -103,7 +103,7 @@ resource "aws_iam_policy" "lambda_secrets_read" {
   })
 
   tags = merge(var.tags, {
-    Name        = "${var.project_name}-${var.environment}-lambda-secrets-read"
+    Name        = "${var.project_name}-${var.environment}-apprunner-secrets-read"
     Environment = var.environment
   })
 }
@@ -127,7 +127,7 @@ output "openai_api_key_arn" {
   value       = aws_secretsmanager_secret.openai_api_key.arn
 }
 
-output "lambda_secrets_read_policy_arn" {
-  description = "Lambda Secrets読み取りポリシーARN"
-  value       = aws_iam_policy.lambda_secrets_read.arn
+output "apprunner_secrets_read_policy_arn" {
+  description = "App Runner Secrets読み取りポリシーARN"
+  value       = aws_iam_policy.apprunner_secrets_read.arn
 }

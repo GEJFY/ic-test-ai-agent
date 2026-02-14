@@ -11,6 +11,7 @@ locals {
   acr_name                     = lower(replace("acr${var.project_name}${var.environment}${substr(local.suffix, 0, 6)}", "-", ""))
   container_env_name           = "cae-${var.project_name}-${var.environment}-${local.suffix}"
   container_app_name           = "ca-${var.project_name}-${var.environment}-${local.suffix}"
+  user_identity_name           = "id-${var.project_name}-${var.environment}-${local.suffix}"
 }
 
 # ------------------------------------------------------------------------------

@@ -22,7 +22,7 @@ resource "azurerm_key_vault" "main" {
 
   network_acls {
     bypass         = "AzureServices"
-    default_action = "Allow"
+    default_action = "Deny"
   }
 
   # Terraform SP（デプロイ用）にシークレット管理権限付与
@@ -71,53 +71,5 @@ resource "azurerm_monitor_diagnostic_setting" "key_vault" {
   metric {
     category = "AllMetrics"
     enabled  = true
-  }
-}
-
-# ------------------------------------------------------------------------------
-# サンプルシークレット（デプロイ後に実際の値を手動で設定）
-# ------------------------------------------------------------------------------
-
-resource "azurerm_key_vault_secret" "foundry_api_key" {
-  name         = "AZURE-FOUNDRY-API-KEY"
-  value        = "REPLACE_WITH_ACTUAL_API_KEY"
-  key_vault_id = azurerm_key_vault.main.id
-  content_type = "text/plain"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
-}
-
-resource "azurerm_key_vault_secret" "foundry_endpoint" {
-  name         = "AZURE-FOUNDRY-ENDPOINT"
-  value        = "https://your-foundry-endpoint.openai.azure.com/"
-  key_vault_id = azurerm_key_vault.main.id
-  content_type = "text/plain"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
-}
-
-resource "azurerm_key_vault_secret" "document_intelligence_key" {
-  name         = "AZURE-DOCUMENT-INTELLIGENCE-KEY"
-  value        = "REPLACE_WITH_ACTUAL_API_KEY"
-  key_vault_id = azurerm_key_vault.main.id
-  content_type = "text/plain"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
-}
-
-resource "azurerm_key_vault_secret" "document_intelligence_endpoint" {
-  name         = "AZURE-DOCUMENT-INTELLIGENCE-ENDPOINT"
-  value        = "https://your-doc-intelligence.cognitiveservices.azure.com/"
-  key_vault_id = azurerm_key_vault.main.id
-  content_type = "text/plain"
-
-  lifecycle {
-    ignore_changes = [value]
   }
 }

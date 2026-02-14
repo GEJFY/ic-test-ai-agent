@@ -48,6 +48,7 @@ _azure-creds.json
 _setup.ps1
 _fix-role.ps1
 _azure-setup.ps1
+_set-secrets.ps1
 
 # -----------------------------------------------------------------------------
 # Cloud platform specific

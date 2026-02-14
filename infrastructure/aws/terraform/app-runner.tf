@@ -119,7 +119,7 @@ resource "aws_iam_role" "apprunner_instance" {
 # Secrets Manager読み取りポリシー
 resource "aws_iam_role_policy_attachment" "apprunner_secrets" {
   role       = aws_iam_role.apprunner_instance.name
-  policy_arn = aws_iam_policy.lambda_secrets_read.arn
+  policy_arn = aws_iam_policy.apprunner_secrets_read.arn
 }
 
 # Bedrock呼び出しポリシー
@@ -192,18 +192,25 @@ resource "aws_apprunner_service" "ic_test_ai" {
 
         runtime_environment_variables = {
           # LLMプロバイダー設定
-          LLM_PROVIDER = "AWS"
-          OCR_PROVIDER = "AWS"
+          LLM_PROVIDER         = "AWS"
+          OCR_PROVIDER         = "AWS"
+          AWS_BEDROCK_MODEL_ID = var.aws_bedrock_model_id
+          AWS_REGION_NAME      = var.region
 
-          # Secrets Manager参照
-          BEDROCK_API_KEY_SECRET_ARN  = aws_secretsmanager_secret.bedrock_api_key.arn
-          TEXTRACT_API_KEY_SECRET_ARN = aws_secretsmanager_secret.textract_api_key.arn
+          # オーケストレータ・パフォーマンス設定
+          USE_GRAPH_ORCHESTRATOR = "true"
+          MAX_PLAN_REVISIONS     = "1"
+          MAX_JUDGMENT_REVISIONS = "1"
+          SKIP_PLAN_CREATION     = "false"
+
+          # 非同期ジョブ処理設定
+          JOB_STORAGE_PROVIDER      = "AWS"
+          JOB_QUEUE_PROVIDER        = "AWS"
+          AWS_DYNAMODB_TABLE_NAME   = aws_dynamodb_table.evaluation_jobs.name
+          AWS_SQS_QUEUE_URL         = aws_sqs_queue.evaluation_queue.url
 
           # タイムアウト設定
           FUNCTION_TIMEOUT_SECONDS = tostring(var.app_runner_timeout)
-
-          # AWS リージョン
-          AWS_REGION_NAME = var.region
 
           # デバッグ設定
           DEBUG = "false"

@@ -94,6 +94,12 @@ variable "container_image_tag" {
   default     = "latest"
 }
 
+variable "gcp_model_name" {
+  description = "GCP Vertex AI モデル名"
+  type        = string
+  default     = "gemini-3-pro-preview"
+}
+
 # ------------------------------------------------------------------------------
 # Apigee設定
 # ------------------------------------------------------------------------------
@@ -121,16 +127,16 @@ variable "apigee_environment_name" {
 # ------------------------------------------------------------------------------
 
 variable "vertex_ai_api_key" {
-  description = "Vertex AI APIキー（セキュリティのため、環境変数で設定）"
+  description = "Vertex AI APIキー（SA認証のため通常は不使用）"
   type        = string
-  default     = "REPLACE_WITH_ACTUAL_API_KEY"
+  default     = "SA_AUTHENTICATION"
   sensitive   = true
 }
 
 variable "document_ai_api_key" {
-  description = "Document AI APIキー"
+  description = "Document AI APIキー（SA認証のため通常は不使用）"
   type        = string
-  default     = "REPLACE_WITH_ACTUAL_API_KEY"
+  default     = "SA_AUTHENTICATION"
   sensitive   = true
 }
 

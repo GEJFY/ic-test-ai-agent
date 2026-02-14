@@ -156,8 +156,8 @@ az apim show --name ic-test-staging-apim --resource-group ic-test-staging-rg
 ### AWS
 
 ```bash
-# Lambda関数確認
-aws lambda get-function --function-name ic-test-staging-evaluator
+# App Runner確認
+aws apprunner list-services --region ap-northeast-1
 
 # API Gateway確認
 aws apigatewayv2 get-apis
@@ -166,8 +166,8 @@ aws apigatewayv2 get-apis
 ### GCP
 
 ```bash
-# Cloud Functions確認
-gcloud functions list
+# Cloud Run確認
+gcloud run services list --region asia-northeast1
 
 # Apigee確認
 gcloud apigee organizations list

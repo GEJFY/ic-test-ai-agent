@@ -79,9 +79,9 @@ region       = "asia-northeast1"
 # Apigee設定（高コスト注意）
 enable_apigee = false  # 評価版期間外は false 推奨
 
-# シークレット（デプロイ後に実際の値に更新）
-vertex_ai_api_key    = "REPLACE_WITH_ACTUAL_API_KEY"
-document_ai_api_key  = "REPLACE_WITH_ACTUAL_API_KEY"
+# シークレット（SA認証のため通常は不使用、フォールバック用に保持）
+vertex_ai_api_key    = "SA_AUTHENTICATION"    # Cloud RunはSA認証でVertex AIにアクセス  # pragma: allowlist secret
+document_ai_api_key  = "SA_AUTHENTICATION"    # Cloud RunはSA認証でDocument AIにアクセス  # pragma: allowlist secret
 openai_api_key       = ""  # フォールバック用（オプション）
 
 # コスト最適化設定

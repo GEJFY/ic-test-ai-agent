@@ -9,8 +9,8 @@ LLMプロバイダーやクラウドサービスとの連携を担当するモ�
 
 【モジュール構成】
 - llm_factory: LLMインスタンス生成ファクトリー
-  - Azure OpenAI Service
-  - Azure AI Foundry
+  - Azure AI Foundry（推奨）
+  - Azure OpenAI Service（レガシー）
   - Google Cloud Vertex AI (Gemini)
   - Amazon Bedrock (Claude)
 

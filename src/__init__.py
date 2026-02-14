@@ -4,17 +4,15 @@ src - 内部統制テスト評価AIシステム 共通コード
 ================================================================================
 
 【概要】
-このパッケージは、Azure Functions、GCP Cloud Functions、AWS Lambdaなど
+このパッケージは、Azure Container Apps、AWS App Runner、GCP Cloud Runなど
 すべてのクラウドプラットフォームで共通して使用するコードを格納します。
 
 【サブパッケージ】
 - core: ビジネスロジック（監査エージェント、オーケストレーター、タスク）
 - infrastructure: インフラ抽象化（LLMファクトリー、OCRファクトリー）
 
-【プラットフォーム別エントリーポイント】
-- platforms/azure/: Azure Functions
-- platforms/gcp/: GCP Cloud Functions
-- platforms/aws/: AWS Lambda
+【共通エントリーポイント】
+- platforms/local/main.py: 全プラットフォーム共通（FastAPI/Uvicorn Docker）
 
 ================================================================================
 """

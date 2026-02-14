@@ -97,3 +97,36 @@ output "api_endpoint" {
   description = "APIエンドポイント（VBA/PowerShellで使用）"
   value       = "${azurerm_api_management.main.gateway_url}/api/evaluate"
 }
+
+# ------------------------------------------------------------------------------
+# Cognitive Services
+# ------------------------------------------------------------------------------
+
+output "cognitive_foundry_endpoint" {
+  description = "Azure AI Foundry エンドポイント"
+  value       = azurerm_cognitive_account.foundry.endpoint
+}
+
+output "cognitive_foundry_name" {
+  description = "Azure AI Foundry アカウント名"
+  value       = azurerm_cognitive_account.foundry.name
+}
+
+output "cognitive_di_endpoint" {
+  description = "Document Intelligence エンドポイント"
+  value       = azurerm_cognitive_account.document_intelligence.endpoint
+}
+
+output "cognitive_di_name" {
+  description = "Document Intelligence アカウント名"
+  value       = azurerm_cognitive_account.document_intelligence.name
+}
+
+# ------------------------------------------------------------------------------
+# Storage Account（非同期ジョブ用）
+# ------------------------------------------------------------------------------
+
+output "storage_account_name" {
+  description = "ジョブ用Storage Account名"
+  value       = azurerm_storage_account.jobs.name
+}

@@ -116,33 +116,31 @@ variable "container_image_tag" {
 }
 
 # ------------------------------------------------------------------------------
-# APIキー（デプロイ後に az containerapp secret set で更新可能）
+# Azure AI / Cognitive Services 設定
 # ------------------------------------------------------------------------------
 
-variable "azure_foundry_api_key" {
-  description = "Azure AI Foundry APIキー"
+variable "azure_foundry_model" {
+  description = "Azure AI Foundry モデル名"
   type        = string
-  default     = "PLACEHOLDER"
-  sensitive   = true
+  default     = "gpt-5-nano"
 }
 
-variable "azure_foundry_endpoint" {
-  description = "Azure AI Foundry エンドポイントURL"
+variable "azure_foundry_api_version" {
+  description = "Azure AI Foundry APIバージョン"
   type        = string
-  default     = "https://placeholder.models.ai.azure.com/"
+  default     = "2025-01-01-preview"
 }
 
-variable "azure_di_key" {
-  description = "Azure Document Intelligence APIキー"
+variable "azure_foundry_model_version" {
+  description = "Azure AI Foundry モデルバージョン"
   type        = string
-  default     = "PLACEHOLDER"
-  sensitive   = true
+  default     = "2025-01-01-preview"
 }
 
-variable "azure_di_endpoint" {
-  description = "Azure Document Intelligence エンドポイントURL"
-  type        = string
-  default     = "https://placeholder.cognitiveservices.azure.com/"
+variable "azure_foundry_capacity" {
+  description = "Azure AI Foundry デプロイメント容量（TPM単位、1=1000 TPM）"
+  type        = number
+  default     = 1
 }
 
 # ------------------------------------------------------------------------------
