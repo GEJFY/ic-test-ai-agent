@@ -8,7 +8,7 @@ Phase 2で導入されたAPI Gateway層（APIM/API Gateway/Apigee）に対応す
 
 | 項目 | 変更前（Phase 1） | 変更後（Phase 2） |
 |-----|-----------------|-----------------|
-| **エンドポイント** | Azure Functions/Lambda/Cloud Functions直接 | APIM/API Gateway経由 |
+| **エンドポイント** | Container Apps/App Runner/Cloud Run直接 | APIM/API Gateway経由 |
 | **認証ヘッダー** | `x-functions-key` (Azure) | `Ocp-Apim-Subscription-Key` (Azure APIM)<br>`X-Api-Key` (AWS API Gateway) |
 | **相関ID** | なし | `X-Correlation-ID` ヘッダー追加 |
 
@@ -138,20 +138,20 @@ psCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File " & _
 }
 ```
 
-## 3. GCP Cloud Functions対応
+## 3. GCP Cloud Run対応
 
 ### Apigee無効時（推奨）
 
-Apigeeは高コストのため、Cloud Functions直接アクセスを推奨します。
+Apigeeは高コストのため、Cloud Run直接アクセスを推奨します。
 
 ```json
 {
   "api": {
     "provider": "GCP",
-    "endpoint": "https://asia-northeast1-PROJECT_ID.cloudfunctions.net/ic-test-ai-prod-evaluate/evaluate",
+    "endpoint": "https://ic-test-evaluate-XXXXX-an.a.run.app/evaluate",
     "apiKey": "",
     "authHeader": "",
-    "authType": "functionsKey"
+    "authType": "none"
   }
 }
 ```
@@ -186,7 +186,7 @@ terraform output -raw api_gateway_endpoint
 terraform output -raw api_key
 
 # GCP
-terraform output -raw cloud_functions_endpoint
+terraform output -raw cloud_run_endpoint
 # または terraform output -raw apigee_endpoint（Apigee有効時）
 ```
 
@@ -250,7 +250,7 @@ fields @timestamp, @message, correlation_id
 
 ```bash
 # Cloud Loggingでクエリ
-gcloud logging read "resource.type=cloud_function \
+gcloud logging read "resource.type=cloud_run_revision \
   jsonPayload.correlation_id=<相関ID>" \
   --limit 50 \
   --format json
@@ -294,10 +294,10 @@ Phase 1の直接アクセスも引き続きサポートされます：
 {
   "api": {
     "provider": "AZURE",
-    "endpoint": "https://func-ic-test-ai-prod-XXXXX.azurewebsites.net/api/evaluate",
-    "apiKey": "<Function App Key>",
-    "authHeader": "x-functions-key",
-    "authType": "functionsKey"
+    "endpoint": "https://ca-ic-test-ai-prod-XXXXX.japaneast.azurecontainerapps.io/evaluate",
+    "apiKey": "<APIM Subscription Key>",
+    "authHeader": "Ocp-Apim-Subscription-Key",
+    "authType": "subscriptionKey"
   }
 }
 ```

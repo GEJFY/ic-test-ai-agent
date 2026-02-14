@@ -102,9 +102,8 @@ gcloud iam service-accounts keys create key.json \
 | Variable名 | 説明 | 例 |
 |------------|------|-----|
 | `ACR_REGISTRY` | ACR URL | `myregistry.azurecr.io` |
-| `AZURE_FUNCTION_APP` | Function App名 | `func-ic-test-prod` |
 | `AZURE_RESOURCE_GROUP` | リソースグループ | `rg-ic-test-prod` |
-| `AZURE_ENDPOINT_URL` | APIエンドポイント | `https://func-ic-test-prod.azurewebsites.net/api` |
+| `AZURE_ENDPOINT_URL` | APIエンドポイント | `https://ca-ic-test-prod.japaneast.azurecontainerapps.io` |
 
 #### AWS用
 
@@ -112,7 +111,7 @@ gcloud iam service-accounts keys create key.json \
 |------------|------|-----|
 | `AWS_REGION` | リージョン | `ap-northeast-1` |
 | `AWS_ECR_REGISTRY` | ECR URL | `123456789.dkr.ecr.ap-northeast-1.amazonaws.com` |
-| `AWS_LAMBDA_FUNCTION` | Lambda関数名 | `ic-test-prod-evaluate` |
+| `AWS_APP_RUNNER_SERVICE` | App Runnerサービス名 | `ic-test-prod` |
 
 #### GCP用
 

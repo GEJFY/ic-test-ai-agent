@@ -627,7 +627,7 @@ MAX_JUDGMENT_REVISIONS=1
 | LLM処理 | Amazon Bedrock (Claude Opus 4.6) | AI評価 |
 | OCR処理（英語） | Amazon Textract | PDF・画像からのテキスト抽出 |
 | OCR処理（日本語） | YomiToku-Pro (SageMaker) | 日本語特化高精度OCR |
-| OCR処理（タイ/蘭語） | Tesseract (Lambda Docker) | 多言語OCR |
+| OCR処理（タイ/蘭語） | Tesseract (Container Docker内蔵) | 多言語OCR |
 | ファイル保存 | S3 | 一時ファイル、ログ |
 
 ### 1.2 非同期モード追加リソース
@@ -644,7 +644,7 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 | 言語 | OCRプロバイダー | サービス | 特徴 |
 |-----|---------------|---------|------|
 | **日本語** (70%) | YomiToku-Pro | SageMaker Endpoint (AWS Marketplace) | 手書き・複雑レイアウト対応 |
-| **タイ語・オランダ語** (5%) | Tesseract | Lambda Docker (言語パック含む) | OSS、低コスト |
+| **タイ語・オランダ語** (5%) | Tesseract | Container (Docker内蔵、言語パック含む) | OSS、低コスト |
 | **英語・その他** (25%) | Amazon Textract | AnalyzeDocument API | AWS標準、高精度 |
 
 ## 2. AWSコスト概算
@@ -825,7 +825,7 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 | 言語 | OCRプロバイダー | 割合 | PoC(9,600p) | 本番(14,400p) |
 |-----|---------------|------|------------|--------------|
 | 日本語 | YomiToku-Pro (SageMaker) | 70% | 6,720ページ | 10,080ページ |
-| タイ語/オランダ語 | Tesseract (Lambda Docker) | 5% | 480ページ | 720ページ |
+| タイ語/オランダ語 | Tesseract (Container Docker内蔵) | 5% | 480ページ | 720ページ |
 | 英語/その他 | Amazon Textract | 25% | 2,400ページ | 3,600ページ |
 
 > **Azure / GCP:** Document Intelligence / Document AI が日本語・英語・タイ語・オランダ語を
@@ -882,9 +882,9 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 | 4 | LLM | Amazon Bedrock | Claude Opus 4.6 | ap-northeast-1 | 出力4.8M tokens | $120 | ¥18,240 |
 | 5 | OCR(日本語) | SageMaker Endpoint | **ml.g4dn.xlarge** | YomiToku-Pro推論 | 2ヶ月稼働(24h) | $758 | ¥115,216 |
 | 6 | OCR(日本語) | AWS Marketplace | **YomiToku-Pro** | ソフトウェア利用料 | 2ヶ月 | $300 | ¥45,600 |
-| 7 | OCR(タイ/蘭) | Lambda Docker | **Tesseract OCR** | メモリ1GB, jpn+tha+nld+eng | 480ページ | $1 | ¥152 |
+| 7 | OCR(タイ/蘭) | App Runner (コンテナ内蔵) | **Tesseract OCR** | Docker内蔵, jpn+tha+nld+eng | 480ページ | $0 | ¥0 |
 | 8 | OCR(英語等) | Amazon Textract | **AnalyzeDocument** | テーブル・フォーム解析 | 2,400ページ | $36 | ¥5,472 |
-| 9 | コンテナ | ECR | **Standard** | Tesseract Dockerイメージ | 1GB | $0.10 | ¥15 |
+| 9 | コンテナ | ECR | **Standard** | App Runner Dockerイメージ（Tesseract内蔵） | 1GB | $0.10 | ¥15 |
 | 10 | ストレージ | S3 | **Standard** | エビデンス一時保存 | 3GB | $0.07 | ¥11 |
 | 11 | DB | DynamoDB | **オンデマンド** | ジョブ状態管理 | 6,000 RWU | $2 | ¥304 |
 | 12 | キュー | SQS | **Standard** | 非同期ジョブ | 6,000メッセージ | $0 | ¥0 |
@@ -927,7 +927,7 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 | # | カテゴリ | リソース名 | プラン/SKU | 設定詳細 | 年間使用量 | 年額（JPY） |
 |---|---------|-----------|-----------|---------|-----------|------------|
 | | **--- コンピュート ---** | | | | | |
-| 1 | コンピュート | Azure Functions | **Consumption Plan** | 512MB, 230秒, East Japan | 9,000回/年 | ¥0 |
+| 1 | コンピュート | Container Apps | **Consumption Plan** | 0.5vCPU/1GiB, East Japan | 9,000回/年 | ¥0 |
 | | **--- AI/LLM ---** | | | | | |
 | 2 | LLM(入力) | Azure AI Foundry | **Standard** | GPT-5.2, East Japan | 63M tokens | ¥16,758 |
 | 3 | LLM(出力) | Azure AI Foundry | Standard | GPT-5.2, East Japan | 7.2M tokens | ¥15,322 |
@@ -955,7 +955,7 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 | # | カテゴリ | リソース名 | プラン | 設定詳細 | 年間使用量 | USD | 年額JPY(@152) |
 |---|---------|-----------|-------|---------|-----------|-----|-------------|
 | | **--- コンピュート ---** | | | | | | |
-| 1 | コンピュート | Cloud Functions (2nd gen) | **従量課金** | メモリ1GB, 最小0インスタンス | 9,000回 + 計算時間 | $18 | ¥2,736 |
+| 1 | コンピュート | Cloud Run | **従量課金** | 0.5vCPU/1GiB, 最小0インスタンス | 9,000回 + 計算時間 | $3 | ¥456 |
 | | **--- AI/LLM ---** | | | | | | |
 | 2 | LLM(入力) | Vertex AI | **Gemini 3 Pro Preview** | global | 63M tokens | $126 | ¥19,152 |
 | 3 | LLM(出力) | Vertex AI | Gemini 3 Pro Preview | global | 7.2M tokens | $86.4 | ¥13,133 |
@@ -973,14 +973,14 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 | 11 | 監視 | Cloud Monitoring | **従量課金** | メトリクス・アラート | 年間 | $15 | ¥2,280 |
 | 12 | トレース | Cloud Trace | **従量課金** | リクエストトレース | 年間 | $3 | ¥456 |
 | | | | | | | | |
-| | **GCP 本番 年間合計** | | | | | **$414** | **¥62,989** |
+| | **GCP 本番 年間合計** | | | | | **$399** | **¥60,709** |
 
 ### 3.4 AWS 本番 年間詳細明細
 
 | # | カテゴリ | リソース名 | プラン | 設定詳細 | 年間使用量 | USD | 年額JPY(@152) |
 |---|---------|-----------|-------|---------|-----------|-----|-------------|
 | | **--- コンピュート ---** | | | | | | |
-| 1 | コンピュート | Lambda | **従量課金** | メモリ512MB, タイムアウト300秒 | 9,000回 | $4 | ¥608 |
+| 1 | コンピュート | App Runner | **従量課金** | 0.5vCPU/1GB, 自動一時停止有効 | 9,000回 | $7 | ¥1,064 |
 | 2 | API | API Gateway | **REST API** | リージョンエンドポイント, WAF付き | 9,000回 | $1 | ¥152 |
 | | **--- AI/LLM ---** | | | | | | |
 | 3 | LLM(入力) | Amazon Bedrock | **Claude Opus 4.6** | ap-northeast-1 | 63M tokens | $315 | ¥47,880 |
@@ -988,9 +988,9 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 | | **--- OCR（3プロバイダー構成）---** | | | | | | |
 | 5 | OCR(日本語) | SageMaker Endpoint | **ml.g4dn.xlarge** | YomiToku-Pro推論エンドポイント | **2ヶ月稼働**(繁忙期) | $758 | ¥115,216 |
 | 6 | OCR(日本語) | AWS Marketplace | **YomiToku-Pro** | ソフトウェアライセンス | 2ヶ月 | $300 | ¥45,600 |
-| 7 | OCR(タイ/蘭) | Lambda Docker | **Tesseract OCR** | 1GB, jpn+tha+nld+eng lang pack | 720ページ | $2 | ¥304 |
+| 7 | OCR(タイ/蘭) | App Runner (コンテナ内蔵) | **Tesseract OCR** | Docker内蔵, jpn+tha+nld+eng lang pack | 720ページ | $0 | ¥0 |
 | 8 | OCR(英語等) | Amazon Textract | **AnalyzeDocument** | テーブル・フォーム解析 | 3,600ページ | $54 | ¥8,208 |
-| 9 | コンテナ | ECR | **Standard** | Tesseract Dockerイメージ保管 | 1GB × 12ヶ月 | $1 | ¥152 |
+| 9 | コンテナ | ECR | **Standard** | App Runner Dockerイメージ保管（Tesseract内蔵） | 1GB × 12ヶ月 | $1 | ¥152 |
 | | **--- ストレージ ---** | | | | | | |
 | 10 | ファイル | S3 | **Standard** | エビデンス一時保存, 30日ライフサイクル | 3.5GB(ピーク) | $5 | ¥760 |
 | 11 | DB | DynamoDB | **オンデマンド** | ジョブ状態・評価結果 | 18K RWU | $6 | ¥912 |
@@ -1004,7 +1004,7 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 | 17 | アラーム | CloudWatch Alarms | **Standard** | エラー率/レイテンシ/コスト | 5アラーム × 12ヶ月 | $6 | ¥912 |
 | 18 | トレース | X-Ray | **従量課金** | リクエストトレース | 年間 | $4 | ¥608 |
 | | | | | | | | |
-| | **AWS 本番 年間合計** | | | | | **$1,690** | **¥256,880** |
+| | **AWS 本番 年間合計** | | | | | **$1,691** | **¥257,032** |
 
 > **AWS SageMaker最適化オプション:**
 > - SageMaker Serverless Inference使用時: OCR日本語コスト ¥158,700 → 約¥50,000（-68%）
@@ -1016,14 +1016,14 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 | プラットフォーム | 年間合計（JPY） | うちLLM | うちOCR | うちインフラ | 特徴 |
 |----------------|---------------|--------|--------|------------|------|
 | **Azure** | **¥118,996** | ¥32,080 | ¥21,888 | ¥65,028 | OCR一元管理, APIM含む |
-| **GCP** | **¥62,989** | ¥32,285 | ¥21,888 | ¥8,816 | Gemini 3 Pro, 軽量インフラ |
-| **AWS** | **¥256,880** | ¥75,240 | ¥169,480 | ¥12,160 | 最高精度LLM, SageMaker OCR |
+| **GCP** | **¥60,709** | ¥32,285 | ¥21,888 | ¥6,536 | Gemini 3 Pro, 軽量インフラ |
+| **AWS** | **¥257,032** | ¥75,240 | ¥169,480 | ¥12,312 | 最高精度LLM, SageMaker OCR |
 
 **コスト構成比（本番年間）:**
 
 ```
 Azure:  LLM 27% | OCR 18% | インフラ 55%  ← Entra ID P1(¥54,720)+APIM(¥6,384)が支配的
-GCP:    LLM 51% | OCR 35% | インフラ 14%  ← LLMがコスト中心
+GCP:    LLM 53% | OCR 36% | インフラ 11%  ← LLMがコスト中心
 AWS:    LLM 29% | OCR 66% | インフラ  5%  ← SageMaker OCRが圧倒的
 ```
 
@@ -1039,24 +1039,24 @@ AWS:    LLM 29% | OCR 66% | インフラ  5%  ← SageMaker OCRが圧倒的
 | プラットフォーム | PoC（3ヶ月） | 本番（年間） | 初年度合計 |
 |----------------|--------------|------------|-----------|
 | **Azure** | ¥36,278 | ¥118,996 | **¥155,274** |
-| **GCP** | ¥36,454 | ¥62,989 | **¥99,443** |
-| **AWS** | ¥218,450 | ¥256,880 | **¥475,330** |
+| **GCP** | ¥36,454 | ¥60,709 | **¥97,163** |
+| **AWS** | ¥218,450 | ¥257,032 | **¥475,482** |
 
 ### 4.2 2年目以降（本番のみ）
 
 | プラットフォーム | 年額（JPY） | 月平均 | テスト1件あたり |
 |----------------|------------|-------|---------------|
 | **Azure** | ¥118,996 | ¥9,916 | ¥66 |
-| **GCP** | ¥62,989 | ¥5,249 | ¥35 |
-| **AWS** | ¥256,880 | ¥21,407 | ¥143 |
+| **GCP** | ¥60,709 | ¥5,059 | ¥34 |
+| **AWS** | ¥257,032 | ¥21,419 | ¥143 |
 
 ### 4.3 3年間TCO（Total Cost of Ownership）
 
 | プラットフォーム | 初年度 | 2年目 | 3年目 | 3年TCO |
 |----------------|-------|-------|-------|--------|
 | **Azure** | ¥155,274 | ¥118,996 | ¥118,996 | **¥393,266** |
-| **GCP** | ¥99,443 | ¥62,989 | ¥62,989 | **¥225,421** |
-| **AWS** | ¥475,330 | ¥256,880 | ¥256,880 | **¥989,090** |
+| **GCP** | ¥97,163 | ¥60,709 | ¥60,709 | **¥218,581** |
+| **AWS** | ¥475,482 | ¥257,032 | ¥257,032 | **¥989,546** |
 
 ---
 
@@ -1191,8 +1191,8 @@ AWS:    LLM 29% | OCR 66% | インフラ  5%  ← SageMaker OCRが圧倒的
 |----------------|------------|------------------|---------|------|
 | **Azure (標準)** | ¥118,996 | **¥160,000** | +34% | Entra ID P1 + APIM込み |
 | **Azure (Free AD)** | ¥64,276 | **¥85,000** | +32% | Entra ID Free使用時 |
-| **GCP** | ¥62,989 | **¥90,000** | +43% | 最もコスト効率が良い |
-| **AWS** | ¥256,880 | **¥350,000** | +36% | SageMaker固定費除く |
+| **GCP** | ¥60,709 | **¥90,000** | +48% | 最もコスト効率が良い |
+| **AWS** | ¥257,032 | **¥350,000** | +36% | SageMaker固定費除く |
 | **AWS (SageMaker込)** | ¥636,880 | **¥850,000** | +33% | YomiToku-Pro年間固定費込み |
 
 **推奨：** 本番環境予算は **¥90,000（GCP）** または **¥160,000（Azure）** で申請
@@ -1231,7 +1231,7 @@ AWS:    LLM 29% | OCR 66% | インフラ  5%  ← SageMaker OCRが圧倒的
 |-----|-------|-----|
 | LLMモデル | GPT-5.2 | Gemini 3 Pro Preview |
 | セルフリフレクション | 有効 | 有効 |
-| 実測見積もり | ¥118,996 | ¥62,989 |
+| 実測見積もり | ¥118,996 | ¥60,709 |
 | **予算申請額** | **¥160,000** | **¥90,000** |
 
 #### パターンC: 精度最優先
@@ -1242,7 +1242,7 @@ AWS:    LLM 29% | OCR 66% | インフラ  5%  ← SageMaker OCRが圧倒的
 | LLMモデル | Claude Opus 4.6 |
 | OCR | YomiToku-Pro（SageMaker） |
 | セルフリフレクション | 有効 |
-| 実測見積もり | ¥256,880（固定費除く） |
+| 実測見積もり | ¥257,032（固定費除く） |
 | **予算申請額** | **¥350,000**（固定費除く） or **¥850,000**（固定費込み） |
 
 ### 7.6 LLMモデル選択ガイド（最新版）
@@ -1509,13 +1509,13 @@ Phase 3（監視最適化）で追加された監視サービスのコスト詳�
 | プラットフォーム | Phase 2までのコスト | 監視コスト追加 | Phase 3後の合計 | 増加率 |
 |----------------|-------------------|--------------|----------------|--------|
 | **Azure** | ¥115,366 | +¥3,630 | **¥118,996** | +3.1% |
-| **AWS** | ¥251,087 | +¥5,793 | **¥256,880** | +2.3% |
-| **GCP** | ¥62,758 | +¥231 | **¥62,989** | +0.4% |
+| **AWS** | ¥251,239 | +¥5,793 | **¥257,032** | +2.3% |
+| **GCP** | ¥60,478 | +¥231 | **¥60,709** | +0.4% |
 
 **Phase 2までのコスト内訳（再掲）:**
-- Azure: Functions + AI Foundry + Document Intelligence + APIM + Key Vault + Storage
-- AWS: Lambda + Bedrock + Textract + API Gateway + Secrets Manager + S3
-- GCP: Cloud Functions + Vertex AI + Document AI + Cloud Storage（Apigee無効）
+- Azure: Container Apps + AI Foundry + Document Intelligence + APIM + Key Vault + Storage
+- AWS: App Runner + Bedrock + Textract + API Gateway + Secrets Manager + S3 + DynamoDB + SQS
+- GCP: Cloud Run + Vertex AI + Document AI + Cloud Storage + Firestore + Cloud Tasks（Apigee無効）
 
 ### 8.6.2 監視コストの推移予測
 

@@ -1124,7 +1124,7 @@ timestamp>="2026-02-11T11:00:00Z"
 
 ```
 [クライアントリクエスト]
-  └── [Cloud Functions: evaluate]  ← ルートスパン
+  └── [Cloud Run: evaluate]  ← ルートスパン
        ├── [Vertex AI: gemini-3-pro invocation]  ← AI推論スパン
        ├── [Document AI: OCR processing]  ← OCR処理スパン
        └── [Secret Manager: get secret]  ← シークレット取得スパン
