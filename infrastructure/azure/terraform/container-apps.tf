@@ -56,13 +56,13 @@ resource "azurerm_container_app" "main" {
 
   # API キー（デプロイ後に az containerapp secret set で実際の値を設定）
   secret {
-    name  = "azure-openai-api-key"
-    value = var.azure_openai_api_key
+    name  = "azure-foundry-api-key"
+    value = var.azure_foundry_api_key
   }
 
   secret {
-    name  = "azure-openai-endpoint"
-    value = var.azure_openai_endpoint
+    name  = "azure-foundry-endpoint"
+    value = var.azure_foundry_endpoint
   }
 
   secret {
@@ -99,23 +99,19 @@ resource "azurerm_container_app" "main" {
       # 環境変数（アプリが期待する変数名に合わせる）
       env {
         name  = "LLM_PROVIDER"
-        value = "AZURE"
+        value = "AZURE_FOUNDRY"
       }
       env {
         name  = "OCR_PROVIDER"
         value = "AZURE"
       }
       env {
-        name        = "AZURE_OPENAI_API_KEY"
-        secret_name = "azure-openai-api-key"  # pragma: allowlist secret
+        name        = "AZURE_FOUNDRY_API_KEY"
+        secret_name = "azure-foundry-api-key"  # pragma: allowlist secret
       }
       env {
-        name        = "AZURE_OPENAI_ENDPOINT"
-        secret_name = "azure-openai-endpoint"  # pragma: allowlist secret
-      }
-      env {
-        name  = "AZURE_OPENAI_DEPLOYMENT_NAME"
-        value = "gpt-4o"
+        name        = "AZURE_FOUNDRY_ENDPOINT"
+        secret_name = "azure-foundry-endpoint"  # pragma: allowlist secret
       }
       env {
         name        = "AZURE_DI_KEY"

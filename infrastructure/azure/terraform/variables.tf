@@ -119,17 +119,17 @@ variable "container_image_tag" {
 # APIキー（デプロイ後に az containerapp secret set で更新可能）
 # ------------------------------------------------------------------------------
 
-variable "azure_openai_api_key" {
-  description = "Azure OpenAI APIキー"
+variable "azure_foundry_api_key" {
+  description = "Azure AI Foundry APIキー"
   type        = string
   default     = "PLACEHOLDER"
   sensitive   = true
 }
 
-variable "azure_openai_endpoint" {
-  description = "Azure OpenAI エンドポイントURL"
+variable "azure_foundry_endpoint" {
+  description = "Azure AI Foundry エンドポイントURL"
   type        = string
-  default     = "https://placeholder.openai.azure.com/"
+  default     = "https://placeholder.models.ai.azure.com/"
 }
 
 variable "azure_di_key" {
