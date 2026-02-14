@@ -71,7 +71,7 @@ resource "azurerm_container_app" "main" {
 
     container {
       name   = "ic-test-ai-agent"
-      image  = "${azurerm_container_registry.main.login_server}/ic-test-ai-agent:${var.container_image_tag}"
+      image  = "mcr.microsoft.com/k8se/quickstart:latest"
       cpu    = var.container_app_cpu
       memory = var.container_app_memory
 
