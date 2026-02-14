@@ -17,6 +17,10 @@ on:
         type: choice
         options: [staging, production]
 
+concurrency:
+  group: deploy-azure
+  cancel-in-progress: true
+
 env:
   PYTHON_VERSION: '3.11'
   DOCKER_IMAGE_NAME: ic-test-ai-agent
@@ -70,6 +74,13 @@ jobs:
           echo "ARM_CLIENT_SECRET=$(echo $CREDS | jq -r .clientSecret)" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=$(echo $CREDS | jq -r .tenantId)" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=$(echo $CREDS | jq -r .subscriptionId)" >> $GITHUB_ENV
+
+      - name: Clean orphaned resources
+        run: |
+          RG_NAME="${{ secrets.AZURE_RESOURCE_GROUP }}"
+          SUFFIX=$(echo -n "$RG_NAME" | md5sum | cut -c1-13)
+          az containerapp delete --name "ca-ic-test-ai-prod-$SUFFIX" \
+            --resource-group "$RG_NAME" --yes 2>/dev/null || true
 
       - name: Deploy Infrastructure
         working-directory: ./infrastructure/azure/terraform
