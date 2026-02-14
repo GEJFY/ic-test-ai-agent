@@ -17,7 +17,7 @@
 6. [相関ID伝播](#6-相関id伝播)
 7. [レート制限設計](#7-レート制限設計)
 8. [エンドポイント一覧](#8-エンドポイント一覧)
-9. [Bicep/Terraform実装リファレンス](#9-bicepterraform実装リファレンス)
+9. [Terraform実装リファレンス](#9-terraform実装リファレンス)
 
 ---
 
@@ -90,7 +90,7 @@ API Gatewayを採用した理由を以下に示す。
 | **レート制限** | rate-limit-by-key ポリシー | Usage Plan + Method Throttling | Quota ポリシー |
 | **バックエンド統合** | Container App URL直接指定 | App Runner URL直接指定 | Target Server + API Proxy |
 | **ログ統合** | Application Insights (W3C) | CloudWatch Logs + X-Ray | Cloud Logging |
-| **IaC** | Bicep | Terraform | Terraform |
+| **IaC** | Terraform | Terraform | Terraform |
 | **CORS** | cors ポリシー | OPTIONS Mock統合 | CORS ポリシー |
 | **相関ID** | set-variable + set-header | Request Parameter Mapping | AssignMessage |
 | **TLS** | TLS 1.2+ (SSL3.0/TLS1.0/1.1明示無効) | TLS 1.2+ | TLS 1.2+ |
@@ -155,31 +155,28 @@ flowchart TB
     Identity -.-> ContainerApp
 ```
 
-**Bicep リソース定義:**
+**Terraform リソース定義:**
 
-```bicep
-resource apim 'Microsoft.ApiManagement/service@2023-05-01-preview' = {
-  name: apimName
-  location: location
-  sku: {
-    name: 'Consumption'   // 従量課金プラン
-    capacity: 0            // Consumptionは0固定
+```hcl
+resource "azurerm_api_management" "main" {
+  name                = local.apim_name
+  location            = data.azurerm_resource_group.main.location
+  resource_group_name = data.azurerm_resource_group.main.name
+  publisher_email     = var.apim_publisher_email
+  publisher_name      = var.apim_publisher_name
+  sku_name            = "Consumption_0"  # 従量課金プラン
+
+  identity {
+    type = "SystemAssigned"  # マネージドID（Key Vault/Container Apps連携用）
   }
-  identity: {
-    type: 'SystemAssigned' // マネージドID（Key Vault/Functions連携用）
-  }
-  properties: {
-    publisherEmail: publisherEmail
-    publisherName: publisherName
-    customProperties: {
-      // セキュリティプロトコル設定
-      'Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Protocols.Tls10': 'False'
-      'Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Protocols.Tls11': 'False'
-      'Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Protocols.Ssl30': 'False'
-      'Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Backend.Protocols.Tls10': 'False'
-      'Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Backend.Protocols.Tls11': 'False'
-      'Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Backend.Protocols.Ssl30': 'False'
-    }
+
+  security {
+    enable_backend_ssl30  = false
+    enable_backend_tls10  = false
+    enable_backend_tls11  = false
+    enable_frontend_ssl30 = false
+    enable_frontend_tls10 = false
+    enable_frontend_tls11 = false
   }
 }
 ```
@@ -881,27 +878,30 @@ resource "google_apigee_product" "ic_test_ai" {
 
 ---
 
-## 9. Bicep/Terraform実装リファレンス
+## 9. Terraform実装リファレンス
 
 ### 9.1 ファイル一覧
 
 | プラットフォーム | ファイル | パス | 主要リソース |
 |---------------|---------|------|------------|
-| **Azure** | `main.bicep` | `infrastructure/azure/bicep/main.bicep` | 全モジュール統合 |
-| **Azure** | `apim.bicep` | `infrastructure/azure/bicep/apim.bicep` | APIM, API, Operations, Subscription, Product, Diagnostic |
-| **Azure** | `container-app.bicep` | `infrastructure/azure/bicep/container-app.bicep` | ACR, Container Apps Environment, Container App |
-| **Azure** | `key-vault.bicep` | `infrastructure/azure/bicep/key-vault.bicep` | Key Vault, Access Policies |
-| **Azure** | `app-insights.bicep` | `infrastructure/azure/bicep/app-insights.bicep` | Log Analytics, App Insights |
-| **Azure** | `parameters.json` | `infrastructure/azure/bicep/parameters.json` | パラメータ値 |
-| **Azure** | `apim-policies.xml` | `infrastructure/azure/apim-policies.xml` | APIMポリシー（Inbound/Outbound/Error） |
+| **Azure** | `apim.tf` | `infrastructure/azure/terraform/apim.tf` | APIM, API, Operations, Subscription, Product, Diagnostic |
+| **Azure** | `container-apps.tf` | `infrastructure/azure/terraform/container-apps.tf` | ACR, Container Apps Environment, Container App |
+| **Azure** | `cognitive-services.tf` | `infrastructure/azure/terraform/cognitive-services.tf` | Azure AI Foundry, Document Intelligence |
+| **Azure** | `storage.tf` | `infrastructure/azure/terraform/storage.tf` | Storage Account (非同期ジョブ) |
+| **Azure** | `key-vault.tf` | `infrastructure/azure/terraform/key-vault.tf` | Key Vault, Access Policies |
+| **Azure** | `monitoring.tf` | `infrastructure/azure/terraform/monitoring.tf` | Log Analytics, App Insights |
+| **Azure** | `variables.tf` | `infrastructure/azure/terraform/variables.tf` | 変数定義 |
+| **Azure** | `terraform.tfvars` | `infrastructure/azure/terraform/terraform.tfvars` | パラメータ値 |
 | **AWS** | `api-gateway.tf` | `infrastructure/aws/terraform/api-gateway.tf` | REST API, App Runner統合, API Key, Usage Plan |
-| **AWS** | `apprunner.tf` | `infrastructure/aws/terraform/apprunner.tf` | App Runner, ECR, IAM Role |
+| **AWS** | `app-runner.tf` | `infrastructure/aws/terraform/app-runner.tf` | App Runner, ECR, IAM Role |
+| **AWS** | `storage.tf` | `infrastructure/aws/terraform/storage.tf` | DynamoDB, SQS (非同期ジョブ) |
 | **AWS** | `secrets-manager.tf` | `infrastructure/aws/terraform/secrets-manager.tf` | Secrets Manager |
 | **AWS** | `cloudwatch.tf` | `infrastructure/aws/terraform/cloudwatch.tf` | CloudWatch Logs, Alarms |
 | **AWS** | `variables.tf` | `infrastructure/aws/terraform/variables.tf` | 変数定義 |
 | **AWS** | `outputs.tf` | `infrastructure/aws/terraform/outputs.tf` | 出力値 |
 | **GCP** | `apigee.tf` | `infrastructure/gcp/terraform/apigee.tf` | Apigee Environment, Product, Developer App |
 | **GCP** | `cloud-run.tf` | `infrastructure/gcp/terraform/cloud-run.tf` | Cloud Run, Artifact Registry |
+| **GCP** | `storage.tf` | `infrastructure/gcp/terraform/storage.tf` | Firestore, Cloud Tasks (非同期ジョブ) |
 | **GCP** | `secret-manager.tf` | `infrastructure/gcp/terraform/secret-manager.tf` | Secret Manager |
 | **GCP** | `cloud-logging.tf` | `infrastructure/gcp/terraform/cloud-logging.tf` | Cloud Logging |
 | **GCP** | `variables.tf` | `infrastructure/gcp/terraform/variables.tf` | 変数定義 |
@@ -915,23 +915,19 @@ resource "google_apigee_product" "ic_test_ai" {
 # 1. リソースグループ作成
 az group create --name rg-ic-test-ai-prod --location japaneast
 
-# 2. Bicepデプロイ
-az deployment group create \
-  --resource-group rg-ic-test-ai-prod \
-  --template-file infrastructure/azure/bicep/main.bicep \
-  --parameters infrastructure/azure/bicep/parameters.json
+# 2. Terraformデプロイ（APIM、Container Apps、Cognitive Services、Storage等を一括作成）
+cd infrastructure/azure/terraform
+terraform init
+terraform plan -out=tfplan -var="resource_group_name=rg-ic-test-ai-prod"
+terraform apply -auto-approve tfplan
 
-# 3. Key Vaultにシークレット設定
-az keyvault secret set --vault-name <KV_NAME> --name AZURE-FOUNDRY-API-KEY --value "<KEY>"
-
-# 4. Container Appにイメージデプロイ
-docker build -t "$ACR_NAME.azurecr.io/ic-test-ai:latest" -f platforms/local/Dockerfile .
+# 3. Container Appにイメージデプロイ
+ACR_NAME=$(terraform output -raw acr_name)
+docker build -t "$ACR_NAME.azurecr.io/ic-test-ai:latest" .
 docker push "$ACR_NAME.azurecr.io/ic-test-ai:latest"
-az containerapp update --name <APP_NAME> --resource-group <RG> --image "$ACR_NAME.azurecr.io/ic-test-ai:latest"
-
-# 5. APIMポリシー適用（Azure Portal）
-# APIs -> ic-test-ai-api -> Design -> Inbound -> Code editor
-# infrastructure/azure/apim-policies.xml の内容を貼り付け
+CONTAINER_APP_NAME=$(terraform output -raw container_app_name)
+az containerapp update --name $CONTAINER_APP_NAME --resource-group rg-ic-test-ai-prod \
+  --image "$ACR_NAME.azurecr.io/ic-test-ai:latest"
 ```
 
 #### AWS

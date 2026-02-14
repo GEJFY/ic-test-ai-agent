@@ -11,7 +11,7 @@ resource "azurerm_container_registry" "main" {
   location            = data.azurerm_resource_group.main.location
   resource_group_name = data.azurerm_resource_group.main.name
   sku                 = "Basic"
-  admin_enabled       = true
+  admin_enabled       = false
 
   tags = var.tags
 }
@@ -30,6 +30,24 @@ resource "azurerm_container_app_environment" "main" {
 }
 
 # ------------------------------------------------------------------------------
+# User-Assigned Managed Identity（ACR認証用、循環依存回避）
+# ------------------------------------------------------------------------------
+
+resource "azurerm_user_assigned_identity" "container_app" {
+  name                = local.user_identity_name
+  resource_group_name = data.azurerm_resource_group.main.name
+  location            = data.azurerm_resource_group.main.location
+  tags                = var.tags
+}
+
+# ACR Pull権限をManaged Identityに付与
+resource "azurerm_role_assignment" "acr_pull" {
+  scope                = azurerm_container_registry.main.id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_user_assigned_identity.container_app.principal_id
+}
+
+# ------------------------------------------------------------------------------
 # Container App
 # ------------------------------------------------------------------------------
 
@@ -40,39 +58,38 @@ resource "azurerm_container_app" "main" {
   revision_mode                = "Single"
 
   identity {
-    type = "SystemAssigned"
+    type         = "SystemAssigned, UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.container_app.id]
   }
 
   registry {
-    server               = azurerm_container_registry.main.login_server
-    username             = azurerm_container_registry.main.admin_username
-    password_secret_name = "acr-password"  # pragma: allowlist secret
+    server   = azurerm_container_registry.main.login_server
+    identity = azurerm_user_assigned_identity.container_app.id
   }
 
-  secret {
-    name  = "acr-password"
-    value = azurerm_container_registry.main.admin_password
-  }
-
-  # API キー（デプロイ後に az containerapp secret set で実際の値を設定）
   secret {
     name  = "azure-foundry-api-key"
-    value = var.azure_foundry_api_key
+    value = azurerm_cognitive_account.foundry.primary_access_key  # pragma: allowlist secret
   }
 
   secret {
     name  = "azure-foundry-endpoint"
-    value = var.azure_foundry_endpoint
+    value = azurerm_cognitive_account.foundry.endpoint  # pragma: allowlist secret
   }
 
   secret {
     name  = "azure-di-key"
-    value = var.azure_di_key
+    value = azurerm_cognitive_account.document_intelligence.primary_access_key  # pragma: allowlist secret
   }
 
   secret {
     name  = "azure-di-endpoint"
-    value = var.azure_di_endpoint
+    value = azurerm_cognitive_account.document_intelligence.endpoint  # pragma: allowlist secret
+  }
+
+  secret {
+    name  = "azure-storage-conn-string"
+    value = azurerm_storage_account.jobs.primary_connection_string  # pragma: allowlist secret
   }
 
   ingress {
@@ -121,6 +138,50 @@ resource "azurerm_container_app" "main" {
         name        = "AZURE_DI_ENDPOINT"
         secret_name = "azure-di-endpoint"  # pragma: allowlist secret
       }
+      # Azure Storage（非同期ジョブ処理用）
+      env {
+        name        = "AZURE_STORAGE_CONNECTION_STRING"
+        secret_name = "azure-storage-conn-string"  # pragma: allowlist secret
+      }
+
+      # モデル・API設定
+      env {
+        name  = "AZURE_FOUNDRY_MODEL"
+        value = var.azure_foundry_model
+      }
+      env {
+        name  = "AZURE_FOUNDRY_API_VERSION"
+        value = var.azure_foundry_api_version
+      }
+
+      # オーケストレータ・パフォーマンス設定
+      env {
+        name  = "USE_GRAPH_ORCHESTRATOR"
+        value = "true"
+      }
+      env {
+        name  = "MAX_PLAN_REVISIONS"
+        value = "1"
+      }
+      env {
+        name  = "MAX_JUDGMENT_REVISIONS"
+        value = "1"
+      }
+      env {
+        name  = "SKIP_PLAN_CREATION"
+        value = "false"
+      }
+
+      # 非同期ジョブ処理設定
+      env {
+        name  = "JOB_STORAGE_PROVIDER"
+        value = "AZURE"
+      }
+      env {
+        name  = "JOB_QUEUE_PROVIDER"
+        value = "AZURE"
+      }
+
       env {
         name  = "APPLICATIONINSIGHTS_CONNECTION_STRING"
         value = azurerm_application_insights.main.connection_string
@@ -167,7 +228,6 @@ resource "azurerm_container_app" "main" {
   lifecycle {
     ignore_changes = [
       template[0].container[0].image,
-      secret,
     ]
   }
 }

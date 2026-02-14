@@ -136,7 +136,7 @@
 | ユーザー認証 | Azure Active Directory | Free / P1 | OAuth 2.0 認証 |
 | アプリ登録 | App Registration | - | クライアント認証設定 |
 
-> **注:** APIM と Key Vault は Bicep IaC で定義済み（`infrastructure/azure/bicep/`）。
+> **注:** APIM と Key Vault は Terraform IaC で定義済み（`infrastructure/azure/terraform/`）。
 > 本番環境では必須のセキュリティ層として導入されています。
 
 ### 3.4 監視・ログリソース（本番環境必須）
@@ -481,7 +481,7 @@ API呼び出し: 1,000項目 × 5回/件 = 5,000回 → 無料枠内
 |-----|------------|------|
 | Azure サブスクリプション設定 | 1時間 | 既存サブスクリプション利用可 |
 | リソースグループ作成 | 0.5時間 | |
-| Azure Container Apps デプロイ | 2時間 | Docker + Bicep テンプレート利用可 |
+| Azure Container Apps デプロイ | 2時間 | Docker + Terraform テンプレート利用可 |
 | Azure AI Foundry 設定 | 1-2時間 | Model Catalogからデプロイ |
 | Document Intelligence 設定 | 1時間 | |
 | Storage Account 設定 | 0.5時間 | |

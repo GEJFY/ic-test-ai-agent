@@ -172,12 +172,12 @@ class DocumentationVerifier:
 
     def _check_endpoint_consistency(self, documented_endpoints: List[str]):
         """ドキュメントと実装のエンドポイント整合性チェック"""
-        # Azure Functions
-        azure_function_app = self.root_dir / "platforms" / "azure" / "function_app.py"
-        if azure_function_app.exists():
-            content = azure_function_app.read_text(encoding="utf-8")
-            # @app.route() デコレータからエンドポイントを抽出
-            implemented_endpoints = re.findall(r'@app\.route\(["\']([^"\']+)["\']', content)
+        # FastAPI共通エントリーポイント
+        fastapi_main = self.root_dir / "platforms" / "local" / "main.py"
+        if fastapi_main.exists():
+            content = fastapi_main.read_text(encoding="utf-8")
+            # @app.get/post デコレータからエンドポイントを抽出
+            implemented_endpoints = re.findall(r'@app\.(?:get|post)\(["\']([^"\']+)["\']', content)
 
             for endpoint in documented_endpoints:
                 # /api プレフィックスを除去して比較

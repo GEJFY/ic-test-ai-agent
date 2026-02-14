@@ -347,7 +347,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/key.json"
 
 ⚠️ **重要**: `key.json` は **絶対にGitにコミットしない** でください。`.gitignore` に `key.json` が含まれていることを確認しましょう。漏洩した場合は直ちにキーを無効化してください。
 
-⚠️ **本番環境では**: Cloud Functions上ではサービスアカウントが自動的に割り当てられるため、キーファイルは不要です。キーファイルはローカル開発時のみ使用します。
+⚠️ **本番環境では**: Cloud Run上ではサービスアカウントが自動的に割り当てられるため、キーファイルは不要です。キーファイルはローカル開発時のみ使用します。
 
 ### IAM権限の確認
 
@@ -1094,7 +1094,7 @@ TIMESTAMP                    SEVERITY  TEXT_PAYLOAD
 Cloud Loggingでは、ログの検索にフィルター構文を使用します。
 
 ```
-# Cloud Functionsのエラーログ
+# Cloud Runのエラーログ
 resource.type="cloud_run_revision"
 resource.labels.function_name="ic-test-ai-prod-evaluate"
 severity>=ERROR

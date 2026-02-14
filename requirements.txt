@@ -7,10 +7,10 @@
 # - 全プラットフォーム共通の依存パッケージ
 #
 # 【本番デプロイ時】
-# プラットフォーム別のrequirements.txtを使用してください:
-# - platforms/azure/requirements.txt  (Azure Functions)
-# - platforms/aws/requirements.txt    (AWS Lambda)
-# - platforms/gcp/requirements.txt    (GCP Cloud Functions)
+# 全プラットフォーム共通のDockerイメージ（platforms/local/main.py）で使用:
+# - Azure Container Apps
+# - AWS App Runner
+# - GCP Cloud Run
 #
 # ==============================================================================
 

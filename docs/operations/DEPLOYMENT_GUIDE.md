@@ -8,7 +8,7 @@
 
 - 各クラウドプラットフォームのアカウントとサブスクリプション
 - Azure CLI / AWS CLI / gcloud CLI のインストールと認証設定
-- Terraform / Azure Bicep のインストール
+- Terraform のインストール
 - Docker Desktop のインストール
 - Python 3.11以上
 
@@ -40,23 +40,20 @@ $PROJECT_NAME = "ic-test"
 az group create --name $RESOURCE_GROUP --location $LOCATION
 ```
 
-### 3. Bicepデプロイ実行
+### 3. Terraformデプロイ
 
 ```bash
-cd infrastructure/azure/bicep
-az deployment group create \
-  --resource-group $RESOURCE_GROUP \
-  --template-file main.bicep \
-  --parameters parameters.json
+cd infrastructure/azure/terraform
+terraform init
+terraform plan -out=tfplan \
+  -var="resource_group_name=$RESOURCE_GROUP"
+terraform apply -auto-approve tfplan
 ```
 
 ### 4. シークレット設定
 
-```bash
-# Key Vaultにシークレット登録
-az keyvault secret set --vault-name <KEY_VAULT_NAME> \
-  --name "AZURE-FOUNDRY-API-KEY" --value "<YOUR_API_KEY>"
-```
+Cognitive Services（Azure AI Foundry、Document Intelligence）とStorage Accountは
+Terraformが自動作成し、Container Appのシークレットとして自動設定されます。
 
 ### 5. デプロイ検証
 

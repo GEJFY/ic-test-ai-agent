@@ -102,17 +102,23 @@ variable "api_gateway_throttle_rate_limit" {
 # Secrets Manager設定
 # ------------------------------------------------------------------------------
 
-variable "bedrock_api_key" {
-  description = "AWS Bedrock APIキー"
+variable "aws_bedrock_model_id" {
+  description = "AWS Bedrock モデルID"
   type        = string
-  default     = "REPLACE_WITH_ACTUAL_API_KEY"
+  default     = "jp.anthropic.claude-sonnet-4-5-20250929-v1:0"
+}
+
+variable "bedrock_api_key" {
+  description = "AWS Bedrock APIキー（IAM認証のため通常は不使用）"
+  type        = string
+  default     = "IAM_AUTHENTICATION"
   sensitive   = true
 }
 
 variable "textract_api_key" {
-  description = "AWS Textract APIキー"
+  description = "AWS Textract APIキー（IAM認証のため通常は不使用）"
   type        = string
-  default     = "REPLACE_WITH_ACTUAL_API_KEY"
+  default     = "IAM_AUTHENTICATION"
   sensitive   = true
 }
 
