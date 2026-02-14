@@ -50,9 +50,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test, security]
     environment: ${{ github.event.inputs.environment || 'staging' }}
-    outputs:
-      apim-endpoint: ${{ steps.apim-info.outputs.apim-endpoint }}
-      apim-subscription-key: ${{ steps.apim-info.outputs.apim-subscription-key }}
     steps:
       - uses: actions/checkout@v4
 
@@ -115,8 +112,17 @@ jobs:
             --url "https://management.azure.com/subscriptions/${SUB_ID}/resourceGroups/${RG_NAME}/providers/Microsoft.ApiManagement/service/${APIM_NAME}/subscriptions/ic-test-ai-subscription/listSecrets?api-version=2023-05-01-preview" \
             --query primaryKey -o tsv)
 
+          # 検証用の環境変数を設定（マスク済み値はジョブ間出力で伝播されないため同一ジョブ内で使用）
           echo "::add-mask::${KEY}"
-          echo "apim-subscription-key=${KEY}" >> $GITHUB_OUTPUT
+          echo "AZURE_APIM_SUBSCRIPTION_KEY=${KEY}" >> $GITHUB_ENV
+          echo "AZURE_APIM_ENDPOINT=${APIM_ENDPOINT}" >> $GITHUB_ENV
+
+          # 監視・シークレット管理の検証用
+          KEY_VAULT_NAME=$(terraform output -raw key_vault_name)
+          APP_INSIGHTS_CS=$(terraform output -raw app_insights_connection_string)
+          echo "::add-mask::${APP_INSIGHTS_CS}"
+          echo "KEY_VAULT_NAME=${KEY_VAULT_NAME}" >> $GITHUB_ENV
+          echo "APPLICATIONINSIGHTS_CONNECTION_STRING=${APP_INSIGHTS_CS}" >> $GITHUB_ENV
 
       # Dockerイメージをビルド・ACRにプッシュ
       - name: Login to ACR
@@ -140,18 +146,13 @@ jobs:
             --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
             --image ${ACR_SERVER}/${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }}
 
-  validate:
-    runs-on: ubuntu-latest
-    needs: deploy
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # デプロイ後の検証（同一ジョブ内でシークレットを環境変数として参照）
+      - name: Setup Python for validation
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Validate
-        env:
-          AZURE_APIM_ENDPOINT: ${{ needs.deploy.outputs.apim-endpoint }}
-          AZURE_APIM_SUBSCRIPTION_KEY: ${{ needs.deploy.outputs.apim-subscription-key }}
+
+      - name: Validate deployment
         run: |
           pip install requests
           python scripts/validate_deployment.py --platform azure
