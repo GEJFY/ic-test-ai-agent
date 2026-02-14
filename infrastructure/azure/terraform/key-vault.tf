@@ -25,6 +25,20 @@ resource "azurerm_key_vault" "main" {
     default_action = "Allow"
   }
 
+  # Terraform SP（デプロイ用）にシークレット管理権限付与
+  access_policy {
+    tenant_id = data.azurerm_client_config.current.tenant_id
+    object_id = data.azurerm_client_config.current.object_id
+
+    secret_permissions = [
+      "Get",
+      "List",
+      "Set",
+      "Delete",
+      "Purge",
+    ]
+  }
+
   # Container AppのManaged Identityにシークレット読み取り権限付与
   access_policy {
     tenant_id = data.azurerm_client_config.current.tenant_id
