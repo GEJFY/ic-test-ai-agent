@@ -256,15 +256,16 @@ class TestGraphOrchestratorConfig:
 
     @patch("core.graph_orchestrator.StateGraph")
     def test_invalid_revision_config(self, mock_state_graph):
-        """不正な設定値（フォールバック）"""
+        """不正な設定値はConfigErrorを発生させる"""
         mock_state_graph.return_value = MagicMock()
         mock_state_graph.return_value.compile.return_value = MagicMock()
 
+        from infrastructure.config import ConfigError
+
         env = {"MAX_PLAN_REVISIONS": "invalid", "MAX_JUDGMENT_REVISIONS": "abc"}
         with patch.dict(os.environ, env, clear=True):
-            orch = GraphAuditOrchestrator(llm=None, vision_llm=None)
-            assert orch.MAX_PLAN_REVISIONS == 1
-            assert orch.MAX_JUDGMENT_REVISIONS == 1
+            with pytest.raises(ConfigError):
+                GraphAuditOrchestrator(llm=None, vision_llm=None)
 
     @patch("core.graph_orchestrator.StateGraph")
     def test_zero_revisions(self, mock_state_graph):

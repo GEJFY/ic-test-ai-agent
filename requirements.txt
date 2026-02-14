@@ -12,75 +12,79 @@
 # - AWS App Runner
 # - GCP Cloud Run
 #
+# 【バージョンポリシー】
+# - メジャーバージョン上限を設定し、破壊的変更を防止
+# - セキュリティパッチは自動適用（>=でマイナー/パッチ許容）
+#
 # ==============================================================================
 
-# LangChain framework (v1.x - 2026年2月最新)
-langchain>=1.2.9
-langchain-core>=1.2.9
-langgraph>=1.0.8                      # LangGraph for workflow orchestration
+# LangChain framework (v1.x - メジャーバージョン固定)
+langchain>=1.2.9,<2.0.0
+langchain-core>=1.2.9,<2.0.0
+langgraph>=1.0.8,<2.0.0              # LangGraph for workflow orchestration
 
-# Cloud LLM providers（使用するプロバイダーのみインストール可）
-langchain-openai>=0.3.0              # Azure OpenAI Service / Azure AI Foundry (GPT-5.x)
-langchain-google-vertexai>=3.0.0     # GCP Vertex AI (Gemini 3.x)
-langchain-aws>=0.3.0                 # AWS Bedrock (Claude Opus 4.x)
-langchain-ollama>=0.3.0              # Ollama (ローカルLLM)
+# Cloud LLM providers（メジャーバージョン固定）
+langchain-openai>=1.0.0,<2.0.0      # Azure AI Foundry (GPT-5.x)
+langchain-google-vertexai>=3.0.0,<4.0.0  # GCP Vertex AI (Gemini 3.x)
+langchain-aws>=1.0.0,<2.0.0         # AWS Bedrock (Claude Opus 4.x)
+langchain-ollama>=1.0.0,<2.0.0      # Ollama (ローカルLLM)
 
 # Utilities
-python-dotenv>=1.0.0
+python-dotenv>=1.0.0,<2.0.0
 
 # ASGI Server (Docker/standalone server)
-uvicorn>=0.30.0
-fastapi>=0.111.0
-httpx>=0.27.0
+uvicorn>=0.30.0,<1.0.0
+fastapi>=0.111.0,<1.0.0
+httpx>=0.27.0,<1.0.0
 
 # Document processing
-pypdf>=3.0.0                          # PDF text extraction
-openpyxl>=3.1.0                       # Excel file processing
-python-docx>=1.0.0                    # Word file processing
+pypdf>=3.0.0,<5.0.0                  # PDF text extraction
+openpyxl>=3.1.0,<4.0.0               # Excel file processing
+python-docx>=1.0.0,<2.0.0            # Word file processing
 
 # ==============================================================================
 # Azure Services（ローカル開発・テスト用）
 # ==============================================================================
 
 # Azure Functions core（ローカル実行用）
-azure-functions>=1.17.0
+azure-functions>=1.17.0,<2.0.0
 
 # Azure Document Intelligence (OCR)
-azure-ai-documentintelligence>=1.0.0
-azure-core>=1.30.0
+azure-ai-documentintelligence>=1.0.0,<2.0.0
+azure-core>=1.30.0,<2.0.0
 
 # Azure Storage（非同期ジョブ管理・テスト用）
-azure-data-tables>=12.4.0             # Table Storage for job persistence
-azure-storage-queue>=12.8.0           # Queue Storage for job notifications
-azure-storage-blob>=12.19.0           # Blob Storage for large evidence files
+azure-data-tables>=12.4.0,<13.0.0    # Table Storage for job persistence
+azure-storage-queue>=12.8.0,<13.0.0  # Queue Storage for job notifications
+azure-storage-blob>=12.19.0,<13.0.0  # Blob Storage for large evidence files
 
 # ==============================================================================
 # Optional OCR Providers（使用時にコメント解除）
 # ==============================================================================
 
 # GCP Document AI (OCR_PROVIDER=GCP)
-# google-cloud-documentai>=2.0.0
+# google-cloud-documentai>=2.0.0,<3.0.0
 
 # Tesseract OCR (OCR_PROVIDER=TESSERACT) - ローカルOSS
-# pytesseract>=0.3.10
-# pdf2image>=1.16.0
-# Pillow>=10.0.0
+# pytesseract>=0.3.10,<1.0.0
+# pdf2image>=1.16.0,<2.0.0
+# Pillow>=10.0.0,<11.0.0
 
 # ==============================================================================
 # Monitoring & Observability（Phase 3: 監視最適化）
 # ==============================================================================
 
 # OpenTelemetry - プラットフォーム共通トレース基盤
-opentelemetry-api>=1.20.0
-opentelemetry-sdk>=1.20.0
+opentelemetry-api>=1.20.0,<2.0.0
+opentelemetry-sdk>=1.20.0,<2.0.0
 
 # Azure Application Insights（Azureデプロイ時）
-# azure-monitor-opentelemetry>=1.0.0
+# azure-monitor-opentelemetry>=1.0.0,<2.0.0
 
 # AWS X-Ray（AWSデプロイ時）
-# aws-xray-sdk>=2.12.0
+# aws-xray-sdk>=2.12.0,<3.0.0
 
 # GCP Cloud Logging/Trace（GCPデプロイ時）
-# google-cloud-logging>=3.8.0
-# google-cloud-trace>=1.11.0
-# opencensus-ext-stackdriver>=0.11.0
+# google-cloud-logging>=3.8.0,<4.0.0
+# google-cloud-trace>=1.11.0,<2.0.0
+# opencensus-ext-stackdriver>=0.11.0,<1.0.0

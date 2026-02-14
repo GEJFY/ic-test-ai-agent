@@ -9,6 +9,7 @@ from enum import Enum
 from typing import Optional
 import logging
 import os
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -239,13 +240,16 @@ def get_secret_provider(
             raise
 
 
-# キャッシュ用のグローバルインスタンス
+# キャッシュ用のグローバルインスタンス（スレッドセーフ）
 _global_provider: Optional[SecretProvider] = None
+_global_provider_lock = threading.Lock()
 
 
 def get_default_provider(force_reinitialize: bool = False) -> SecretProvider:
     """
-    デフォルトのシークレットプロバイダーを取得します（シングルトン）。
+    デフォルトのシークレットプロバイダーを取得します（スレッドセーフ・シングルトン）。
+
+    Double-checked lockingパターンにより、並行リクエスト時の競合状態を防止します。
 
     Args:
         force_reinitialize: 強制的に再初期化するか
@@ -264,6 +268,8 @@ def get_default_provider(force_reinitialize: bool = False) -> SecretProvider:
     global _global_provider
 
     if _global_provider is None or force_reinitialize:
-        _global_provider = get_secret_provider()
+        with _global_provider_lock:
+            if _global_provider is None or force_reinitialize:
+                _global_provider = get_secret_provider()
 
     return _global_provider

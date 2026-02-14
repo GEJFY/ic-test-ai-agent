@@ -12,6 +12,12 @@
 # - 自動スケーリング（0〜max_instances）
 # - ヘルスチェック
 #
+# 【ネットワークセキュリティ】
+# - Inbound:  HTTPS (443) Apigee経由のみ許可（ingress = internal-and-cloud-load-balancing）
+# - Outbound: HTTPS (443) Vertex AI / Document AI / Secret Manager
+# - 認証:     Apigee + APIキー / サービスアカウント
+# - 暗号化:   TLS 1.2+（トランジット中）、Secret Manager（シークレット管理）
+#
 # ==============================================================================
 
 # ------------------------------------------------------------------------------

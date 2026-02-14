@@ -1,8 +1,8 @@
 # システムアーキテクチャ設計書
 
 **文書名**: 内部統制テスト評価AIシステム アーキテクチャ設計書
-**バージョン**: 2.4.0-multiplatform
-**最終更新日**: 2026-02-11
+**バージョン**: 3.1.0-multiplatform
+**最終更新日**: 2026-02-14
 **対象読者**: 開発者、インフラ担当者、アーキテクト
 
 ---
@@ -682,6 +682,52 @@ class SecretProvider(ABC):
 ### 7.5 リクエストサイズ制限
 
 APIMポリシーにより、リクエストボディのサイズを10MB以下に制限する。超過した場合は`413 Payload Too Large`を返却する。
+
+### 7.6 入力バリデーション
+
+ジョブ投入時にシステム境界で入力を検証し、不正データの侵入を防止する。
+
+| 制約 | 値 | エラー |
+| ---- | --- | ------ |
+| `tenant_id` 長 | 1〜255文字 | `ValueError` |
+| `items` 型 | `list[dict]` のみ | `ValueError` |
+| `items` 件数 | 1〜1,000件 | `ValueError` |
+
+### 7.7 スレッドセーフティ
+
+シングルトンインスタンス（`AsyncJobManager`、`SecretProvider`）の初期化にdouble-checked lockingパターンを採用し、並行リクエスト時の競合状態を防止する。
+
+```python
+# パターン例（async_handlers.py）
+_instance = None
+_lock = threading.Lock()
+
+def get_instance():
+    if _instance is None:
+        with _lock:
+            if _instance is None:
+                _instance = create_instance()
+    return _instance
+```
+
+### 7.8 コンテナセキュリティ
+
+| 項目 | 設定 |
+| ---- | ---- |
+| **実行ユーザー** | 非rootユーザー（UID 1000） |
+| **権限昇格防止** | `security_opt: no-new-privileges:true` |
+| **ファイル権限** | `chmod -R 755`（必要最小限） |
+| **ヘルスチェック** | curl ベース（30秒間隔、起動猶予15秒） |
+
+### 7.9 環境変数バリデーション
+
+`infrastructure/config.py` モジュールが型安全な環境変数読み取りを提供する。不正な値が設定された場合、起動時に `ConfigError` を発生させる。
+
+| ヘルパー | 用途 | バリデーション |
+| -------- | ---- | -------------- |
+| `get_env_int()` | 整数値 | 型チェック、最小値/最大値 |
+| `get_env_bool()` | 真偽値 | `true/false/1/0/yes/no/on/off` のみ許容 |
+| `get_env_str()` | 文字列 | 許容値リスト（`allowed_values`） |
 
 ---
 

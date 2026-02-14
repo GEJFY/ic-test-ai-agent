@@ -158,3 +158,25 @@ variable "daily_data_cap_in_gb" {
   type        = number
   default     = 1
 }
+
+# ------------------------------------------------------------------------------
+# コスト管理
+# ------------------------------------------------------------------------------
+
+variable "enable_budget_alert" {
+  description = "月次予算アラートを有効にするか"
+  type        = bool
+  default     = true
+}
+
+variable "budget_amount" {
+  description = "月次予算額（USD）"
+  type        = number
+  default     = 100
+}
+
+variable "budget_alert_email" {
+  description = "予算アラートの通知先メールアドレス"
+  type        = string
+  default     = ""
+}

@@ -180,6 +180,40 @@ python scripts/validate_deployment.py --platform <platform>
 - 代替プラットフォームへの切り替え検討
 - ユーザーへの状況通知
 
+### ジョブ処理停滞時の対応
+
+**症状**: ジョブが `RUNNING` 状態のまま長時間更新されない
+
+#### 1. 状況確認
+
+- ヘルスチェックエンドポイント: `GET /health` で `status` が `healthy` か確認
+- `response_time_ms` が異常に大きくないか確認
+
+#### 2. 原因特定
+
+- LLM APIのレートリミット到達 → ログに `429 Too Many Requests` がないか確認
+- メモリ不足 → コンテナのOOMKill発生確認
+- ストレージ接続障害 → Table Storage / DynamoDB / Firestoreへのアクセスエラー確認
+
+#### 3. 対応
+
+- レートリミット → `MAX_CONCURRENT_EVALUATIONS` を下げる（デフォルト10）
+- メモリ不足 → コンテナのメモリ上限を引き上げ
+- ストレージ障害 → 接続文字列・認証情報を再確認
+- 復旧不能な場合 → ジョブを手動で `FAILED` に更新し、ユーザーに再投入を依頼
+
+### ヘルスチェック `degraded` 状態の対応
+
+症状: `/health` が `"status": "degraded"` を返す
+
+原因: LLMプロバイダーが未設定または認証エラー
+
+対応手順:
+
+1. 環境変数 `LLM_PROVIDER` と対応するAPI Key/Endpoint が正しく設定されているか確認
+2. Key Vault / Secrets Manager の接続を確認
+3. 設定修正後、コンテナを再デプロイ
+
 ---
 
 ## 定期メンテナンス

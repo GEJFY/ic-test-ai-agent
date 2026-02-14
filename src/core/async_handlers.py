@@ -60,6 +60,7 @@ results = await handle_results(job_id)
 import os
 import logging
 import time
+import threading
 import traceback
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -81,15 +82,16 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 _job_manager: Optional[AsyncJobManager] = None
+_job_manager_lock = threading.Lock()
 
 
 def get_job_manager() -> AsyncJobManager:
     """
-    ジョブマネージャーのシングルトンインスタンスを取得
+    ジョブマネージャーのシングルトンインスタンスを取得（スレッドセーフ）
 
     【シングルトンパターン】
     アプリケーション全体で1つのAsyncJobManagerインスタンスを共有します。
-    これにより、ストレージ接続の再利用とリソースの効率的な管理が可能です。
+    Double-checked lockingパターンにより、並行リクエスト時の競合状態を防止します。
 
     【初期化処理】
     初回呼び出し時に以下を実行:
@@ -107,38 +109,38 @@ def get_job_manager() -> AsyncJobManager:
     global _job_manager
 
     if _job_manager is None:
-        logger.info("[AsyncHandlers] JobManager初期化開始...")
-        init_start = time.time()
+        with _job_manager_lock:
+            if _job_manager is None:
+                logger.info("[AsyncHandlers] JobManager初期化開始...")
+                init_start = time.time()
 
-        try:
-            from infrastructure.job_storage import get_job_storage, get_job_queue
+                try:
+                    from infrastructure.job_storage import get_job_storage, get_job_queue
 
-            # ストレージを初期化（Azure Table Storage / メモリ等）
-            storage = get_job_storage()
-            storage_type = type(storage).__name__
-            logger.info(f"[AsyncHandlers] ストレージ初期化完了: {storage_type}")
+                    storage = get_job_storage()
+                    storage_type = type(storage).__name__
+                    logger.info(f"[AsyncHandlers] ストレージ初期化完了: {storage_type}")
 
-            # キューを初期化（オプション、None可）
-            queue = get_job_queue()
-            queue_type = type(queue).__name__ if queue else "None"
-            logger.debug(f"[AsyncHandlers] キュー初期化完了: {queue_type}")
+                    queue = get_job_queue()
+                    queue_type = type(queue).__name__ if queue else "None"
+                    logger.debug(f"[AsyncHandlers] キュー初期化完了: {queue_type}")
 
-            # ジョブマネージャーを作成
-            _job_manager = AsyncJobManager(storage=storage, queue=queue)
+                    _job_manager = AsyncJobManager(storage=storage, queue=queue)
 
-            init_elapsed = time.time() - init_start
-            logger.info(
-                f"[AsyncHandlers] JobManager初期化完了 "
-                f"(ストレージ: {storage_type}, キュー: {queue_type}, "
-                f"所要時間: {init_elapsed:.2f}秒)"
-            )
+                    init_elapsed = time.time() - init_start
+                    logger.info(
+                        f"[AsyncHandlers] JobManager初期化完了 "
+                        f"(ストレージ: {storage_type}, キュー: {queue_type}, "
+                        f"所要時間: {init_elapsed:.2f}秒)"
+                    )
 
-        except Exception as e:
-            logger.error(
-                f"[AsyncHandlers] JobManager初期化エラー: {type(e).__name__}: {e}",
-                exc_info=True
-            )
-            raise
+                except Exception as e:
+                    logger.error(
+                        f"[AsyncHandlers] JobManager初期化エラー: "
+                        f"{type(e).__name__}: {e}",
+                        exc_info=True
+                    )
+                    raise
 
     return _job_manager
 
@@ -190,8 +192,22 @@ async def handle_submit(items: List[Dict[str, Any]], tenant_id: str = "default")
 
         return response.to_dict()
 
+    except ValueError as e:
+        # 入力バリデーションエラー（400系）
+        logger.warning(
+            f"[AsyncHandlers] Submit validation error: {e}, "
+            f"tenant: {tenant_id}, items: {len(items)}"
+        )
+        return {
+            "error": True,
+            "message": f"Invalid request: {str(e)}"
+        }
     except Exception as e:
-        logger.error(f"[AsyncHandlers] Submit error: {e}", exc_info=True)
+        logger.error(
+            f"[AsyncHandlers] Submit error: {type(e).__name__}: {e}, "
+            f"tenant: {tenant_id}, items: {len(items)}",
+            exc_info=True
+        )
         return {
             "error": True,
             "message": f"Failed to submit job: {str(e)}"

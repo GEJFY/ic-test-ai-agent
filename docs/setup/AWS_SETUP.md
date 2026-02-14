@@ -1622,10 +1622,12 @@ curl -s "$API_URL/health" | python -m json.tool
 ```json
 {
     "status": "healthy",
+    "version": "3.1.0-multiplatform",
+    "response_time_ms": 45.2,
+    "timestamp": "2026-02-14T12:00:00",
     "platform": "aws",
     "llm_provider": "AWS",
-    "ocr_provider": "AWS",
-    "timestamp": "2026-02-11T10:00:00Z"
+    "ocr_provider": "AWS"
 }
 ```
 

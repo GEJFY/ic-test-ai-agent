@@ -1,8 +1,8 @@
     # 内部統制テスト評価AIシステム 仕様書
 
     ================================================================================
-    **バージョン**: 1.2.0
-    **最終更新日**: 2026年2月8日
+    **バージョン**: 3.1.0-multiplatform
+    **最終更新日**: 2026年2月14日
     **対象読者**: システム管理者、開発者、内部監査担当者
     ================================================================================
 
@@ -560,15 +560,26 @@
     #### 非同期処理・タイムアウト制御
 
     ```python
-    # サーバー側の同時実行制御
-    semaphore = asyncio.Semaphore(3)  # 最大3並列
+    # サーバー側の同時実行制御（環境変数で変更可能）
+    # MAX_CONCURRENT_EVALUATIONS: 1〜50（デフォルト: 10）
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_EVALUATIONS)
 
-    # アイテム単位のタイムアウト
-    timeout_seconds = 90
+    # アイテム単位のタイムアウト（環境変数で変更可能）
+    # EVALUATION_TIMEOUT_SECONDS: 60〜900秒（デフォルト: 300秒）
+    timeout_seconds = DEFAULT_TIMEOUT_SECONDS
 
     # コンテナ全体のタイムアウト
     # Uvicorn: --timeout-keep-alive 600  # 10分
     ```
+
+    #### ジョブ投入バリデーション
+
+    | 制約 | 値 | エラー |
+    | ---- | -- | ------ |
+    | tenant_id長 | 1〜255文字 | `ValueError` |
+    | items型 | `list[dict]` | `ValueError` |
+    | items数 | 1〜1,000件 | `ValueError` |
+    | item要素型 | `dict` | `ValueError` |
 
     ---
 
@@ -1753,7 +1764,10 @@
     レスポンス:
     {
         "status": "healthy",
-        "llm_configured": true,
+        "version": "3.1.0-multiplatform",
+        "response_time_ms": 45.2,
+        "timestamp": "2026-02-14T12:00:00",
+        "llm": { "provider": "AZURE", "configured": true },
         ...
     }
     ```
@@ -3030,6 +3044,7 @@
 
     | 日付 | バージョン | 変更内容 |
     | ---- | ---------- | -------- |
+    | 2026-02-14 | 3.1.0-multiplatform | コードベース堅牢化（スレッドセーフ・入力バリデーション・CI品質ゲート・Dockerセキュリティ）、APIバージョン統一、ヘルスチェック拡張（degradedステータス・response_time_ms・timestamp）、環境変数バリデーションヘルパー追加 |
     | 2026-02-09 | 1.3.0 | テストスイート大幅拡充（156件→530+件、カバレッジ62%）、E2Eテスト追加、pre-commit hooks導入（flake8/bandit/detect-secrets）、CI/CDにbanditセキュリティスキャン・Codecovカバレッジ追加、Dependabot設定追加、テストドキュメント全面更新 |
     | 2026-02-08 | 1.2.0 | クラウドリソース詳細ドキュメント追加（セクション12）、マルチクラウドアーキテクチャ図解、各プロバイダー（Azure/AWS/GCP）のリソース詳細解説、最新モデル情報更新（Gemini 3 global設定、AWS Inference Profile ID、GPT-5 Nano等）、初心者向け学習コンテンツ追加 |
     | 2026-01-30 | 1.1.2 | pytestベースのユニットテスト・統合テストスイート追加（156件）、Azure Blob/Queue統合テスト追加、テストドキュメント整備 |
