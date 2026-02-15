@@ -191,6 +191,59 @@
     └─────────────────────────────────────────────────────────────────┘
     ```
 
+    > **Mermaid版（詳細）**
+
+    ```mermaid
+    graph TD
+        subgraph client["クライアント側（ユーザーPC）"]
+            excel["Excel VBA<br/>ExcelToJson.bas"]
+            ps["PowerShell<br/>CallCloudApi.ps1"]
+            excel -->|"JSON変換 +<br/>バッチ処理"| ps
+        end
+
+        subgraph server["サーバー側（クラウド コンテナ）"]
+            api["FastAPI<br/>platforms/local/main.py"]
+            handler["handlers.py<br/>handle_evaluate()"]
+            factory["LLMFactory<br/>llm_factory.py"]
+            orch["GraphAuditOrchestrator<br/>graph_orchestrator.py"]
+            tasks["監査タスク A1-A8<br/>core/tasks/"]
+            docproc["DocumentProcessor<br/>document_processor.py"]
+            highlight["HighlightingService<br/>highlighting_service.py"]
+            api --> handler
+            handler --> factory
+            handler --> orch
+            orch --> tasks
+            tasks --> docproc
+            handler --> highlight
+        end
+
+        subgraph external["外部サービス"]
+            llm["LLM プロバイダー"]
+            ocr["OCR プロバイダー"]
+            azure_llm["Azure AI Foundry<br/>GPT-5.2 / GPT-5-nano"]
+            gcp_llm["GCP Vertex AI<br/>Gemini 2.5 / 3 Pro"]
+            aws_llm["AWS Bedrock<br/>Claude Sonnet 4.5 / Opus 4.6"]
+            azure_ocr["Azure Document Intelligence"]
+            aws_ocr["Amazon Textract"]
+            gcp_ocr["Google Document AI"]
+            llm --- azure_llm
+            llm --- gcp_llm
+            llm --- aws_llm
+            ocr --- azure_ocr
+            ocr --- aws_ocr
+            ocr --- gcp_ocr
+        end
+
+        ps -->|"HTTPS POST<br/>Base64エビデンス付き"| api
+        factory -->|"LangChain"| llm
+        tasks -->|"LLM呼び出し"| llm
+        docproc -->|"テキスト抽出"| ocr
+
+        style client fill:#e3f2fd,stroke:#1565c0
+        style server fill:#e8f5e9,stroke:#2e7d32
+        style external fill:#fff3e0,stroke:#ef6c00
+    ```
+
     ### 2.3 各コンポーネントの役割
 
     | コンポーネント | 役割 | 技術 |
@@ -201,6 +254,60 @@
     | LLM Factory | AIモデルの切り替え管理 | LangChain |
     | Auditor Agent | 監査タスクのオーケストレーション | LangGraph |
     | Tasks (A1-A8) | 個別の監査評価ロジック | Python |
+
+    > **サーバー内部モジュール依存関係**
+
+    ```mermaid
+    graph LR
+        subgraph api_layer["API層"]
+            main["main.py<br/>(FastAPI)"]
+        end
+
+        subgraph sync_flow["同期処理フロー"]
+            handlers["handlers.py<br/>handle_evaluate()"]
+            orch["GraphAuditOrchestrator<br/>graph_orchestrator.py"]
+        end
+
+        subgraph async_flow["非同期処理フロー"]
+            async_h["async_handlers.py<br/>handle_submit()"]
+            job_mgr["AsyncJobManager<br/>async_job_manager.py"]
+        end
+
+        subgraph core_services["コアサービス"]
+            tasks["BaseAuditTask<br/>A1-A8タスク"]
+            docproc["DocumentProcessor<br/>テキスト抽出"]
+            highlight["HighlightingService<br/>証跡ハイライト"]
+            prompts["prompts.py<br/>プロンプト管理"]
+        end
+
+        subgraph infra["インフラ抽象化層"]
+            llm_f["LLMFactory<br/>マルチLLM"]
+            ocr_f["OCRFactory<br/>マルチOCR"]
+            storage["JobStorage<br/>永続化"]
+            queue["JobQueue<br/>キュー"]
+        end
+
+        main --> handlers
+        main --> async_h
+        handlers --> llm_f
+        handlers --> orch
+        handlers --> highlight
+        async_h --> job_mgr
+        job_mgr --> storage
+        job_mgr --> queue
+        job_mgr -.->|"バックグラウンド実行"| handlers
+        orch --> tasks
+        orch --> prompts
+        tasks --> docproc
+        tasks --> llm_f
+        docproc --> ocr_f
+
+        style api_layer fill:#e3f2fd,stroke:#1565c0
+        style sync_flow fill:#e8f5e9,stroke:#2e7d32
+        style async_flow fill:#fce4ec,stroke:#c62828
+        style core_services fill:#fff3e0,stroke:#ef6c00
+        style infra fill:#f3e5f5,stroke:#7b1fa2
+    ```
 
     ### 2.4 データフロー詳細
 
@@ -259,6 +366,329 @@
     │  }                                                               │
     └──────────────────────────────────────────────────────────────────┘
     ```
+
+    > **Mermaid版 シーケンス図（同期APIフロー）**
+
+    ```mermaid
+    sequenceDiagram
+        participant Client as Excel VBA<br/>+ PowerShell
+        participant API as FastAPI<br/>main.py
+        participant Handler as handlers.py
+        participant Factory as LLMFactory
+        participant Orch as GraphAudit<br/>Orchestrator
+        participant Tasks as A1-A8<br/>Tasks
+        participant LLM as LLM<br/>Provider
+
+        Client->>+API: POST /evaluate<br/>(JSON + Base64エビデンス)
+        API->>+Handler: handle_evaluate(items)
+        Handler->>Factory: get_llm_instances()
+        Factory-->>Handler: (llm, vision_llm)
+        Handler->>Handler: get_orchestrator(llm, vision_llm)
+
+        loop 各評価アイテム（並列 max 10）
+            Handler->>+Orch: evaluate(AuditContext)
+            Orch->>Orch: screen_evidence()
+            Orch->>+LLM: create_plan()
+            LLM-->>-Orch: ExecutionPlan
+            Orch->>+LLM: review_plan()
+            LLM-->>-Orch: 承認 or 要修正
+
+            opt 要修正の場合（最大1回）
+                Orch->>LLM: refine_plan()
+            end
+
+            par A1-A8 並列実行
+                Orch->>+Tasks: execute(context)
+                Tasks->>+LLM: invoke(prompt)
+                LLM-->>-Tasks: AI応答
+                Tasks-->>-Orch: TaskResult
+            end
+
+            Orch->>Orch: aggregate_results()
+            Orch->>+LLM: review_judgment()
+            LLM-->>-Orch: 承認 or 要修正
+
+            opt 要修正の場合（最大1回）
+                Orch->>LLM: refine_judgment()
+            end
+
+            Orch-->>-Handler: AuditResult
+        end
+
+        Handler-->>-API: List[結果]
+        API-->>-Client: JSON Response
+    ```
+
+    ### 2.5 LangGraph 評価ワークフロー
+
+    `GraphAuditOrchestrator` は LangGraph のステートマシンとして実装されており、
+    自己反省（Self-Reflection）ループを含む以下のワークフローで評価を実行します。
+
+    ```mermaid
+    graph TD
+        START([開始]) --> screen
+
+        screen["screen_evidence<br/>━━━━━━━━━━━━━━━<br/>エビデンススクリーニング<br/>・ファイル名マッチング（0.4）<br/>・テキスト内容分析（0.4）<br/>・文書タイプ判定（0.1）<br/>・閾値: ≥0.2"]
+
+        screen --> plan
+
+        plan["create_plan<br/>━━━━━━━━━━━━━━━<br/>テスト実行計画作成<br/>・統制記述の分析<br/>・必要タスクの選定（A1-A8）<br/>・実行順序・依存関係の決定"]
+
+        plan --> review_p{"review_plan<br/>━━━━━━━━━━━━━━━<br/>LLM計画レビュー<br/>（Self-Reflection）"}
+
+        review_p -->|"承認 or<br/>修正上限到達"| exec
+        review_p -->|"要修正<br/>（最大1回）"| refine_p
+
+        refine_p["refine_plan<br/>━━━━━━━━━━━━━━━<br/>計画修正<br/>・レビュー指摘の反映<br/>・タスク追加/削除"]
+        refine_p --> review_p
+
+        exec["execute_tasks<br/>━━━━━━━━━━━━━━━<br/>A1-A8 タスク並列実行<br/>・DocumentProcessor でテキスト抽出<br/>・各タスク固有のLLM推論<br/>・TaskResult 生成"]
+
+        exec --> agg
+
+        agg["aggregate_results<br/>━━━━━━━━━━━━━━━<br/>結果集約・最終判定<br/>・タスク結果の統合<br/>・有効/非有効の判定<br/>・判定根拠の生成<br/>・信頼度スコア算出"]
+
+        agg --> review_j{"review_judgment<br/>━━━━━━━━━━━━━━━<br/>LLM判定レビュー<br/>（Self-Reflection）"}
+
+        review_j -->|"承認 or<br/>修正上限到達"| output
+        review_j -->|"要修正<br/>（最大1回）"| refine_j
+
+        refine_j["refine_judgment<br/>━━━━━━━━━━━━━━━<br/>判定修正<br/>・レビュー指摘の反映<br/>・判定根拠の補強"]
+        refine_j --> review_j
+
+        output["output<br/>━━━━━━━━━━━━━━━<br/>結果出力<br/>・AuditResult 構築<br/>・証跡ハイライト（任意）"]
+
+        output --> END([終了])
+
+        style screen fill:#e3f2fd,stroke:#1565c0
+        style plan fill:#e8f5e9,stroke:#2e7d32
+        style review_p fill:#fff9c4,stroke:#f9a825
+        style refine_p fill:#fff3e0,stroke:#ef6c00
+        style exec fill:#e8f5e9,stroke:#2e7d32
+        style agg fill:#e8f5e9,stroke:#2e7d32
+        style review_j fill:#fff9c4,stroke:#f9a825
+        style refine_j fill:#fff3e0,stroke:#ef6c00
+        style output fill:#f3e5f5,stroke:#7b1fa2
+    ```
+
+    **ワークフロー状態（AuditGraphState）**:
+
+    | フィールド | 型 | 説明 |
+    |-----------|-----|------|
+    | `context` | Dict | 入力データ（統制記述、テスト手続き、エビデンス） |
+    | `evidence_validation` | Dict | P1 入力バリデーション結果 |
+    | `screening_summary` | Dict | P2 エビデンススクリーニング結果 |
+    | `execution_plan` | Dict | テスト実行計画 |
+    | `plan_review` | Dict | 計画レビュー結果 |
+    | `plan_revision_count` | int | 計画修正回数（上限: `MAX_PLAN_REVISIONS`、デフォルト1） |
+    | `task_results` | List[Dict] | 各タスクの実行結果 |
+    | `judgment` | Dict | 最終判定 |
+    | `judgment_review` | Dict | 判定レビュー結果 |
+    | `judgment_revision_count` | int | 判定修正回数（上限: `MAX_JUDGMENT_REVISIONS`、デフォルト1） |
+    | `user_feedback` | str | 再評価時のユーザーフィードバック |
+    | `previous_result` | Dict | 前回評価結果（再評価時） |
+    | `reevaluation_mode` | str | 再評価モード（`judgment_only` or `full`） |
+    | `final_result` | Dict | 最終出力 |
+
+    ### 2.6 ファクトリーパターン
+
+    本システムはファクトリーパターンにより、LLM・OCR・ジョブストレージの
+    プロバイダーを環境変数で切り替え可能にしています。
+
+    ```mermaid
+    classDiagram
+        class LLMProvider {
+            <<enumeration>>
+            AZURE_FOUNDRY
+            GCP
+            AWS
+            LOCAL
+        }
+
+        class LLMFactory {
+            +get_provider()$ LLMProvider
+            +get_config_status()$ Dict
+            +create_chat_model(temperature)$ ChatModel
+            +create_vision_model(temperature)$ ChatModel
+            +get_provider_info()$ Dict
+            -_create_azure_foundry_model()$ AzureChatOpenAI
+            -_create_gcp_model()$ ChatVertexAI
+            -_create_aws_model()$ ChatBedrock
+            -_create_local_model()$ ChatOllama
+        }
+
+        class OCRProvider {
+            <<enumeration>>
+            AZURE
+            AWS
+            GCP
+            TESSERACT
+            YOMITOKU
+            NONE
+        }
+
+        class OCRFactory {
+            +get_ocr_client()$ OCRClient
+            +get_config_status()$ Dict
+        }
+
+        class JobStorageBase {
+            <<abstract>>
+            +create_job(tenant_id, items)* EvaluationJob
+            +get_job(job_id)* EvaluationJob
+            +update_job(job)* None
+            +get_jobs_by_status(status)* List
+        }
+
+        class JobQueueBase {
+            <<abstract>>
+            +enqueue(job_id)* None
+            +dequeue()* str
+            +get_queue_length()* int
+        }
+
+        class InMemoryJobStorage {
+            -_jobs: Dict
+        }
+        class AzureTableJobStorage
+        class AWSDynamoDBJobStorage
+        class GCPFirestoreJobStorage
+
+        class InMemoryJobQueue {
+            -_queue: asyncio.Queue
+        }
+        class AzureQueueJobQueue
+        class AWSSQSJobQueue
+        class GCPCloudTasksJobQueue
+
+        LLMFactory --> LLMProvider : uses
+        OCRFactory --> OCRProvider : uses
+
+        JobStorageBase <|-- InMemoryJobStorage
+        JobStorageBase <|-- AzureTableJobStorage
+        JobStorageBase <|-- AWSDynamoDBJobStorage
+        JobStorageBase <|-- GCPFirestoreJobStorage
+
+        JobQueueBase <|-- InMemoryJobQueue
+        JobQueueBase <|-- AzureQueueJobQueue
+        JobQueueBase <|-- AWSSQSJobQueue
+        JobQueueBase <|-- GCPCloudTasksJobQueue
+    ```
+
+    **プロバイダー別の必須環境変数**:
+
+    | ファクトリー | プロバイダー | 必須環境変数 |
+    |-------------|-------------|-------------|
+    | LLMFactory | `AZURE_FOUNDRY` | `AZURE_FOUNDRY_ENDPOINT`, `AZURE_FOUNDRY_API_KEY` |
+    | LLMFactory | `GCP` | `GCP_PROJECT_ID`, `GCP_LOCATION` |
+    | LLMFactory | `AWS` | `AWS_REGION` |
+    | LLMFactory | `LOCAL` | なし（デフォルト: localhost:11434） |
+    | OCRFactory | `AZURE` | `AZURE_DI_ENDPOINT`, `AZURE_DI_KEY` |
+    | OCRFactory | `AWS` | `AWS_REGION` |
+    | OCRFactory | `GCP` | `GCP_PROJECT_ID` |
+    | JobStorage | `MEMORY` | なし |
+    | JobStorage | `AZURE` | `AZURE_STORAGE_CONNECTION_STRING` |
+
+    ### 2.7 監査タスク体系
+
+    監査タスクは `BaseAuditTask` 抽象基底クラスを継承し、8種類の評価手法を実装しています。
+
+    ```mermaid
+    classDiagram
+        class TaskType {
+            <<enumeration>>
+            A1_SEMANTIC_SEARCH
+            A2_IMAGE_RECOGNITION
+            A3_DATA_EXTRACTION
+            A4_STEPWISE_REASONING
+            A5_SEMANTIC_REASONING
+            A6_MULTI_DOCUMENT
+            A7_PATTERN_ANALYSIS
+            A8_SOD_DETECTION
+        }
+
+        class AuditContext {
+            +item_id: str
+            +control_description: str
+            +test_procedure: str
+            +evidence_link: str
+            +evidence_files: List~EvidenceFile~
+        }
+
+        class EvidenceFile {
+            +file_name: str
+            +extension: str
+            +mime_type: str
+            +base64_content: str
+        }
+
+        class TaskResult {
+            +task_type: TaskType
+            +task_name: str
+            +success: bool
+            +result: Any
+            +reasoning: str
+            +confidence: float
+            +evidence_references: List~str~
+            +sub_results: List~TaskResult~
+        }
+
+        class BaseAuditTask {
+            <<abstract>>
+            +task_name: str
+            +execute(context: AuditContext)* TaskResult
+        }
+
+        class SemanticSearchTask {
+            A1: 意味検索
+        }
+        class ImageRecognitionTask {
+            A2: 画像認識
+        }
+        class DataExtractionTask {
+            A3: データ抽出
+        }
+        class StepwiseReasoningTask {
+            A4: 段階的推論
+        }
+        class SemanticReasoningTask {
+            A5: 意味推論
+        }
+        class MultiDocumentTask {
+            A6: 複数文書統合
+        }
+        class PatternAnalysisTask {
+            A7: パターン分析
+        }
+        class SoDDetectionTask {
+            A8: 職務分掌検出
+        }
+
+        BaseAuditTask <|-- SemanticSearchTask
+        BaseAuditTask <|-- ImageRecognitionTask
+        BaseAuditTask <|-- DataExtractionTask
+        BaseAuditTask <|-- StepwiseReasoningTask
+        BaseAuditTask <|-- SemanticReasoningTask
+        BaseAuditTask <|-- MultiDocumentTask
+        BaseAuditTask <|-- PatternAnalysisTask
+        BaseAuditTask <|-- SoDDetectionTask
+
+        BaseAuditTask --> TaskType : uses
+        BaseAuditTask --> AuditContext : receives
+        BaseAuditTask --> TaskResult : returns
+        AuditContext --> EvidenceFile : contains
+    ```
+
+    | タスク | 目的 | 主な用途 |
+    |--------|------|---------|
+    | A1 意味検索 | エビデンス内のキーワード・概念を意味的に検索 | 承認記録、日付の確認 |
+    | A2 画像認識 | スクリーンショット・スキャン画像の内容認識 | システム画面、署名の確認 |
+    | A3 データ抽出 | 表・数値データの構造化抽出 | 金額、件数の照合 |
+    | A4 段階的推論 | 複数ステップの論理的推論 | 手続きの完全性検証 |
+    | A5 意味推論 | 文脈を考慮した意味的判断 | ポリシー準拠の判定 |
+    | A6 複数文書統合 | 複数エビデンスの横断的分析 | 整合性チェック |
+    | A7 パターン分析 | 異常パターン・傾向の検出 | 不正兆候の検出 |
+    | A8 職務分掌検出 | 職務分離（SoD）違反の検出 | 承認者・実行者の分離確認 |
 
     ---
 
