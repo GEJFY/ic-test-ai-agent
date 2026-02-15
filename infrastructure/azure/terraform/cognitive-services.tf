@@ -31,8 +31,8 @@ resource "azurerm_cognitive_deployment" "llm" {
     version = var.azure_foundry_model_version
   }
 
-  sku {
-    name     = "Standard"
+  scale {
+    type     = "GlobalStandard"
     capacity = var.azure_foundry_capacity
   }
 }

@@ -134,7 +134,7 @@ variable "azure_foundry_api_version" {
 variable "azure_foundry_model_version" {
   description = "Azure AI Foundry モデルバージョン"
   type        = string
-  default     = "2025-01-01-preview"
+  default     = "2025-08-07"
 }
 
 variable "azure_foundry_capacity" {

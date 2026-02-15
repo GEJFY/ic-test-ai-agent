@@ -6,9 +6,9 @@ locals {
   suffix                       = substr(md5(var.resource_group_name), 0, 13)
   log_analytics_workspace_name = "log-${var.project_name}-${var.environment}-${local.suffix}"
   app_insights_name            = "appi-${var.project_name}-${var.environment}-${local.suffix}"
-  key_vault_name               = "kv-${var.project_name}-${substr(local.suffix, 0, 8)}"
-  apim_name                    = "apim-${var.project_name}-${var.environment}-${local.suffix}"
-  acr_name                     = lower(replace("acr${var.project_name}${var.environment}${substr(local.suffix, 0, 6)}", "-", ""))
+  key_vault_name               = "kv-${var.project_name}-${substr(local.suffix, 0, 10)}"
+  apim_name                    = "apim-${var.project_name}-${var.environment}-${substr(md5("${var.resource_group_name}-apim"), 0, 8)}"
+  acr_name                     = lower(replace("acr${var.project_name}${var.environment}${local.suffix}", "-", ""))
   container_env_name           = "cae-${var.project_name}-${var.environment}-${local.suffix}"
   container_app_name           = "ca-${var.project_name}-${var.environment}-${local.suffix}"
   user_identity_name           = "id-${var.project_name}-${var.environment}-${local.suffix}"
