@@ -498,3 +498,87 @@ class TestFeedbackReeval:
 
         call_kwargs = mock_orchestrator.evaluate.call_args
         assert call_kwargs.kwargs["user_feedback"] is None
+
+    @pytest.mark.asyncio
+    async def test_feedback_full_mode_passes_correctly(self, sample_request_item):
+        """fullモードのフィードバックが正しく渡される"""
+        mock_orchestrator = Mock()
+        mock_result = Mock()
+        mock_result.to_response_dict.return_value = {
+            "ID": "CLC-01",
+            "evaluationResult": False,
+            "feedbackApplied": True,
+            "reevaluationRound": 1,
+            "resultChanged": True,
+        }
+        mock_orchestrator.evaluate = AsyncMock(return_value=mock_result)
+
+        item = dict(sample_request_item)
+        item["UserFeedback"] = "証跡の署名日を確認してください"
+        item["ReevaluationMode"] = "full"
+        item["PreviousResult"] = {
+            "evaluationResult": True,
+            "judgmentBasis": "統制は有効",
+            "executionPlanSummary": "【A5:意味的推論】",
+        }
+
+        result = await evaluate_single_item(mock_orchestrator, item)
+
+        call_kwargs = mock_orchestrator.evaluate.call_args
+        assert call_kwargs.kwargs["user_feedback"] == "証跡の署名日を確認してください"
+        assert call_kwargs.kwargs["reevaluation_mode"] == "full"
+        assert call_kwargs.kwargs["previous_result"]["evaluationResult"] is True
+
+    @pytest.mark.asyncio
+    async def test_feedback_default_mode_is_judgment_only(self, sample_request_item):
+        """ReevaluationMode未指定時はjudgment_onlyがデフォルト"""
+        mock_orchestrator = Mock()
+        mock_result = Mock()
+        mock_result.to_response_dict.return_value = {"ID": "CLC-01"}
+        mock_orchestrator.evaluate = AsyncMock(return_value=mock_result)
+
+        item = dict(sample_request_item)
+        item["UserFeedback"] = "テストフィードバック"
+        # ReevaluationMode を指定しない
+
+        await evaluate_single_item(mock_orchestrator, item)
+
+        call_kwargs = mock_orchestrator.evaluate.call_args
+        assert call_kwargs.kwargs["reevaluation_mode"] == "judgment_only"
+
+    @pytest.mark.asyncio
+    async def test_feedback_timeout_returns_error(self, sample_request_item):
+        """フィードバック再評価でもタイムアウトはエラーを返す"""
+        mock_orchestrator = Mock()
+
+        async def slow_evaluate(context, **kwargs):
+            await asyncio.sleep(10)
+
+        mock_orchestrator.evaluate = slow_evaluate
+
+        item = dict(sample_request_item)
+        item["UserFeedback"] = "テスト"
+        item["ReevaluationMode"] = "judgment_only"
+
+        result = await evaluate_single_item(
+            mock_orchestrator, item, timeout_seconds=0.1
+        )
+
+        assert result["evaluationResult"] is False
+        assert "タイムアウト" in result["judgmentBasis"]
+
+    @pytest.mark.asyncio
+    async def test_feedback_error_returns_error_result(self, sample_request_item):
+        """フィードバック再評価でエラー時はエラー結果を返す"""
+        mock_orchestrator = Mock()
+        mock_orchestrator.evaluate = AsyncMock(
+            side_effect=RuntimeError("再評価エラー")
+        )
+
+        item = dict(sample_request_item)
+        item["UserFeedback"] = "テスト"
+
+        result = await evaluate_single_item(mock_orchestrator, item)
+
+        assert result["evaluationResult"] is False
+        assert "エラー" in result["judgmentBasis"]

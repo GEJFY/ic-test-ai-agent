@@ -1477,3 +1477,376 @@ class TestFeedbackReeval:
         assert "user_feedback" in AuditGraphState.__annotations__
         assert "previous_result" in AuditGraphState.__annotations__
         assert "reevaluation_mode" in AuditGraphState.__annotations__
+
+
+# =============================================================================
+# evaluate() フィードバックルーティングテスト
+# =============================================================================
+
+class TestEvaluateFeedbackRouting:
+    """evaluate() メソッドのフィードバックルーティングテスト"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        with patch("core.graph_orchestrator.StateGraph") as mock_sg:
+            mock_sg.return_value = MagicMock()
+            mock_sg.return_value.compile.return_value = AsyncMock()
+            self.orch = GraphAuditOrchestrator(llm=None, vision_llm=None)
+
+    def _make_context(self):
+        """テスト用AuditContextを作成"""
+        return AuditContext(
+            item_id="CLC-01",
+            control_description="テスト統制",
+            test_procedure="テスト手続き",
+            evidence_link="",
+            evidence_files=[]
+        )
+
+    @pytest.mark.asyncio
+    async def test_evaluate_no_feedback_calls_graph(self):
+        """フィードバックなしで通常のグラフ実行を呼ぶ"""
+        mock_final_state = {
+            "final_result": {
+                "item_id": "CLC-01",
+                "evaluation_result": True,
+                "judgment_basis": "有効",
+                "document_quotes": [],
+                "confidence": 0.8,
+                "key_findings": [],
+                "control_effectiveness": {},
+                "plan_review_summary": "",
+                "judgment_review_summary": "",
+                "test_coverage": {},
+            },
+            "task_results": [],
+            "execution_plan": {"analysis": {}, "execution_plan": [], "task_dependencies": {}, "reasoning": ""},
+        }
+        self.orch.graph.ainvoke = AsyncMock(return_value=mock_final_state)
+
+        with patch.object(self.orch.highlighting_service, "highlight_evidence", new_callable=AsyncMock, return_value=[]):
+            result = await self.orch.evaluate(self._make_context())
+
+        assert isinstance(result, AuditResult)
+        assert result.feedback_applied is False
+        assert result.reevaluation_round == 0
+        self.orch.graph.ainvoke.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_evaluate_with_feedback_full_calls_graph(self):
+        """fullモードフィードバックでグラフ実行を呼ぶ"""
+        mock_final_state = {
+            "final_result": {
+                "item_id": "CLC-01",
+                "evaluation_result": False,
+                "judgment_basis": "再評価結果",
+                "document_quotes": [],
+                "confidence": 0.7,
+                "key_findings": [],
+                "control_effectiveness": {},
+                "plan_review_summary": "",
+                "judgment_review_summary": "",
+                "test_coverage": {},
+            },
+            "task_results": [],
+            "execution_plan": {"analysis": {}, "execution_plan": [], "task_dependencies": {}, "reasoning": ""},
+        }
+        self.orch.graph.ainvoke = AsyncMock(return_value=mock_final_state)
+
+        prev = {"evaluationResult": True, "reevaluationRound": 0}
+
+        with patch.object(self.orch.highlighting_service, "highlight_evidence", new_callable=AsyncMock, return_value=[]):
+            result = await self.orch.evaluate(
+                self._make_context(),
+                user_feedback="根拠を見直してください",
+                reevaluation_mode="full",
+                previous_result=prev,
+            )
+
+        assert result.feedback_applied is True
+        assert result.reevaluation_round == 1
+        assert result.result_changed is True
+        # fullモードではグラフを呼ぶ
+        self.orch.graph.ainvoke.assert_called_once()
+        # initial_stateにフィードバックが注入されている
+        call_args = self.orch.graph.ainvoke.call_args[0][0]
+        assert call_args["user_feedback"] != ""
+        assert call_args["reevaluation_mode"] == "full"
+
+    @pytest.mark.asyncio
+    async def test_evaluate_judgment_only_skips_graph(self):
+        """judgment_onlyモードではグラフを呼ばず_evaluate_judgment_onlyへ"""
+        prev = {
+            "evaluationResult": True,
+            "judgmentBasis": "前回根拠",
+            "executionPlanSummary": "前回計画",
+            "taskResults": [],
+            "reevaluationRound": 0,
+        }
+
+        with patch.object(
+            self.orch, "_evaluate_judgment_only", new_callable=AsyncMock
+        ) as mock_jo:
+            mock_jo.return_value = AuditResult(
+                item_id="CLC-01",
+                evaluation_result=False,
+                judgment_basis="再評価済み",
+                document_reference="",
+                file_name="",
+                feedback_applied=True,
+                reevaluation_round=1,
+                result_changed=True,
+            )
+
+            result = await self.orch.evaluate(
+                self._make_context(),
+                user_feedback="テスト",
+                reevaluation_mode="judgment_only",
+                previous_result=prev,
+            )
+
+        mock_jo.assert_called_once()
+        assert result.feedback_applied is True
+        # グラフは呼ばれない
+        self.orch.graph.ainvoke.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_evaluate_graph_error_returns_fallback(self):
+        """グラフ実行エラー時にフォールバック結果を返す"""
+        self.orch.graph.ainvoke = AsyncMock(side_effect=Exception("テストエラー"))
+
+        result = await self.orch.evaluate(self._make_context())
+
+        assert isinstance(result, AuditResult)
+        assert result.evaluation_result is False
+        assert result.confidence == 0.0
+
+    @pytest.mark.asyncio
+    async def test_evaluate_reevaluation_round_increments(self):
+        """再評価ラウンドが前回+1になる"""
+        mock_final_state = {
+            "final_result": {
+                "item_id": "CLC-01",
+                "evaluation_result": True,
+                "judgment_basis": "再評価済み",
+                "document_quotes": [],
+                "confidence": 0.9,
+                "key_findings": [],
+                "control_effectiveness": {},
+                "plan_review_summary": "",
+                "judgment_review_summary": "",
+                "test_coverage": {},
+            },
+            "task_results": [],
+            "execution_plan": {"analysis": {}, "execution_plan": [], "task_dependencies": {}, "reasoning": ""},
+        }
+        self.orch.graph.ainvoke = AsyncMock(return_value=mock_final_state)
+
+        prev = {"evaluationResult": True, "reevaluationRound": 3}
+
+        with patch.object(self.orch.highlighting_service, "highlight_evidence", new_callable=AsyncMock, return_value=[]):
+            result = await self.orch.evaluate(
+                self._make_context(),
+                user_feedback="確認お願いします",
+                reevaluation_mode="full",
+                previous_result=prev,
+            )
+
+        assert result.reevaluation_round == 4
+
+    @pytest.mark.asyncio
+    async def test_evaluate_result_changed_false_when_same(self):
+        """前回と同じ結果のときresult_changed=False"""
+        mock_final_state = {
+            "final_result": {
+                "item_id": "CLC-01",
+                "evaluation_result": True,
+                "judgment_basis": "有効",
+                "document_quotes": [],
+                "confidence": 0.8,
+                "key_findings": [],
+                "control_effectiveness": {},
+                "plan_review_summary": "",
+                "judgment_review_summary": "",
+                "test_coverage": {},
+            },
+            "task_results": [],
+            "execution_plan": {"analysis": {}, "execution_plan": [], "task_dependencies": {}, "reasoning": ""},
+        }
+        self.orch.graph.ainvoke = AsyncMock(return_value=mock_final_state)
+
+        prev = {"evaluationResult": True, "reevaluationRound": 0}
+
+        with patch.object(self.orch.highlighting_service, "highlight_evidence", new_callable=AsyncMock, return_value=[]):
+            result = await self.orch.evaluate(
+                self._make_context(),
+                user_feedback="確認",
+                reevaluation_mode="full",
+                previous_result=prev,
+            )
+
+        assert result.result_changed is False
+
+
+# =============================================================================
+# _evaluate_judgment_only テスト
+# =============================================================================
+
+class TestEvaluateJudgmentOnly:
+    """_evaluate_judgment_only メソッドのテスト"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        with patch("core.graph_orchestrator.StateGraph") as mock_sg:
+            mock_sg.return_value = MagicMock()
+            mock_sg.return_value.compile.return_value = MagicMock()
+            # LLMを設定
+            self.mock_llm = MagicMock()
+            self.orch = GraphAuditOrchestrator(
+                llm=self.mock_llm, vision_llm=None
+            )
+
+    def _make_context(self, with_files=False):
+        files = []
+        if with_files:
+            files = [EvidenceFile(
+                file_name="test.pdf", mime_type="application/pdf",
+                extension=".pdf", base64_content="dGVzdA=="
+            )]
+        return AuditContext(
+            item_id="CLC-01",
+            control_description="テスト統制",
+            test_procedure="テスト手続き",
+            evidence_link="//server/path/",
+            evidence_files=files,
+        )
+
+    @pytest.mark.asyncio
+    async def test_judgment_only_calls_llm_with_feedback(self):
+        """judgment_onlyモードでLLMにフィードバック付きのプロンプトを渡す"""
+        mock_chain = AsyncMock()
+        mock_chain.ainvoke.return_value = {
+            "evaluation_result": False,
+            "judgment_basis": "再評価済み根拠",
+            "document_quotes": [],
+            "confidence": 0.85,
+        }
+
+        with patch("core.graph_orchestrator.ChatPromptTemplate") as mock_pt:
+            mock_pt.from_template.return_value.__or__ = MagicMock(
+                return_value=MagicMock(__or__=MagicMock(return_value=mock_chain))
+            )
+            with patch.object(self.orch.highlighting_service, "highlight_evidence", new_callable=AsyncMock, return_value=[]):
+                result = await self.orch._evaluate_judgment_only(
+                    context=self._make_context(),
+                    user_feedback="署名日を確認してください",
+                    previous_result={
+                        "evaluationResult": True,
+                        "judgmentBasis": "前回根拠",
+                        "executionPlanSummary": "前回計画",
+                        "taskResults": [],
+                        "reevaluationRound": 0,
+                    },
+                )
+
+        assert isinstance(result, AuditResult)
+        assert result.feedback_applied is True
+        assert result.reevaluation_round == 1
+        assert result.result_changed is True  # True→False
+        assert result.evaluation_result is False
+
+    @pytest.mark.asyncio
+    async def test_judgment_only_error_returns_fallback(self):
+        """judgment_onlyでLLMエラー時にフォールバック結果を返す"""
+        mock_chain = AsyncMock()
+        mock_chain.ainvoke.side_effect = Exception("LLMエラー")
+
+        with patch("core.graph_orchestrator.ChatPromptTemplate") as mock_pt:
+            mock_pt.from_template.return_value.__or__ = MagicMock(
+                return_value=MagicMock(__or__=MagicMock(return_value=mock_chain))
+            )
+            result = await self.orch._evaluate_judgment_only(
+                context=self._make_context(),
+                user_feedback="テスト",
+                previous_result={
+                    "evaluationResult": True,
+                    "reevaluationRound": 0,
+                },
+            )
+
+        assert isinstance(result, AuditResult)
+        assert result.evaluation_result is False
+        assert "エラー" in result.judgment_basis
+
+    @pytest.mark.asyncio
+    async def test_judgment_only_uses_previous_task_results(self):
+        """judgment_onlyが前回のタスク結果をプロンプトに含める"""
+        mock_chain = AsyncMock()
+        mock_chain.ainvoke.return_value = {
+            "evaluation_result": True,
+            "judgment_basis": "有効",
+            "document_quotes": [],
+            "confidence": 0.9,
+        }
+
+        prev_results = {
+            "evaluationResult": True,
+            "judgmentBasis": "前回根拠",
+            "executionPlanSummary": "【A5:意味的推論】",
+            "taskResults": [
+                {
+                    "taskType": "A5",
+                    "taskName": "意味的推論",
+                    "success": True,
+                    "confidence": 0.9,
+                    "reasoning": "確認完了",
+                }
+            ],
+            "reevaluationRound": 1,
+        }
+
+        with patch("core.graph_orchestrator.ChatPromptTemplate") as mock_pt:
+            mock_pt.from_template.return_value.__or__ = MagicMock(
+                return_value=MagicMock(__or__=MagicMock(return_value=mock_chain))
+            )
+            with patch.object(self.orch.highlighting_service, "highlight_evidence", new_callable=AsyncMock, return_value=[]):
+                result = await self.orch._evaluate_judgment_only(
+                    context=self._make_context(with_files=True),
+                    user_feedback="再確認",
+                    previous_result=prev_results,
+                )
+
+        # LLM呼び出し時の引数を確認
+        call_kwargs = mock_chain.ainvoke.call_args[0][0]
+        assert "A5" in call_kwargs["task_results"]
+        assert "意味的推論" in call_kwargs["task_results"]
+        assert result.reevaluation_round == 2
+
+    @pytest.mark.asyncio
+    async def test_judgment_only_no_previous_tasks(self):
+        """前回タスク結果がない場合でもエラーにならない"""
+        mock_chain = AsyncMock()
+        mock_chain.ainvoke.return_value = {
+            "evaluation_result": True,
+            "judgment_basis": "有効",
+            "document_quotes": [],
+            "confidence": 0.8,
+        }
+
+        with patch("core.graph_orchestrator.ChatPromptTemplate") as mock_pt:
+            mock_pt.from_template.return_value.__or__ = MagicMock(
+                return_value=MagicMock(__or__=MagicMock(return_value=mock_chain))
+            )
+            with patch.object(self.orch.highlighting_service, "highlight_evidence", new_callable=AsyncMock, return_value=[]):
+                result = await self.orch._evaluate_judgment_only(
+                    context=self._make_context(),
+                    user_feedback="確認",
+                    previous_result={
+                        "evaluationResult": True,
+                        "reevaluationRound": 0,
+                    },
+                )
+
+        assert isinstance(result, AuditResult)
+        call_kwargs = mock_chain.ainvoke.call_args[0][0]
+        assert "タスク結果情報なし" in call_kwargs["task_results"]

@@ -335,6 +335,41 @@ Import-Certificate -FilePath cert.cer -CertStoreLocation Cert:\LocalMachine\Root
 
 ---
 
+## フィードバック再評価関連
+
+### 問題: フィードバックを入力しても再評価が実行されない
+
+**症状**: G列にフィードバックを入力して再評価マクロを実行したが、結果が変わらない
+
+**原因**: フィードバック列が空白のみ、またはsetting.jsonのcolumns.Feedbackの列指定が正しくない
+
+**解決策**:
+1. G列に実際のテキスト（空白のみでないこと）が入力されているか確認
+2. `setting.json` の `columns.Feedback` が `"G"` に設定されているか確認
+3. VBAエディタのイミディエイトウィンドウでリクエストJSONを確認し、`UserFeedback` フィールドが含まれているか確認
+
+### 問題: 再評価回数（H列）が更新されない
+
+**症状**: フィードバック再評価を実行したが、H列の値が変わらない
+
+**原因**: setting.jsonのcolumns.ReevalCountの列指定が正しくない、またはAPIレスポンスの`reevaluationRound`がマッピングされていない
+
+**解決策**:
+1. `setting.json` の `columns.ReevalCount` が `"H"` に設定されているか確認
+2. APIレスポンスに `reevaluationRound` フィールドが含まれているか確認
+
+### 問題: fullモードの再評価が非常に遅い
+
+**症状**: fullモードでのフィードバック再評価に通常評価の倍以上の時間がかかる
+
+**原因**: fullモードは証憑の再読み取りからグラフ全体を再実行するため、処理時間が長くなる
+
+**解決策**:
+1. 判断・根拠の修正のみが目的であれば `judgment_only` モードを使用
+2. `judgment_only` モードでは前回のタスク結果を引き継ぐため、処理が高速
+
+---
+
 ## 緊急時の連絡先
 
 **開発チーム**: dev-team@example.com
