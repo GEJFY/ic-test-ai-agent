@@ -35,7 +35,7 @@ terraform {
 
   backend "azurerm" {
     resource_group_name  = "rg-terraform-state"
-    storage_account_name = "stictestaiterraformst"
+    storage_account_name = "stictestaiterraform"
     container_name       = "tfstate"
     key                  = "prod/azure.tfstate"
   }
