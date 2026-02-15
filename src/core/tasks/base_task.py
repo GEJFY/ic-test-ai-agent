@@ -305,7 +305,7 @@ class BaseAuditTask(ABC):
 
         Args:
             llm: LangChain の ChatModel インスタンス
-                 （例: ChatOpenAI, AzureChatOpenAI）
+                 （例: AzureChatOpenAI (Azure AI Foundry)）
                  None の場合、LLM を使用しない簡易処理になります
 
         Note:

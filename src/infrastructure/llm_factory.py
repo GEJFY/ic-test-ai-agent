@@ -21,7 +21,6 @@ LLMインスタンス生成ファクトリーを提供します。
 │ プロバイダー    │ 説明                                           │
 ├─────────────────┼────────────────────────────────────────────────┤
 │ AZURE_FOUNDRY   │ Azure AI Foundry（推奨・統合AIプラットフォーム）│
-│ AZURE           │ Azure OpenAI Service（レガシー・後方互換用）   │
 │ GCP             │ Google Cloud Vertex AI（Geminiモデル）         │
 │ AWS             │ Amazon Bedrock（Claude等）                     │
 └─────────────────┴────────────────────────────────────────────────┘
@@ -56,14 +55,6 @@ export LLM_PROVIDER=AZURE_FOUNDRY
 export AZURE_FOUNDRY_ENDPOINT=https://project.region.models.ai.azure.com
 export AZURE_FOUNDRY_API_KEY=your-api-key
 export AZURE_FOUNDRY_MODEL=gpt-5-nano
-```
-
-Azure OpenAI の場合（レガシー・後方互換用）:
-```bash
-export LLM_PROVIDER=AZURE
-export AZURE_OPENAI_API_KEY=your-api-key
-export AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-export AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o
 ```
 
 【注意事項】
@@ -177,7 +168,6 @@ class LLMProvider(Enum):
     【各プロバイダーの特徴】
     ┌──────────────────┬─────────────────────────────────────────────┐
     │ AZURE_FOUNDRY    │ 推奨。複数モデル対応、統合管理、カタログ    │
-    │ AZURE            │ レガシー。旧Azure OpenAI Service後方互換用  │
     │ GCP              │ Gemini、Google検索連携、マルチモーダル      │
     │ AWS              │ Claude、既存AWSサービスとの統合、IAM連携    │
     │ LOCAL            │ Ollama、ローカル実行、プライバシー重視      │
@@ -194,7 +184,6 @@ class LLMProvider(Enum):
     name = provider.value                    # 列挙型から文字列へ
     ```
     """
-    AZURE = "AZURE"                    # Azure OpenAI Service（レガシー・後方互換用）
     AZURE_FOUNDRY = "AZURE_FOUNDRY"    # Azure AI Foundry（推奨）
     GCP = "GCP"                        # Google Cloud Vertex AI
     AWS = "AWS"                        # Amazon Bedrock
@@ -253,11 +242,6 @@ class LLMFactory:
     # -------------------------------------------------------------------------
     # これらの環境変数が設定されていないと、LLMを作成できません
     REQUIRED_ENV_VARS: Dict[LLMProvider, List[str]] = {
-        LLMProvider.AZURE: [
-            "AZURE_OPENAI_API_KEY",           # APIキー（認証用）
-            "AZURE_OPENAI_ENDPOINT",          # エンドポイントURL
-            "AZURE_OPENAI_DEPLOYMENT_NAME",   # デプロイメント名
-        ],
         LLMProvider.AZURE_FOUNDRY: [
             "AZURE_FOUNDRY_ENDPOINT",         # Foundryエンドポイント
             "AZURE_FOUNDRY_API_KEY",          # APIキー
@@ -281,7 +265,6 @@ class LLMFactory:
     # 明示的にモデルが指定されない場合に使用されるデフォルト値
     # Note: AWS Bedrockでは on-demand throughput には inference profile ID が必要
     DEFAULT_MODELS: Dict[LLMProvider, Optional[str]] = {
-        LLMProvider.AZURE: None,  # レガシー: デプロイ名を使用
         LLMProvider.AZURE_FOUNDRY: "gpt-5-nano",  # GPT-5 Nano (動作確認済み)
         LLMProvider.GCP: "gemini-3-pro-preview",  # Gemini 3 Pro (動作確認済み・globalリージョン必須)
         LLMProvider.AWS: "jp.anthropic.claude-sonnet-4-5-20250929-v1:0",  # Claude Sonnet 4.5 JP (動作確認済み)
@@ -293,7 +276,6 @@ class LLMFactory:
     # -------------------------------------------------------------------------
     # 低コスト・高速応答を優先する場合に使用
     COST_EFFECTIVE_MODELS: Dict[LLMProvider, Optional[str]] = {
-        LLMProvider.AZURE: None,
         LLMProvider.AZURE_FOUNDRY: "gpt-5-nano",        # GPT-5 Nano (高速・低コスト)
         LLMProvider.GCP: "gemini-2.5-flash-lite",       # Gemini 2.5 Flash Lite (動作確認済み)
         LLMProvider.AWS: "anthropic.claude-3-haiku-20240307-v1:0",  # Claude 3 Haiku
@@ -306,7 +288,6 @@ class LLMFactory:
     # 最高精度を求める場合に使用（コスト高）
     # Note: AWS Bedrockでは on-demand throughput には inference profile ID が必要
     HIGH_END_MODELS: Dict[LLMProvider, Optional[str]] = {
-        LLMProvider.AZURE: None,
         LLMProvider.AZURE_FOUNDRY: "gpt-5-nano",        # GPT-5 Nano (デプロイ済み)
         LLMProvider.GCP: "gemini-3-pro-preview",        # Gemini 3 Pro (動作確認済み・globalリージョン必須)
         LLMProvider.AWS: "global.anthropic.claude-opus-4-6-v1",  # Claude Opus 4.6 (動作確認済み)
@@ -318,7 +299,6 @@ class LLMFactory:
     # -------------------------------------------------------------------------
     # Vision（画像認識）機能をサポートするモデル
     VISION_MODELS: Dict[LLMProvider, Optional[str]] = {
-        LLMProvider.AZURE: None,  # Visionデプロイまたはデフォルト
         LLMProvider.AZURE_FOUNDRY: "gpt-5-nano",        # GPT-5 NanoはVision対応
         LLMProvider.GCP: "gemini-2.5-flash",            # Gemini 2.5はネイティブでVision対応（動作確認済み）
         LLMProvider.AWS: "anthropic.claude-3-sonnet-20240229-v1:0",  # Claude 3 Sonnet Vision対応
@@ -447,7 +427,6 @@ class LLMFactory:
                 "\n"
                 "【対応プロバイダー】\n"
                 "  AZURE_FOUNDRY - Azure AI Foundry（推奨）\n"
-                "  AZURE         - Azure OpenAI Service（レガシー）\n"
                 "  GCP           - Google Cloud Vertex AI\n"
                 "  AWS           - Amazon Bedrock\n"
                 "  LOCAL         - Ollama (ローカルLLM)\n"
@@ -500,7 +479,7 @@ class LLMFactory:
         【使用例】
         ```python
         try:
-            LLMFactory.validate_config(LLMProvider.AZURE)
+            LLMFactory.validate_config(LLMProvider.AZURE_FOUNDRY)
             print("設定OK")
         except LLMConfigError as e:
             print(f"設定エラー: {e}")
@@ -575,7 +554,7 @@ class LLMFactory:
 
         Returns:
             ChatModel: LangChainチャットモデルインスタンス
-                - AzureChatOpenAI (Azure / Azure Foundry)
+                - AzureChatOpenAI (Azure AI Foundry)
                 - ChatVertexAI (GCP)
                 - ChatBedrock (AWS)
 
@@ -618,9 +597,7 @@ class LLMFactory:
 
         try:
             # プロバイダー別にモデルを作成
-            if provider == LLMProvider.AZURE:
-                llm = cls._create_azure_model(temperature, model, **kwargs)
-            elif provider == LLMProvider.AZURE_FOUNDRY:
+            if provider == LLMProvider.AZURE_FOUNDRY:
                 llm = cls._create_azure_foundry_model(temperature, model, **kwargs)
             elif provider == LLMProvider.GCP:
                 llm = cls._create_gcp_model(temperature, model, **kwargs)
@@ -657,61 +634,6 @@ class LLMFactory:
                 exc_info=True
             )
             raise
-
-    @classmethod
-    def _create_azure_model(
-        cls,
-        temperature: float,
-        model: Optional[str],
-        **kwargs
-    ):
-        """
-        Azure OpenAI Service ChatModelを作成する（レガシー・後方互換用）
-
-        【注意】新規利用にはAZURE_FOUNDRYプロバイダーを推奨します。
-
-        【Azure OpenAI Serviceとは】
-        MicrosoftがAzure上で提供するOpenAI APIのマネージドサービスです。
-        Azure AI Foundryへの移行が推奨されています。
-
-        Args:
-            temperature: 生成の多様性
-            model: デプロイ名の上書き
-            **kwargs: 追加パラメータ
-
-        Returns:
-            AzureChatOpenAI: Azure OpenAIチャットモデル
-        """
-        logger.debug("[LLMFactory] Azure OpenAI（レガシー）モデル作成開始")
-
-        # LangChainのAzureモジュールをインポート
-        from langchain_openai import AzureChatOpenAI
-
-        # 環境変数から設定を取得
-        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-        api_key = os.getenv("AZURE_OPENAI_API_KEY")
-        api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
-        deployment = model or os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
-
-        logger.debug(
-            f"[LLMFactory] Azure OpenAI（レガシー）設定: "
-            f"endpoint={endpoint[:30]}..., "
-            f"deployment={deployment}, "
-            f"api_version={api_version}"
-        )
-
-        # モデルを作成
-        llm = AzureChatOpenAI(
-            azure_endpoint=endpoint,
-            api_key=api_key,
-            api_version=api_version,
-            deployment_name=deployment,
-            temperature=temperature,
-            **kwargs
-        )
-
-        logger.info(f"[LLMFactory] Azure OpenAI（レガシー）モデル作成完了: {deployment}")
-        return llm
 
     @classmethod
     def _create_azure_foundry_model(
@@ -1070,7 +992,7 @@ class LLMFactory:
         内部統制テストでは、スキャンされた書類や図表の分析に使用します。
 
         【対応モデル】
-        - Azure/Azure Foundry: GPT-4o, GPT-4V
+        - Azure AI Foundry: GPT-5 Nano, GPT-5
         - GCP: Gemini 1.5 Pro/Flash
         - AWS: Claude 3シリーズ
 
@@ -1105,10 +1027,6 @@ class LLMFactory:
 
         # 各プロバイダーのVision対応モデルを取得
         vision_models = {
-            LLMProvider.AZURE: os.getenv(
-                "AZURE_OPENAI_VISION_DEPLOYMENT",
-                os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
-            ),
             LLMProvider.AZURE_FOUNDRY: os.getenv(
                 "AZURE_FOUNDRY_VISION_MODEL",
                 os.getenv("AZURE_FOUNDRY_MODEL", cls.VISION_MODELS[LLMProvider.AZURE_FOUNDRY])
@@ -1186,9 +1104,7 @@ class LLMFactory:
         status["configured"] = len(status["missing_vars"]) == 0
 
         # モデル名を取得
-        if provider == LLMProvider.AZURE:
-            status["model"] = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
-        elif provider == LLMProvider.AZURE_FOUNDRY:
+        if provider == LLMProvider.AZURE_FOUNDRY:
             status["model"] = os.getenv(
                 "AZURE_FOUNDRY_MODEL",
                 cls.DEFAULT_MODELS[LLMProvider.AZURE_FOUNDRY]
@@ -1228,17 +1144,6 @@ class LLMFactory:
         ```
         """
         return {
-            "AZURE": {
-                "name": "Azure OpenAI Service（レガシー）",
-                "description": "レガシー。Azure AI Foundry（AZURE_FOUNDRY）への移行を推奨。",
-                "models": ["gpt-5.2", "gpt-5", "gpt-5-nano", "gpt-4o"],
-                "required_env_vars": cls.REQUIRED_ENV_VARS[LLMProvider.AZURE],
-                "optional_env_vars": [
-                    "AZURE_OPENAI_API_VERSION",
-                    "AZURE_OPENAI_VISION_DEPLOYMENT"
-                ],
-                "documentation": "https://learn.microsoft.com/azure/ai-services/openai/"
-            },
             "AZURE_FOUNDRY": {
                 "name": "Azure AI Foundry",
                 "description": "Azure AI Foundry - 統合AIプラットフォーム。GPT-5.2、Phi-4、DeepSeek-R1等が利用可能。",

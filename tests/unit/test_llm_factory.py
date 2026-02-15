@@ -34,13 +34,12 @@ class TestLLMProvider:
 
     def test_all_providers_exist(self):
         """全プロバイダーが定義されているか"""
-        expected_providers = ["AZURE", "AZURE_FOUNDRY", "GCP", "AWS", "LOCAL"]
+        expected_providers = ["AZURE_FOUNDRY", "GCP", "AWS", "LOCAL"]
         for provider in expected_providers:
             assert hasattr(LLMProvider, provider)
 
     def test_provider_values(self):
         """プロバイダー値の確認"""
-        assert LLMProvider.AZURE.value == "AZURE"
         assert LLMProvider.AZURE_FOUNDRY.value == "AZURE_FOUNDRY"
         assert LLMProvider.GCP.value == "GCP"
         assert LLMProvider.AWS.value == "AWS"
@@ -63,18 +62,18 @@ class TestLLMConfigError:
         """プロバイダー情報付きエラー"""
         error = LLMConfigError(
             message="エンドポイント未設定",
-            provider="AZURE"
+            provider="AZURE_FOUNDRY"
         )
-        assert error.provider == "AZURE"
+        assert error.provider == "AZURE_FOUNDRY"
 
     def test_create_error_with_missing_vars(self):
         """不足変数情報付きエラー"""
         error = LLMConfigError(
             message="環境変数が不足",
-            missing_vars=["AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY"]
+            missing_vars=["AZURE_FOUNDRY_ENDPOINT", "AZURE_FOUNDRY_API_KEY"]
         )
         assert len(error.missing_vars) == 2
-        assert "AZURE_OPENAI_ENDPOINT" in error.missing_vars
+        assert "AZURE_FOUNDRY_ENDPOINT" in error.missing_vars
 
 
 # =============================================================================
@@ -90,12 +89,6 @@ class TestLLMFactory:
             # 環境変数なしの場合はエラー
             with pytest.raises(LLMConfigError):
                 LLMFactory.get_provider()
-
-    def test_get_provider_azure(self):
-        """Azureプロバイダー取得"""
-        with patch.dict(os.environ, {"LLM_PROVIDER": "AZURE"}):
-            provider = LLMFactory.get_provider()
-            assert provider == LLMProvider.AZURE
 
     def test_get_provider_azure_foundry(self):
         """Azure Foundryプロバイダー取得"""
@@ -153,37 +146,6 @@ class TestLLMFactory:
             if not status["configured"]:
                 assert "missing_vars" in status
 
-    @pytest.mark.integration
-    def test_create_chat_model_azure(self):
-        """Azure ChatModel作成（統合テスト）"""
-        env_vars = {
-            "LLM_PROVIDER": "AZURE",
-            "AZURE_OPENAI_ENDPOINT": "https://test.openai.azure.com/",
-            "AZURE_OPENAI_API_KEY": "test-key",
-            "AZURE_OPENAI_DEPLOYMENT_NAME": "gpt-4o",
-            "AZURE_OPENAI_API_VERSION": "2024-02-01"
-        }
-        with patch.dict(os.environ, env_vars):
-            # 設定状態を確認
-            status = LLMFactory.get_config_status()
-            assert status["provider"] == "AZURE"
-            assert status["configured"] is True
-
-    @pytest.mark.integration
-    def test_create_vision_model_azure(self):
-        """Azure VisionModel作成（統合テスト）"""
-        env_vars = {
-            "LLM_PROVIDER": "AZURE",
-            "AZURE_OPENAI_ENDPOINT": "https://test.openai.azure.com/",
-            "AZURE_OPENAI_API_KEY": "test-key",
-            "AZURE_OPENAI_DEPLOYMENT_NAME": "gpt-4o",
-            "AZURE_OPENAI_API_VERSION": "2024-02-01"
-        }
-        with patch.dict(os.environ, env_vars):
-            # 設定状態を確認
-            status = LLMFactory.get_config_status()
-            assert status["configured"] is True
-
     def test_create_chat_model_raises_without_config(self):
         """設定なしでChatModel作成時にエラー"""
         with patch.dict(os.environ, {}, clear=True):
@@ -228,7 +190,6 @@ class TestLLMFactoryIntegration:
     def test_multiple_provider_detection(self):
         """複数プロバイダーの検出"""
         providers_to_test = [
-            ("AZURE", LLMProvider.AZURE),
             ("AZURE_FOUNDRY", LLMProvider.AZURE_FOUNDRY),
             ("GCP", LLMProvider.GCP),
             ("AWS", LLMProvider.AWS),

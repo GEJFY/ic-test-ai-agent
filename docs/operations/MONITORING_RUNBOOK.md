@@ -104,7 +104,7 @@ requests
 **Azure**:
 ```kusto
 dependencies
-| where target contains "openai.azure.com"
+| where target contains "models.ai.azure.com"
 | where timestamp > ago(24h)
 | summarize count() by bin(timestamp, 1h)
 ```
