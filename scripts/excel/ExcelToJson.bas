@@ -119,6 +119,8 @@ Private Type SettingConfig
     ColJudgmentBasis As String       ' 判断根拠列
     ColDocumentReference As String   ' 文書参照列
     ColFileName As String            ' ファイル名列
+    ColFeedbackApplied As String     ' FB適用列（True/False → Boolean表示）
+    ColResultChanged As String       ' 結果変更列（True/False → Boolean表示）
 
     '--- フィードバック設定 ---
     DefaultReevalMode As String      ' 再評価モード（judgment_only/full）
@@ -1332,6 +1334,28 @@ Private Sub WriteResponseToExcel(responseJson As String, config As SettingConfig
                     End If
                 End If
 
+                '--- フィードバック適用フラグの書き込み ---
+                If config.ColFeedbackApplied <> "" Then
+                    Dim fbAppliedValue As String
+                    fbAppliedValue = ExtractJsonBooleanValue(itemJson, "feedbackApplied")
+                    If fbAppliedValue = "true" Then
+                        ws.Range(config.ColFeedbackApplied & rowNum).Value = config.BooleanDisplayTrue
+                    ElseIf fbAppliedValue = "false" Then
+                        ws.Range(config.ColFeedbackApplied & rowNum).Value = config.BooleanDisplayFalse
+                    End If
+                End If
+
+                '--- 結果変更フラグの書き込み ---
+                If config.ColResultChanged <> "" Then
+                    Dim resultChangedValue As String
+                    resultChangedValue = ExtractJsonBooleanValue(itemJson, "resultChanged")
+                    If resultChangedValue = "true" Then
+                        ws.Range(config.ColResultChanged & rowNum).Value = config.BooleanDisplayTrue
+                    ElseIf resultChangedValue = "false" Then
+                        ws.Range(config.ColResultChanged & rowNum).Value = config.BooleanDisplayFalse
+                    End If
+                End If
+
                 processedCount = processedCount + 1
 
                 '--- 行高さの自動調整 ---
@@ -2030,6 +2054,8 @@ Private Function LoadSettings(ByRef config As SettingConfig) As Boolean
     If config.ColFileName = "" Then
         config.ColFileName = ExtractNestedJsonValue(jsonText, "responseMapping", "fileName")
     End If
+    config.ColFeedbackApplied = ExtractNestedJsonValue(jsonText, "responseMapping", "feedbackApplied")
+    config.ColResultChanged = ExtractNestedJsonValue(jsonText, "responseMapping", "resultChanged")
 
     '--- Boolean表示設定の解析 ---
     config.BooleanDisplayTrue = ExtractJsonValue(jsonText, "booleanDisplayTrue")
@@ -2787,6 +2813,8 @@ Public Sub ClearEvaluationResults()
     If config.ColJudgmentBasis <> "" Then confirmMsg = confirmMsg & "・判断根拠（" & config.ColJudgmentBasis & "列）" & vbCrLf
     If config.ColDocumentReference <> "" Then confirmMsg = confirmMsg & "・文書参照（" & config.ColDocumentReference & "列）" & vbCrLf
     If config.ColFileName <> "" Then confirmMsg = confirmMsg & "・ファイル名（" & config.ColFileName & "列〜）" & vbCrLf
+    If config.ColFeedbackApplied <> "" Then confirmMsg = confirmMsg & "・FB適用（" & config.ColFeedbackApplied & "列）" & vbCrLf
+    If config.ColResultChanged <> "" Then confirmMsg = confirmMsg & "・結果変更（" & config.ColResultChanged & "列）" & vbCrLf
     If config.ColFeedback <> "" Then confirmMsg = confirmMsg & "・フィードバック（" & config.ColFeedback & "列）" & vbCrLf
     If config.ColReevalCount <> "" Then confirmMsg = confirmMsg & "・再評価回数（" & config.ColReevalCount & "列）" & vbCrLf
     confirmMsg = confirmMsg & vbCrLf & "対象範囲: " & config.DataStartRow & "行目〜" & lastRow & "行目" & vbCrLf & vbCrLf
@@ -2838,6 +2866,18 @@ Public Sub ClearEvaluationResults()
         On Error Resume Next
         ws.Range(ws.Cells(config.DataStartRow, fileNameColNum), ws.Cells(lastRow, clearEndCol)).Hyperlinks.Delete
         On Error GoTo ErrorHandler
+        clearedCount = clearedCount + 1
+    End If
+
+    ' FB適用列のクリア
+    If config.ColFeedbackApplied <> "" Then
+        ws.Range(config.ColFeedbackApplied & config.DataStartRow & ":" & config.ColFeedbackApplied & lastRow).ClearContents
+        clearedCount = clearedCount + 1
+    End If
+
+    ' 結果変更列のクリア
+    If config.ColResultChanged <> "" Then
+        ws.Range(config.ColResultChanged & config.DataStartRow & ":" & config.ColResultChanged & lastRow).ClearContents
         clearedCount = clearedCount + 1
     End If
 
