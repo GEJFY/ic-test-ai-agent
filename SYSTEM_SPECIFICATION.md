@@ -343,8 +343,9 @@ graph LR
 │    "TestProcedure": "...",             "judgmentBasis": "...",  │
 │    "EvidenceFiles": [...],             "confidence": 0.85,      │
 │    "UserFeedback": "...",  (任意)      "feedbackApplied": false,│
-│    "ReevaluationMode": "..." (任意)    "reevaluationRound": 0   │
-│  }                                   }                          │
+│    "ReevaluationMode": "..." (任意)    "resultChanged": false,  │
+│  }                                     "reevaluationRound": 0   │
+│                                       }                          │
 │                                                                  │
 │         ┌─────────────────────────────────┐                     │
 │         │  AI が以下を実行:                │                     │
@@ -889,19 +890,25 @@ VBAから呼び出され、エビデンスファイルを収集してAPIを呼�
     "dataStartRow": 2,
     "sheetName": "",
     "batchSize": 10,
+    "asyncMode": true,
+    "pollingIntervalSec": 5,
+    "apiClient": "POWERSHELL",
     "columns": {
         "ID": "A",
-        "ControlDescription": "C",
-        "TestProcedure": "D",
-        "EvidenceLink": "E",
+        "TestTarget": "B",
+        "Category": "C",
+        "ControlDescription": "D",
+        "TestProcedure": "E",
+        "EvidenceLink": "F",
         "Feedback": "G",
         "ReevalCount": "H"
     },
     "api": {
         "provider": "AZURE",
-        "endpoint": "https://ca-ic-test-evaluation.azurecontainerapps.io/api/evaluate",
-        "apiKey": "your-api-key",  # pragma: allowlist secret
-        "authHeader": "x-api-key"
+        "endpoint": "https://<APIM名>.azure-api.net/api/evaluate",
+        "authType": "functionsKey",
+        "apiKey": "<APIM_SUBSCRIPTION_KEY>",
+        "authHeader": "Ocp-Apim-Subscription-Key"
     },
     "feedback": {
         "defaultMode": "judgment_only"
@@ -911,7 +918,9 @@ VBAから呼び出され、エビデンスファイルを収集してAPIを呼�
         "executionPlanSummary": "J",
         "judgmentBasis": "K",
         "documentReference": "L",
-        "evidenceFileNames": "M"
+        "feedbackApplied": "M",
+        "resultChanged": "N",
+        "evidenceFileNames": "O"
     },
     "booleanDisplayTrue": "有効",
     "booleanDisplayFalse": "非有効"
@@ -928,7 +937,7 @@ VBAから呼び出され、エビデンスファイルを収集してAPIを呼�
 | `columns.*` | 入力列マッピング（Feedback, ReevalCount含む） | - |
 | `api.*` | API接続設定 | - |
 | `feedback.defaultMode` | フィードバック再評価モード（judgment_only/full） | "judgment_only" |
-| `responseMapping.*` | 出力列マッピング（I列以降） | - |
+| `responseMapping.*` | 出力列マッピング（I-O列〜: 評価結果〜ファイル名、ファイル名は末尾配置推奨） | - |
 | `booleanDisplayTrue/False` | Boolean表示形式 | "有効"/"非有効" |
 
 ---
@@ -971,9 +980,13 @@ VBAから呼び出され、エビデンスファイルを収集してAPIを呼�
     {
         "ID": "CLC-01",
         "evaluationResult": true,
+        "executionPlanSummary": "[A5:意味検索 + 推論] 取締役会議事録の経営成績レビューを評価",
         "judgmentBasis": "[A5:意味検索 + 推論] 有効 - 取締役会議事録に経営成績レビューの記載あり...",
         "documentReference": "取締役会議事録 2024年第3四半期",
         "fileName": "議事録.pdf",
+        "feedbackApplied": false,
+        "reevaluationRound": 0,
+        "resultChanged": false,
         "_debug": {
             "confidence": 0.85,
             "executionPlan": {
@@ -1298,7 +1311,10 @@ AI評価の品質向上のため、評価結果を自動的にレビュー・修
 | `executionPlanSummary` | 実行計画の概要 |
 | `judgmentBasis` | 判断根拠（詳細説明） |
 | `documentReference` | 参照文書（引用情報） |
-| `evidenceFileNames` | 証跡ファイル名リスト |
+| `fileName` | 主に参照した証跡ファイル名 |
+| `feedbackApplied` | フィードバック適用有無（再評価時のみ） |
+| `resultChanged` | 再評価で結果が変わったか（再評価時のみ） |
+| `reevaluationRound` | 再評価の回数（再評価時のみ） |
 
 ### 6.4 大容量証跡ファイル対応
 
@@ -1606,30 +1622,41 @@ C:\SampleData\
 
 #### ステップ2: 設定ファイルの確認
 
-setting.jsonがプロジェクトルートに存在することを確認:
+setting.jsonがプロジェクトルートに存在することを確認（`setting.json.example`をコピーして編集）:
 
 ```json
 {
     "dataStartRow": 2,
     "sheetName": "",
     "batchSize": 10,
+    "asyncMode": true,
+    "pollingIntervalSec": 5,
+    "apiClient": "POWERSHELL",
     "columns": {
         "ID": "A",
-        "ControlDescription": "C",
-        "TestProcedure": "D",
-        "EvidenceLink": "E"
+        "TestTarget": "B",
+        "Category": "C",
+        "ControlDescription": "D",
+        "TestProcedure": "E",
+        "EvidenceLink": "F",
+        "Feedback": "G",
+        "ReevalCount": "H"
     },
     "api": {
         "provider": "AZURE",
-        "endpoint": "https://ca-ic-test-evaluation.azurecontainerapps.io/api/evaluate",
-        "apiKey": "your-api-key",  # pragma: allowlist secret
-        "authHeader": "x-api-key"
+        "endpoint": "https://<APIM名>.azure-api.net/api/evaluate",
+        "authType": "functionsKey",
+        "apiKey": "<APIM_SUBSCRIPTION_KEY>",
+        "authHeader": "Ocp-Apim-Subscription-Key"
     },
     "responseMapping": {
-        "evaluationResult": "F",
-        "judgmentBasis": "G",
-        "documentReference": "H",
-        "fileName": "I"
+        "evaluationResult": "I",
+        "executionPlanSummary": "J",
+        "judgmentBasis": "K",
+        "documentReference": "L",
+        "feedbackApplied": "M",
+        "resultChanged": "N",
+        "evidenceFileNames": "O"
     },
     "booleanDisplayTrue": "有効",
     "booleanDisplayFalse": "非有効"
@@ -2066,7 +2093,7 @@ cd c:\path\to\ic-test-ai-agent
     "api": {
         "provider": "AZURE",
         "authType": "azureAd",
-        "endpoint": "https://ca-ic-test-evaluation.azurecontainerapps.io/api/evaluate"
+        "endpoint": "https://ca-ic-test-evaluation.azurecontainerapps.io/evaluate"
     },
     "azureAd": {
         "tenantId": "1f6ccb61-70c2-46fa-bab8-55e19b2fcc9b",
@@ -2085,7 +2112,7 @@ cd c:\path\to\ic-test-ai-agent
     "pollingIntervalSec": 5,
     "api": {
         "provider": "AZURE",
-        "endpoint": "https://ca-ic-test-evaluation.azurecontainerapps.io/api/evaluate",
+        "endpoint": "https://ca-ic-test-evaluation.azurecontainerapps.io/evaluate",
         "authType": "azureAd"
     },
     "azureAd": {
@@ -2189,7 +2216,7 @@ cd c:\path\to\ic-test-ai-agent
 .\scripts\test-azure-ad-auth.ps1 `
     -TenantId "1f6ccb61-70c2-46fa-bab8-55e19b2fcc9b" `
     -ClientId "262cd06b-dcd2-4237-9eb3-4c0536a665b1" `
-    -FunctionUrl "https://ca-ic-test-evaluation.azurecontainerapps.io/api/health" `
+    -FunctionUrl "https://ca-ic-test-evaluation.azurecontainerapps.io/health" `
     -Scope "api://262cd06b-dcd2-4237-9eb3-4c0536a665b1/user_impersonation openid offline_access"
 ```
 

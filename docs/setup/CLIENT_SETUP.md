@@ -220,63 +220,56 @@ ExcelToJson.bas は `setting.json` という設定ファイルからAPI接続情
   "dataStartRow": 2,
   "sheetName": "",
   "batchSize": 5,
-  "asyncMode": false,
+  "asyncMode": true,
   "pollingIntervalSec": 5,
+  "apiClient": "POWERSHELL",
 
-  "inputColumns": {
-    "id": "A",
-    "testTarget": "B",
-    "category": "C",
-    "controlDescription": "D",
-    "testProcedure": "E",
-    "evidenceLink": "F"
+  "columns": {
+    "ID": "A",
+    "TestTarget": "B",
+    "Category": "C",
+    "ControlDescription": "D",
+    "TestProcedure": "E",
+    "EvidenceLink": "F",
+    "Feedback": "G",
+    "ReevalCount": "H"
   },
 
   "api": {
     "provider": "AZURE",
     "endpoint": "https://<APIM_NAME>.azure-api.net/api/evaluate",
-    "key": "<YOUR_APIM_SUBSCRIPTION_KEY>",
-    "authHeader": "Ocp-Apim-Subscription-Key",
-    "client": "POWERSHELL",
-    "authType": "functionsKey"
+    "authType": "functionsKey",
+    "apiKey": "<YOUR_APIM_SUBSCRIPTION_KEY>",
+    "authHeader": "Ocp-Apim-Subscription-Key"
   },
 
-  "feedbackColumns": {
-    "feedback": "G",
-    "reevalCount": "H"
-  },
-
-  "feedback": {
-    "defaultMode": "judgment_only"
-  },
-
-  "outputColumns": {
+  "responseMapping": {
     "evaluationResult": "I",
     "executionPlanSummary": "J",
     "judgmentBasis": "K",
     "documentReference": "L",
-    "fileName": "M"
+    "feedbackApplied": "M",
+    "resultChanged": "N",
+    "evidenceFileNames": "O"
   },
 
-  "booleanDisplay": {
-    "true": "有効",
-    "false": "不備"
-  }
+  "booleanDisplayTrue": "有効",
+  "booleanDisplayFalse": "不備"
 }
 ```
 
 #### 各プラットフォーム別のAPI設定
 
-**Azure 環境**:
+**Azure 環境（APIM経由）**:
+
 ```json
 {
   "api": {
     "provider": "AZURE",
     "endpoint": "https://<APIM_NAME>.azure-api.net/api/evaluate",
-    "key": "<YOUR_APIM_SUBSCRIPTION_KEY>",
-    "authHeader": "Ocp-Apim-Subscription-Key",
-    "client": "POWERSHELL",
-    "authType": "functionsKey"
+    "authType": "functionsKey",
+    "apiKey": "<YOUR_APIM_SUBSCRIPTION_KEY>",
+    "authHeader": "Ocp-Apim-Subscription-Key"
   }
 }
 ```
@@ -284,16 +277,32 @@ ExcelToJson.bas は `setting.json` という設定ファイルからAPI接続情
 - `<APIM_NAME>`: Azure API Management のリソース名（管理者に確認してください）
 - `<YOUR_APIM_SUBSCRIPTION_KEY>`: サブスクリプションキー（Azure Portalで取得）
 
+**Azure 環境（Container Apps直接）**:
+
+```json
+{
+  "api": {
+    "provider": "AZURE",
+    "endpoint": "https://<CA_NAME>.azurecontainerapps.io/evaluate",
+    "authType": "functionsKey",
+    "apiKey": "",
+    "authHeader": ""
+  }
+}
+```
+
+- `<CA_NAME>`: Container Apps のリソース名（APIMを経由しないため `/api/` プレフィックス不要）
+
 **AWS 環境**:
+
 ```json
 {
   "api": {
     "provider": "AWS",
     "endpoint": "https://<API_ID>.execute-api.ap-northeast-1.amazonaws.com/prod/evaluate",
-    "key": "<YOUR_AWS_API_KEY>",
-    "authHeader": "X-Api-Key",
-    "client": "POWERSHELL",
-    "authType": "functionsKey"
+    "authType": "functionsKey",
+    "apiKey": "<YOUR_AWS_API_KEY>",
+    "authHeader": "x-api-key"
   }
 }
 ```
@@ -302,21 +311,21 @@ ExcelToJson.bas は `setting.json` という設定ファイルからAPI接続情
 - `<YOUR_AWS_API_KEY>`: API Gateway のAPIキー（AWS Consoleで取得）
 
 **GCP 環境**:
+
 ```json
 {
   "api": {
     "provider": "GCP",
-    "endpoint": "https://<APIGEE_ENDPOINT>/evaluate",
-    "key": "<YOUR_GCP_API_KEY>",
-    "authHeader": "X-Api-Key",
-    "client": "POWERSHELL",
-    "authType": "functionsKey"
+    "endpoint": "https://<CLOUD_RUN_URL>/evaluate",
+    "authType": "functionsKey",
+    "apiKey": "<YOUR_GCP_BEARER_TOKEN>",
+    "authHeader": "Authorization"
   }
 }
 ```
 
-- `<APIGEE_ENDPOINT>`: Apigee のエンドポイント（管理者に確認してください）
-- `<YOUR_GCP_API_KEY>`: GCP のAPIキー（GCP Consoleで取得）
+- `<CLOUD_RUN_URL>`: Cloud Run のURL（管理者に確認してください）
+- `<YOUR_GCP_BEARER_TOKEN>`: GCP のBearerトークン（GCP Consoleで取得）
 
 > **APIキーの取得場所がわからない場合**:
 > システム管理者に問い合わせてください。APIキーは機密情報です。
@@ -324,7 +333,7 @@ ExcelToJson.bas は `setting.json` という設定ファイルからAPI接続情
 
 ### 2.6 Excel テンプレートの準備
 
-#### 列の構成（A列〜M列）
+#### 列の構成（A列〜O列〜）
 
 本システムで使用するExcelのデータ形式は以下の通りです。
 1行目はヘッダー行で、2行目以降に実際のデータを入力します。
@@ -343,10 +352,14 @@ ExcelToJson.bas は `setting.json` という設定ファイルからAPI接続情
 | J | 実行計画サマリー | 出力 | AIが作成したテスト計画の要約 | - |
 | K | 判断根拠 | 出力 | AIがその判断に至った理由 | - |
 | L | 文書参照 | 出力 | 参照したエビデンス文書の情報 | - |
-| M | ファイル名 | 出力 | 処理されたエビデンスファイル名 | - |
+| M | FB適用 | 出力 | フィードバックが適用されたか（有効/非有効） | `有効` |
+| N | 結果変更 | 出力 | 再評価で結果が変わったか（有効/非有効） | `有効` |
+| O〜 | ファイル名 | 出力 | 処理されたエビデンスファイル名（複数時に右方向へ最大5列展開） | - |
 
 > **補足**: 列の位置は `setting.json` で変更できます。上記はデフォルト設定の場合です。
 > G列（フィードバック）は初回評価時には空欄のままで構いません。
+> M列・N列はフィードバック再評価を実行した場合のみ値が設定されます。
+> O列以降のファイル名はエビデンスファイル数に応じて右方向に展開されます。
 
 #### サンプルデータ
 
@@ -408,11 +421,14 @@ ExcelToJson.bas は `setting.json` という設定ファイルからAPI接続情
 | J列（デフォルト） | 実行計画サマリー | AIが作成したテスト計画の要約 |
 | K列（デフォルト） | 判断根拠 | AIがその判断に至った理由の詳細説明 |
 | L列（デフォルト） | 文書参照 | 参照したエビデンス文書の情報 |
-| M列（デフォルト） | ファイル名 | 処理されたエビデンスファイル名 |
+| M列（デフォルト） | FB適用 | フィードバックが適用されたか（再評価時のみ） |
+| N列（デフォルト） | 結果変更 | 再評価で結果が変わったか（再評価時のみ） |
+| O列〜（デフォルト） | ファイル名 | 処理されたエビデンスファイル名（複数時に右方向へ展開） |
 
 > **注意**: G列・H列はフィードバック再評価用に予約されています（2.9参照）。
-> 出力列は `setting.json` の `outputColumns` で変更可能です。
-> 入力データの列と重ならないように設定してください。
+> M列・N列はフィードバック再評価を実行した場合のみ値が設定されます。
+> O列以降のファイル名はエビデンス数に応じて最大5列展開されるため、末尾に配置しています。
+> 出力列は `setting.json` の `responseMapping` で変更可能です。
 
 ### 2.9 フィードバック再評価機能
 

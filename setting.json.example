@@ -45,23 +45,28 @@
     "_apiClient": "API呼び出し方式。POWERSHELL（推奨）またはVBA",
     "apiClient": "POWERSHELL",
 
-    "_columns": "Excel入力列の定義",
+    "_columns": "Excel入力列の定義（A-F: 入力、G: フィードバック入力、H: 再評価回数自動更新）",
     "columns": {
         "ID": "A",
         "TestTarget": "B",
         "Category": "C",
         "ControlDescription": "D",
         "TestProcedure": "E",
-        "EvidenceLink": "F"
+        "EvidenceLink": "F",
+        "Feedback": "G",
+        "ReevalCount": "H"
     },
 
     "_api": "=== APIプロバイダー設定 ===",
     "_api_provider": "AZURE / GCP / AWS のいずれかを指定",
     "_api_authType": "認証方式: azureAd（本番環境推奨）または functionsKey（開発環境用）",
+    "_api_endpoint_note": "APIM経由: https://<APIM名>.azure-api.net/api/evaluate, Container Apps直接: https://<CA名>.azurecontainerapps.io/evaluate",
     "api": {
         "provider": "AZURE",
-        "endpoint": "https://your-function-app.azurewebsites.net/api/evaluate",
-        "authType": "azureAd"
+        "endpoint": "https://<APIM名>.azure-api.net/api/evaluate",
+        "authType": "functionsKey",
+        "apiKey": "<APIM_SUBSCRIPTION_KEY>",
+        "authHeader": "Ocp-Apim-Subscription-Key"
     },
 
     "_azureAd": "=== Azure AD認証設定（authType: azureAdの場合に必要）===",
@@ -76,13 +81,15 @@
     },
 
     "_responseMapping": "=== APIレスポンスのExcel出力列マッピング ===",
-    "_responseMapping_note": "APIから返されるJSONキー名と出力先のExcel列を対応付け",
+    "_responseMapping_note": "APIから返されるJSONキー名と出力先のExcel列を対応付け（G-H列はフィードバック用に予約）",
     "responseMapping": {
-        "evaluationResult": "G",
-        "executionPlanSummary": "H",
-        "judgmentBasis": "I",
-        "documentReference": "J",
-        "evidenceFileNames": "K"
+        "evaluationResult": "I",
+        "executionPlanSummary": "J",
+        "judgmentBasis": "K",
+        "documentReference": "L",
+        "feedbackApplied": "M",
+        "resultChanged": "N",
+        "evidenceFileNames": "O"
     },
 
     "_booleanDisplay": "=== Boolean値の表示設定 ===",
@@ -92,15 +99,39 @@
 
     "_api_examples": "=== プロバイダー別の設定例 ===",
 
+    "_azure_apim_example": {
+        "_description": "Azure APIM経由（本番環境推奨）",
+        "_note1": "APIM Subscription Keyで認証",
+        "_note2": "非同期: /api/evaluate/submit → /api/evaluate/status/{id} → /api/evaluate/results/{id}",
+        "api": {
+            "provider": "AZURE",
+            "authType": "functionsKey",
+            "endpoint": "https://<APIM名>.azure-api.net/api/evaluate",
+            "apiKey": "<APIM_SUBSCRIPTION_KEY>",
+            "authHeader": "Ocp-Apim-Subscription-Key"
+        }
+    },
+
+    "_azure_direct_example": {
+        "_description": "Azure Container Apps 直接接続（開発・テスト用）",
+        "_note": "APIMを経由しないため /api/ プレフィックスは不要",
+        "api": {
+            "provider": "AZURE",
+            "authType": "functionsKey",
+            "endpoint": "https://<CA名>.azurecontainerapps.io/evaluate",
+            "apiKey": "",
+            "authHeader": ""
+        }
+    },
+
     "_azure_ad_example": {
-        "_description": "Azure Functions の設定例（Azure AD認証 - 本番環境推奨）",
+        "_description": "Azure AD認証（APIM + Entra ID連携時）",
         "_note1": "Azure ADグループで許可されたユーザーのみアクセス可能",
-        "_note2": "Functions Keyは不要（AuthLevel.ANONYMOUS + Azure ADプラットフォーム認証）",
-        "_note3": "トークンキャッシュにより2回目以降はブラウザ認証不要",
+        "_note2": "トークンキャッシュにより2回目以降はブラウザ認証不要",
         "api": {
             "provider": "AZURE",
             "authType": "azureAd",
-            "endpoint": "https://your-app.azurewebsites.net/api/evaluate"
+            "endpoint": "https://<APIM名>.azure-api.net/api/evaluate"
         },
         "azureAd": {
             "tenantId": "your-tenant-id",
@@ -109,35 +140,23 @@
         }
     },
 
-    "_azure_key_example": {
-        "_description": "Azure Functions の設定例（Functions Key認証 - 開発環境用）",
-        "_note": "セキュリティ上、本番環境では非推奨",
-        "api": {
-            "provider": "AZURE",
-            "authType": "functionsKey",
-            "endpoint": "https://your-app.azurewebsites.net/api/evaluate",
-            "apiKey": "your-function-key",
-            "authHeader": "x-functions-key"
-        }
-    },
-
     "_gcp_example": {
-        "_description": "Google Cloud Functions の設定例",
+        "_description": "Google Cloud Run の設定例",
         "api": {
             "provider": "GCP",
             "authType": "functionsKey",
-            "endpoint": "https://region-project.cloudfunctions.net/function-name",
+            "endpoint": "https://<CLOUD_RUN_URL>/evaluate",
             "apiKey": "your-bearer-token",
             "authHeader": "Authorization"
         }
     },
 
     "_aws_example": {
-        "_description": "AWS Lambda (API Gateway) の設定例",
+        "_description": "AWS App Runner (API Gateway) の設定例",
         "api": {
             "provider": "AWS",
             "authType": "functionsKey",
-            "endpoint": "https://xxxxx.execute-api.ap-northeast-1.amazonaws.com/prod/resource",
+            "endpoint": "https://xxxxx.execute-api.ap-northeast-1.amazonaws.com/prod/evaluate",
             "apiKey": "your-api-key",
             "authHeader": "x-api-key"
         }
@@ -200,6 +219,7 @@
     },
 
     "_expected_response": "=== 期待するAPIレスポンス形式 ===",
+    "_response_note": "feedbackApplied/resultChanged/reevaluationRoundはフィードバック再評価時に返される",
     "_response_example": [
         {
             "ID": "IC-001",
@@ -207,7 +227,10 @@
             "executionPlanSummary": "[A5:意味推論] 承認プロセスの有効性を評価",
             "judgmentBasis": "承認記録が適切に保存されている",
             "documentReference": "内部統制規程 第3条",
-            "evidenceFileNames": "approval_record.pdf"
+            "fileName": "approval_record.pdf",
+            "feedbackApplied": false,
+            "reevaluationRound": 0,
+            "resultChanged": false
         }
     ]
 }
