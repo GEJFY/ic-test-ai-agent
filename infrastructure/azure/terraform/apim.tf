@@ -234,7 +234,7 @@ resource "azurerm_api_management_subscription" "ic_test_ai" {
   resource_group_name = data.azurerm_resource_group.main.name
   subscription_id     = "ic-test-ai-subscription"
   display_name        = "IC Test AI Subscription"
-  api_id              = azurerm_api_management_api.ic_test_ai.id
+  product_id          = azurerm_api_management_product.ic_test_ai.id
   state               = "active"
 }
 
