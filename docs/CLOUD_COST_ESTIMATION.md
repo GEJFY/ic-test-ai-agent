@@ -115,9 +115,11 @@
 | リソース | Azure サービス名 | SKU/プラン | 用途 |
 |---------|-----------------|-----------|------|
 | APIホスティング | Azure Container Apps | Consumption | REST API エンドポイント（Docker + FastAPI） |
+| コンテナレジストリ | Azure Container Registry (ACR) | Basic | Dockerイメージ保管・デプロイ |
 | LLM処理 | Azure AI Foundry | Standard | AI評価（GPT-5.2等） |
 | OCR処理 | Azure Document Intelligence | S0 | PDF・画像からのテキスト抽出 |
 | ファイル保存 | Azure Storage Account | Standard LRS | 一時ファイル、ログ |
+| サービスID | Managed Identity（System + User） | - | サービス間認証（ACR Pull、Key Vault等） |
 
 ### 3.2 非同期モード追加リソース
 
@@ -207,6 +209,31 @@ PoC（1,200件/3ヶ月）:
 | 1vCPU, 2GB | 約 ¥21,000/月 |
 
 **推奨ケース:** 月10,000項目以上、コールドスタートを回避したい場合
+
+---
+
+### 4.1.3 Azure Container Registry (ACR)
+
+Container Apps にデプロイする Docker イメージの保管に使用します。
+Terraform IaC で `infrastructure/azure/terraform/container-apps.tf` に定義済みです。
+
+| SKU | 月額（JPY） | ストレージ | 備考 |
+| --- | ---------- | -------- | ---- |
+| **Basic** | 約 ¥760 | 10GB | **推奨** - 単一イメージ保管に十分 |
+| Standard | 約 ¥3,040 | 100GB | 複数環境運用時 |
+| Premium | 約 ¥7,600 | 500GB | geo レプリケーション |
+
+**計算例:**
+
+```text
+Dockerイメージサイズ: 約500MB（Python + FastAPI + 依存ライブラリ）
+ストレージ: 1-2GB（現世代 + 前世代イメージ）
+月額: ¥760（Basic SKU）
+年額: ¥9,120
+```
+
+> **注:** Managed Identity（User-Assigned）で AcrPull ロールを付与し、
+> APIキー不要でContainer AppsからACRへの認証を実現しています。Managed Identity 自体は無料です。
 
 ---
 
@@ -438,19 +465,21 @@ API呼び出し: 1,000項目 × 5回/件 = 5,000回 → 無料枠内
 | リソース | 構成 | 使用量 | PoC合計（JPY） |
 |---------|-----|--------|--------------|
 | Azure Container Apps | Consumption Plan | 6,000回 | ¥0 |
+| Container Registry (ACR) | Basic | 1-2GB（Dockerイメージ）× 3ヶ月 | ¥2,280 |
 | Azure AI Foundry (GPT-5.2) | Standard | 入力42M + 出力4.8M tokens | ¥21,400 |
 | Document Intelligence | S0 / Layout | 9,600ページ | ¥14,592 |
 | Storage（Blob+Table+Queue） | Standard LRS | 3GB + 操作 | ¥300 |
 | Key Vault | Standard | 5シークレット | ¥0 |
 | Entra ID (Azure AD) | Free | 5ユーザー | ¥0 |
 | 監視（AppInsights+Monitor） | 無料枠内 | 2GB/月 × 3ヶ月 | ¥0 |
-| **PoC合計（3ヶ月）** | | | **¥36,292** |
+| **PoC合計（3ヶ月）** | | | **¥38,572** |
 
 ### 5.2 本番環境（1,800件/年間）
 
 | リソース | 構成 | 年間使用量 | 年額（JPY） |
 |---------|-----|-----------|------------|
 | Azure Container Apps | Consumption Plan | 9,000回/年 | ¥0 |
+| Container Registry (ACR) | Basic | 1-2GB（Dockerイメージ）× 12ヶ月 | ¥9,120 |
 | Azure AI Foundry (GPT-5.2) | Standard | 入力63M + 出力7.2M tokens | ¥32,080 |
 | Document Intelligence | S0 / Layout | 14,400ページ | ¥21,888 |
 | Storage（Blob+Table+Queue） | Standard LRS | 3.5GB + 操作 | ¥1,500 |
@@ -458,9 +487,9 @@ API呼び出し: 1,000項目 × 5回/件 = 5,000回 → 無料枠内
 | Key Vault | Standard | 8シークレット | ¥600 |
 | Entra ID (Azure AD) | P1 | 5ユーザー × 12ヶ月 | ¥54,720 |
 | 監視（AppInsights+Monitor） | Basic + アラート | 5ルール × 12ヶ月 | ¥1,824 |
-| **本番合計（年間）** | | | **¥118,996** |
+| **本番合計（年間）** | | | **¥128,116** |
 
-> **注:** Entra ID を Free プランにする場合、年額は **¥64,276** まで低下します。
+> **注:** Entra ID を Free プランにする場合、年額は **¥73,396** まで低下します。
 
 ### 5.3 コスト削減オプション
 
@@ -556,6 +585,7 @@ MAX_JUDGMENT_REVISIONS=1
 | リソース | GCP サービス名 | 用途 |
 |---------|---------------|------|
 | APIホスティング | Cloud Run | REST API エンドポイント（Docker + FastAPI） |
+| コンテナレジストリ | Artifact Registry | Dockerイメージ保管・デプロイ |
 | LLM処理 | Vertex AI (Gemini 3) | AI評価 |
 | OCR処理 | Document AI | PDF・画像からのテキスト抽出 |
 | ファイル保存 | Cloud Storage | 一時ファイル、ログ |
@@ -576,6 +606,23 @@ MAX_JUDGMENT_REVISIONS=1
 | vCPU | $0.00002400 / vCPU-秒 | 月間18万vCPU-秒 |
 | メモリ | $0.00000250 / GiB-秒 | 月間36万GiB-秒 |
 | リクエスト | $0.40 / 100万回 | 200万回/月 |
+
+### 2.1.1 Artifact Registry
+
+Cloud Run にデプロイする Docker イメージの保管に使用します。
+
+| 項目 | 単価 | 備考 |
+|-----|------|------|
+| ストレージ | $0.10 / GB/月 | Standard リポジトリ |
+
+**計算例:**
+
+```text
+Dockerイメージサイズ: 約500MB（Python + FastAPI + 依存ライブラリ）
+ストレージ: 1GB（現世代 + 前世代イメージ）
+月額: $0.10（¥15）
+年額: $1.20（¥182）
+```
 
 ### 2.2 Vertex AI (Gemini 3 Pro Preview)
 
@@ -610,6 +657,7 @@ MAX_JUDGMENT_REVISIONS=1
 - [Cloud Run 価格](https://cloud.google.com/run/pricing)
 - [Vertex AI 価格](https://cloud.google.com/vertex-ai/pricing)
 - [Document AI 価格](https://cloud.google.com/document-ai/pricing)
+- [Artifact Registry 価格](https://cloud.google.com/artifact-registry/pricing)
 - [Cloud Storage 価格](https://cloud.google.com/storage/pricing)
 - [Firestore 価格](https://cloud.google.com/firestore/pricing)
 
@@ -715,6 +763,7 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 | 機能 | Azure | GCP | AWS |
 |-----|-------|-----|-----|
 | コンテナホスティング | Azure Container Apps | Cloud Run | App Runner |
+| コンテナレジストリ | Azure Container Registry | Artifact Registry | ECR |
 | LLM | AI Foundry (GPT-5.2) | Vertex AI (Gemini 3 Pro) | Bedrock (Claude Opus 4.6) |
 | OCR | Document Intelligence | Document AI | Textract + YomiToku + Tesseract |
 | ジョブストレージ | Table Storage | Firestore | DynamoDB |
@@ -840,37 +889,39 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 | # | カテゴリ | リソース名 | プラン/SKU | 設定 | 使用量 | 費用（JPY） |
 |---|---------|-----------|-----------|------|--------|------------|
 | 1 | コンピュート | Azure Container Apps | **Consumption Plan** | vCPU 0.5, メモリ1GB, Docker+FastAPI | 6,000回 × 60秒 | ¥0 |
-| 2 | LLM | Azure AI Foundry | **Standard** | GPT-5.2, East Japan | 入力42M tokens | ¥11,172 |
-| 3 | LLM | Azure AI Foundry | Standard | GPT-5.2, East Japan | 出力4.8M tokens | ¥10,214 |
-| 4 | OCR | Document Intelligence | **S0 / Layout** | East Japan, 全言語対応 | 9,600ページ | ¥14,592 |
-| 5 | ストレージ | Blob Storage | **Standard LRS Hot** | エビデンス一時保存 | 3GB + 12,000操作 | ¥150 |
-| 6 | ストレージ | Table Storage | **Standard LRS** | ジョブ状態管理 | 0.2GB + 15,000操作 | ¥100 |
-| 7 | ストレージ | Queue Storage | **Standard LRS** | 非同期ジョブキュー | 0.05GB + 12,000操作 | ¥50 |
-| 8 | 監視 | Application Insights | **Basic** | ログ・トレース・例外 | 2GB/月 × 2-3ヶ月 | ¥0 |
-| 9 | 監視 | Log Analytics Workspace | **従量課金** | 診断ログ集約, 保持90日 | 1GB/月 × 2-3ヶ月 | ¥0 |
-| 10 | 監視 | Azure Monitor | **メトリクスアラート** | エラー率/応答時間/API障害 | 3ルール × 2-3ヶ月 | ¥0 |
-| 11 | セキュリティ | Key Vault | **Standard** | APIキー・接続文字列保管 | 5シークレット | ¥0 |
-| 12 | 認証 | Entra ID (Azure AD) | **Free** | 基本認証（PoC用） | 5ユーザー | ¥0 |
+| 2 | コンテナ | Container Registry (ACR) | **Basic** | Dockerイメージ保管 | 1-2GB × 3ヶ月 | ¥2,280 |
+| 3 | LLM | Azure AI Foundry | **Standard** | GPT-5.2, East Japan | 入力42M tokens | ¥11,172 |
+| 4 | LLM | Azure AI Foundry | Standard | GPT-5.2, East Japan | 出力4.8M tokens | ¥10,214 |
+| 5 | OCR | Document Intelligence | **S0 / Layout** | East Japan, 全言語対応 | 9,600ページ | ¥14,592 |
+| 6 | ストレージ | Blob Storage | **Standard LRS Hot** | エビデンス一時保存 | 3GB + 12,000操作 | ¥150 |
+| 7 | ストレージ | Table Storage | **Standard LRS** | ジョブ状態管理 | 0.2GB + 15,000操作 | ¥100 |
+| 8 | ストレージ | Queue Storage | **Standard LRS** | 非同期ジョブキュー | 0.05GB + 12,000操作 | ¥50 |
+| 9 | 監視 | Application Insights | **Basic** | ログ・トレース・例外 | 2GB/月 × 2-3ヶ月 | ¥0 |
+| 10 | 監視 | Log Analytics Workspace | **従量課金** | 診断ログ集約, 保持90日 | 1GB/月 × 2-3ヶ月 | ¥0 |
+| 11 | 監視 | Azure Monitor | **メトリクスアラート** | エラー率/応答時間/API障害 | 3ルール × 2-3ヶ月 | ¥0 |
+| 12 | セキュリティ | Key Vault | **Standard** | APIキー・接続文字列保管 | 5シークレット | ¥0 |
+| 13 | 認証 | Entra ID (Azure AD) | **Free** | 基本認証（PoC用） | 5ユーザー | ¥0 |
 | | | | | | | |
-| | **Azure PoC 合計** | | | | | **¥36,278** |
+| | **Azure PoC 合計** | | | | | **¥38,558** |
 
 ### 2.2 GCP PoC 詳細明細
 
 | # | カテゴリ | リソース名 | プラン | 設定 | 使用量 | USD | JPY(@152) |
 |---|---------|-----------|-------|------|--------|-----|-----------|
 | 1 | コンピュート | Cloud Run | **従量課金** | vCPU 1, メモリ1GB, Docker+FastAPI | 6,000回 | $0 | ¥0 |
-| 2 | LLM | Vertex AI | **Gemini 3 Pro Preview** | global | 入力42M tokens | $84 | ¥12,768 |
-| 3 | LLM | Vertex AI | Gemini 3 Pro Preview | global | 出力4.8M tokens | $57.6 | ¥8,755 |
-| 4 | OCR | Document AI | **Layout Parser** | 全言語対応 | 9,600ページ | $96 | ¥14,592 |
-| 5 | ストレージ | Cloud Storage | **Standard** | asia-northeast1 | 3GB | $0.08 | ¥12 |
-| 6 | DB | Firestore | **Native mode** | ジョブ管理 | 6,000ドキュメント | $2 | ¥304 |
-| 7 | キュー | Cloud Tasks | **従量課金** | 非同期ジョブ | 6,000タスク | $0 | ¥0 |
-| 8 | 監視 | Cloud Logging | **従量課金** | ログ収集 | 2GB/月 × 2-3ヶ月 | $0 | ¥0 |
-| 9 | 監視 | Cloud Monitoring | **従量課金** | メトリクス・アラート | 基本 | $0 | ¥0 |
-| 10 | セキュリティ | Secret Manager | **従量課金** | API キー保管 | 5シークレット | $0.15 | ¥23 |
-| 11 | 認証 | IAM | **標準** | サービスアカウント | 3アカウント | $0 | ¥0 |
+| 2 | コンテナ | Artifact Registry | **Standard** | Dockerイメージ保管 | 1GB × 3ヶ月 | $0.30 | ¥46 |
+| 3 | LLM | Vertex AI | **Gemini 3 Pro Preview** | global | 入力42M tokens | $84 | ¥12,768 |
+| 4 | LLM | Vertex AI | Gemini 3 Pro Preview | global | 出力4.8M tokens | $57.6 | ¥8,755 |
+| 5 | OCR | Document AI | **Layout Parser** | 全言語対応 | 9,600ページ | $96 | ¥14,592 |
+| 6 | ストレージ | Cloud Storage | **Standard** | asia-northeast1 | 3GB | $0.08 | ¥12 |
+| 7 | DB | Firestore | **Native mode** | ジョブ管理 | 6,000ドキュメント | $2 | ¥304 |
+| 8 | キュー | Cloud Tasks | **従量課金** | 非同期ジョブ | 6,000タスク | $0 | ¥0 |
+| 9 | 監視 | Cloud Logging | **従量課金** | ログ収集 | 2GB/月 × 2-3ヶ月 | $0 | ¥0 |
+| 10 | 監視 | Cloud Monitoring | **従量課金** | メトリクス・アラート | 基本 | $0 | ¥0 |
+| 11 | セキュリティ | Secret Manager | **従量課金** | API キー保管 | 5シークレット | $0.15 | ¥23 |
+| 12 | 認証 | IAM | **標準** | サービスアカウント | 3アカウント | $0 | ¥0 |
 | | | | | | | | |
-| | **GCP PoC 合計** | | | | | **$240** | **¥36,454** |
+| | **GCP PoC 合計** | | | | | **$240** | **¥36,500** |
 
 ### 2.3 AWS PoC 詳細明細
 
@@ -903,8 +954,8 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 
 | プラットフォーム | PoC全期間合計（JPY） | 月平均（2-3ヶ月換算） | 特徴 |
 |----------------|--------------------|--------------------|------|
-| **Azure** | **¥36,278** | ¥12,100-18,100 | OCR一元管理、バランス型 |
-| **GCP** | **¥36,454** | ¥12,200-18,200 | Gemini 3 Pro + Document AI |
+| **Azure** | **¥38,558** | ¥12,900-19,300 | OCR一元管理、バランス型 |
+| **GCP** | **¥36,500** | ¥12,200-18,200 | Gemini 3 Pro + Document AI |
 | **AWS** | **¥218,450** | ¥72,800-109,200 | 最高精度、SageMaker OCR含む |
 
 ---
@@ -927,28 +978,29 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 | # | カテゴリ | リソース名 | プラン/SKU | 設定詳細 | 年間使用量 | 年額（JPY） |
 |---|---------|-----------|-----------|---------|-----------|------------|
 | | **--- コンピュート ---** | | | | | |
-| 1 | コンピュート | Azure Functions | **Consumption Plan** | 512MB, 230秒, East Japan | 9,000回/年 | ¥0 |
+| 1 | コンピュート | Azure Container Apps | **Consumption Plan** | vCPU 0.5, メモリ1GB, East Japan | 9,000回/年 | ¥0 |
+| 2 | コンテナ | Container Registry (ACR) | **Basic** | Dockerイメージ保管 | 1-2GB × 12ヶ月 | ¥9,120 |
 | | **--- AI/LLM ---** | | | | | |
-| 2 | LLM(入力) | Azure AI Foundry | **Standard** | GPT-5.2, East Japan | 63M tokens | ¥16,758 |
-| 3 | LLM(出力) | Azure AI Foundry | Standard | GPT-5.2, East Japan | 7.2M tokens | ¥15,322 |
+| 3 | LLM(入力) | Azure AI Foundry | **Standard** | GPT-5.2, East Japan | 63M tokens | ¥16,758 |
+| 4 | LLM(出力) | Azure AI Foundry | Standard | GPT-5.2, East Japan | 7.2M tokens | ¥15,322 |
 | | **--- OCR ---** | | | | | |
-| 4 | OCR | Document Intelligence | **S0 / Layout** | 全言語ネイティブ対応(日/英/タイ/蘭) | 14,400ページ | ¥21,888 |
+| 5 | OCR | Document Intelligence | **S0 / Layout** | 全言語ネイティブ対応(日/英/タイ/蘭) | 14,400ページ | ¥21,888 |
 | | **--- ストレージ ---** | | | | | |
-| 5 | Blob Storage | Storage Account | **Standard LRS Hot** | エビデンス一時保存, 30日自動削除 | 3.5GB(ピーク) + 18K操作 | ¥700 |
-| 6 | Table Storage | Storage Account | **Standard LRS** | ジョブ状態・評価結果保持 | 0.5GB + 36K操作 | ¥500 |
-| 7 | Queue Storage | Storage Account | **Standard LRS** | 非同期ジョブキュー | 0.1GB + 18K操作 | ¥300 |
+| 6 | Blob Storage | Storage Account | **Standard LRS Hot** | エビデンス一時保存, 30日自動削除 | 3.5GB(ピーク) + 18K操作 | ¥700 |
+| 7 | Table Storage | Storage Account | **Standard LRS** | ジョブ状態・評価結果保持 | 0.5GB + 36K操作 | ¥500 |
+| 8 | Queue Storage | Storage Account | **Standard LRS** | 非同期ジョブキュー | 0.1GB + 18K操作 | ¥300 |
 | | **--- API管理 ---** | | | | | |
-| 8 | API Gateway | Azure API Management | **Consumption** | レート制限/認証/ログ | 9,000回/年（無料枠内） | ¥6,384 |
+| 9 | API Gateway | Azure API Management | **Consumption** | レート制限/認証/ログ | 9,000回/年（無料枠内） | ¥6,384 |
 | | **--- 認証・セキュリティ ---** | | | | | |
-| 9 | 認証 | Entra ID (Azure AD) | **P1** | 条件付きアクセス, MFA | 5ユーザー × 12ヶ月 | ¥54,720 |
-| 10 | シークレット | Key Vault | **Standard** | APIキー・接続文字列 | 8シークレット + 5K操作 | ¥600 |
+| 10 | 認証 | Entra ID (Azure AD) | **P1** | 条件付きアクセス, MFA | 5ユーザー × 12ヶ月 | ¥54,720 |
+| 11 | シークレット | Key Vault | **Standard** | APIキー・接続文字列 | 8シークレット + 5K操作 | ¥600 |
 | | **--- 監視・ログ ---** | | | | | |
-| 11 | APM | Application Insights | **Basic** | トレース・例外・依存関係 | 年間3GB（無料枠内） | ¥0 |
-| 12 | ログ | Log Analytics Workspace | **従量課金** | 診断ログ集約, 保持90日 | 年間4GB（無料枠内） | ¥0 |
-| 13 | アラート | Azure Monitor | **メトリクス3 + ログ2** | エラー率/応答/API + 日次レポート | 5ルール × 12ヶ月 | ¥1,824 |
-| 14 | 診断設定 | Diagnostic Settings | **-** | Functions/Foundry/DI → Log Analytics | 3設定 | ¥0 |
+| 12 | APM | Application Insights | **Basic** | トレース・例外・依存関係 | 年間3GB（無料枠内） | ¥0 |
+| 13 | ログ | Log Analytics Workspace | **従量課金** | 診断ログ集約, 保持90日 | 年間4GB（無料枠内） | ¥0 |
+| 14 | アラート | Azure Monitor | **メトリクス3 + ログ2** | エラー率/応答/API + 日次レポート | 5ルール × 12ヶ月 | ¥1,824 |
+| 15 | 診断設定 | Diagnostic Settings | **-** | Container Apps/Foundry/DI → Log Analytics | 3設定 | ¥0 |
 | | | | | | | |
-| | **Azure 本番 年間合計** | | | | | **¥118,996** |
+| | **Azure 本番 年間合計** | | | | | **¥128,116** |
 
 ### 3.3 GCP 本番 年間詳細明細
 
@@ -956,24 +1008,25 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 |---|---------|-----------|-------|---------|-----------|-----|-------------|
 | | **--- コンピュート ---** | | | | | | |
 | 1 | コンピュート | Cloud Functions (2nd gen) | **従量課金** | メモリ1GB, 最小0インスタンス | 9,000回 + 計算時間 | $18 | ¥2,736 |
+| 2 | コンテナ | Artifact Registry | **Standard** | Dockerイメージ保管 | 1GB × 12ヶ月 | $1.20 | ¥182 |
 | | **--- AI/LLM ---** | | | | | | |
-| 2 | LLM(入力) | Vertex AI | **Gemini 3 Pro Preview** | global | 63M tokens | $126 | ¥19,152 |
-| 3 | LLM(出力) | Vertex AI | Gemini 3 Pro Preview | global | 7.2M tokens | $86.4 | ¥13,133 |
+| 3 | LLM(入力) | Vertex AI | **Gemini 3 Pro Preview** | global | 63M tokens | $126 | ¥19,152 |
+| 4 | LLM(出力) | Vertex AI | Gemini 3 Pro Preview | global | 7.2M tokens | $86.4 | ¥13,133 |
 | | **--- OCR ---** | | | | | | |
-| 4 | OCR | Document AI | **Layout Parser** | 全言語ネイティブ対応 | 14,400ページ | $144 | ¥21,888 |
+| 5 | OCR | Document AI | **Layout Parser** | 全言語ネイティブ対応 | 14,400ページ | $144 | ¥21,888 |
 | | **--- ストレージ ---** | | | | | | |
-| 5 | ファイル | Cloud Storage | **Standard** | asia-northeast1, 30日ライフサイクル | 3.5GB(ピーク) | $5 | ¥760 |
-| 6 | DB | Firestore | **Native mode** | ジョブ管理・評価結果 | 18Kドキュメント | $10 | ¥1,520 |
-| 7 | キュー | Cloud Tasks | **従量課金** | 非同期ジョブ | 9,000タスク | $2 | ¥304 |
+| 6 | ファイル | Cloud Storage | **Standard** | asia-northeast1, 30日ライフサイクル | 3.5GB(ピーク) | $5 | ¥760 |
+| 7 | DB | Firestore | **Native mode** | ジョブ管理・評価結果 | 18Kドキュメント | $10 | ¥1,520 |
+| 8 | キュー | Cloud Tasks | **従量課金** | 非同期ジョブ | 9,000タスク | $2 | ¥304 |
 | | **--- 認証・セキュリティ ---** | | | | | | |
-| 8 | 認証 | IAM | **標準** | サービスアカウント | 5アカウント | $0 | ¥0 |
-| 9 | シークレット | Secret Manager | **従量課金** | APIキー保管 | 8シークレット × 12ヶ月 | $5 | ¥760 |
+| 9 | 認証 | IAM | **標準** | サービスアカウント | 5アカウント | $0 | ¥0 |
+| 10 | シークレット | Secret Manager | **従量課金** | APIキー保管 | 8シークレット × 12ヶ月 | $5 | ¥760 |
 | | **--- 監視・ログ ---** | | | | | | |
-| 10 | ログ | Cloud Logging | **従量課金** | 全サービスログ集約 | 年間4GB（無料枠内） | $0 | ¥0 |
-| 11 | 監視 | Cloud Monitoring | **従量課金** | メトリクス・アラート | 年間 | $15 | ¥2,280 |
-| 12 | トレース | Cloud Trace | **従量課金** | リクエストトレース | 年間 | $3 | ¥456 |
+| 11 | ログ | Cloud Logging | **従量課金** | 全サービスログ集約 | 年間4GB（無料枠内） | $0 | ¥0 |
+| 12 | 監視 | Cloud Monitoring | **従量課金** | メトリクス・アラート | 年間 | $15 | ¥2,280 |
+| 13 | トレース | Cloud Trace | **従量課金** | リクエストトレース | 年間 | $3 | ¥456 |
 | | | | | | | | |
-| | **GCP 本番 年間合計** | | | | | **$414** | **¥62,989** |
+| | **GCP 本番 年間合計** | | | | | **$415** | **¥63,171** |
 
 ### 3.4 AWS 本番 年間詳細明細
 
@@ -1015,20 +1068,20 @@ AWSではTextractが日本語・タイ語・オランダ語に非対応のため
 
 | プラットフォーム | 年間合計（JPY） | うちLLM | うちOCR | うちインフラ | 特徴 |
 |----------------|---------------|--------|--------|------------|------|
-| **Azure** | **¥118,996** | ¥32,080 | ¥21,888 | ¥65,028 | OCR一元管理, APIM含む |
-| **GCP** | **¥62,989** | ¥32,285 | ¥21,888 | ¥8,816 | Gemini 3 Pro, 軽量インフラ |
+| **Azure** | **¥128,116** | ¥32,080 | ¥21,888 | ¥74,148 | OCR一元管理, APIM含む |
+| **GCP** | **¥63,171** | ¥32,285 | ¥21,888 | ¥8,998 | Gemini 3 Pro, 軽量インフラ |
 | **AWS** | **¥256,880** | ¥75,240 | ¥169,480 | ¥12,160 | 最高精度LLM, SageMaker OCR |
 
 **コスト構成比（本番年間）:**
 
 ```
-Azure:  LLM 27% | OCR 18% | インフラ 55%  ← Entra ID P1(¥54,720)+APIM(¥6,384)が支配的
+Azure:  LLM 25% | OCR 17% | インフラ 58%  ← Entra ID P1(¥54,720)+APIM(¥6,384)+ACR(¥9,120)が支配的
 GCP:    LLM 51% | OCR 35% | インフラ 14%  ← LLMがコスト中心
 AWS:    LLM 29% | OCR 66% | インフラ  5%  ← SageMaker OCRが圧倒的
 ```
 
 > **注:** Azure のインフラ比率が高いのは Entra ID P1（¥54,720/年）+ APIM（¥6,384/年）によるものです。
-> Free プランの場合、Azure 年間合計は **¥64,276** まで低下します。
+> Free プランの場合、Azure 年間合計は **¥73,396** まで低下します。
 
 ---
 
@@ -1038,24 +1091,24 @@ AWS:    LLM 29% | OCR 66% | インフラ  5%  ← SageMaker OCRが圧倒的
 
 | プラットフォーム | PoC（3ヶ月） | 本番（年間） | 初年度合計 |
 |----------------|--------------|------------|-----------|
-| **Azure** | ¥36,278 | ¥118,996 | **¥155,274** |
-| **GCP** | ¥36,454 | ¥62,989 | **¥99,443** |
+| **Azure** | ¥38,558 | ¥128,116 | **¥166,674** |
+| **GCP** | ¥36,500 | ¥63,171 | **¥99,671** |
 | **AWS** | ¥218,450 | ¥256,880 | **¥475,330** |
 
 ### 4.2 2年目以降（本番のみ）
 
 | プラットフォーム | 年額（JPY） | 月平均 | テスト1件あたり |
 |----------------|------------|-------|---------------|
-| **Azure** | ¥118,996 | ¥9,916 | ¥66 |
-| **GCP** | ¥62,989 | ¥5,249 | ¥35 |
+| **Azure** | ¥128,116 | ¥10,676 | ¥71 |
+| **GCP** | ¥63,171 | ¥5,264 | ¥35 |
 | **AWS** | ¥256,880 | ¥21,407 | ¥143 |
 
 ### 4.3 3年間TCO（Total Cost of Ownership）
 
 | プラットフォーム | 初年度 | 2年目 | 3年目 | 3年TCO |
 |----------------|-------|-------|-------|--------|
-| **Azure** | ¥155,274 | ¥118,996 | ¥118,996 | **¥393,266** |
-| **GCP** | ¥99,443 | ¥62,989 | ¥62,989 | **¥225,421** |
+| **Azure** | ¥166,674 | ¥128,116 | ¥128,116 | **¥422,906** |
+| **GCP** | ¥99,671 | ¥63,171 | ¥63,171 | **¥225,763** |
 | **AWS** | ¥475,330 | ¥256,880 | ¥256,880 | **¥989,090** |
 
 ---
@@ -1508,12 +1561,12 @@ Phase 3（監視最適化）で追加された監視サービスのコスト詳�
 
 | プラットフォーム | Phase 2までのコスト | 監視コスト追加 | Phase 3後の合計 | 増加率 |
 |----------------|-------------------|--------------|----------------|--------|
-| **Azure** | ¥115,366 | +¥3,630 | **¥118,996** | +3.1% |
+| **Azure** | ¥124,486 | +¥3,630 | **¥128,116** | +2.9% |
 | **AWS** | ¥251,087 | +¥5,793 | **¥256,880** | +2.3% |
-| **GCP** | ¥62,758 | +¥231 | **¥62,989** | +0.4% |
+| **GCP** | ¥62,940 | +¥231 | **¥63,171** | +0.4% |
 
 **Phase 2までのコスト内訳（再掲）:**
-- Azure: Functions + AI Foundry + Document Intelligence + APIM + Key Vault + Storage
+- Azure: Container Apps + ACR + AI Foundry + Document Intelligence + APIM + Key Vault + Storage
 - AWS: Lambda + Bedrock + Textract + API Gateway + Secrets Manager + S3
 - GCP: Cloud Functions + Vertex AI + Document AI + Cloud Storage（Apigee無効）
 
@@ -1636,3 +1689,4 @@ sampler = ProbabilitySampler(0.1)
 | 7.0 | 2026年2月 | **Part 8: 監視サービスコスト詳細を追加**（Phase 3対応）、Application Insights/X-Ray/Cloud Loggingコスト明細化、プラットフォーム別監視コスト比較、監視ROI分析（7,300%~190,000%）、無料枠活用ガイド、コスト最適化推奨事項追加 |
 | 8.0 | 2026年2月 | APIM/Key Vaultを本番必須リソースに移動、構成整理 |
 | 9.0 | 2026年2月12日 | **為替レート¥152/USD（2026/2/12時点）に更新**、全コスト再計算、Azure本番にAPIM明示追加（¥6,384/年）、Entra ID P1（¥54,720/年）反映、PoC（3ヶ月）・本番（年間）形式に統一、3年TCO・予算取り推奨額を更新 |
+| 9.1 | 2026年2月15日 | **コンテナレジストリ・認証リソースの網羅性確保**: Azure ACR Basic（¥9,120/年）・Managed Identity、GCP Artifact Registry（¥182/年）をリソース一覧・コスト見積もりに追加、Part 4比較表にコンテナレジストリ行追加、全サマリー・TCOテーブルの合計金額を再計算 |
