@@ -82,6 +82,12 @@ variable "container_timeout" {
   default     = 540
 }
 
+variable "container_min_instances" {
+  description = "Cloud Run 最小インスタンス数（コールドスタート防止には1以上推奨）"
+  type        = number
+  default     = 1
+}
+
 variable "container_max_instances" {
   description = "Cloud Run 最大インスタンス数"
   type        = number
@@ -98,6 +104,16 @@ variable "gcp_model_name" {
   description = "GCP Vertex AI モデル名"
   type        = string
   default     = "gemini-3-pro-preview"
+}
+
+# ------------------------------------------------------------------------------
+# アクセス制御
+# ------------------------------------------------------------------------------
+
+variable "allow_unauthenticated" {
+  description = "Cloud Runへの未認証アクセスを許可（Apigee無効時はtrue、有効時はfalse推奨）"
+  type        = bool
+  default     = true
 }
 
 # ------------------------------------------------------------------------------

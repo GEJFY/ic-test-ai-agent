@@ -21,6 +21,31 @@
 data "aws_caller_identity" "current" {}
 
 # ------------------------------------------------------------------------------
+# SNS Topic: アラーム通知先
+# ------------------------------------------------------------------------------
+
+resource "aws_sns_topic" "alarm_notifications" {
+  count = var.alarm_notification_email != "" ? 1 : 0
+  name  = "${var.project_name}-${var.environment}-alarm-notifications"
+
+  tags = merge(var.tags, {
+    Name        = "${var.project_name}-${var.environment}-alarm-notifications"
+    Environment = var.environment
+  })
+}
+
+resource "aws_sns_topic_subscription" "alarm_email" {
+  count     = var.alarm_notification_email != "" ? 1 : 0
+  topic_arn = aws_sns_topic.alarm_notifications[0].arn
+  protocol  = "email"
+  endpoint  = var.alarm_notification_email
+}
+
+locals {
+  alarm_actions = var.alarm_notification_email != "" ? [aws_sns_topic.alarm_notifications[0].arn] : []
+}
+
+# ------------------------------------------------------------------------------
 # CloudWatch Alarms: App Runner HTTPエラー率
 # ------------------------------------------------------------------------------
 
@@ -41,7 +66,7 @@ resource "aws_cloudwatch_metric_alarm" "apprunner_errors" {
     ServiceName = aws_apprunner_service.ic_test_ai.service_name
   }
 
-  alarm_actions = []
+  alarm_actions = local.alarm_actions
 
   tags = merge(var.tags, {
     Name        = "${var.project_name}-${var.environment}-apprunner-errors-alarm"
@@ -70,7 +95,7 @@ resource "aws_cloudwatch_metric_alarm" "apprunner_latency" {
     ServiceName = aws_apprunner_service.ic_test_ai.service_name
   }
 
-  alarm_actions = []
+  alarm_actions = local.alarm_actions
 
   tags = merge(var.tags, {
     Name        = "${var.project_name}-${var.environment}-apprunner-latency-alarm"
@@ -99,7 +124,7 @@ resource "aws_cloudwatch_metric_alarm" "apprunner_instances" {
     ServiceName = aws_apprunner_service.ic_test_ai.service_name
   }
 
-  alarm_actions = []
+  alarm_actions = local.alarm_actions
 
   tags = merge(var.tags, {
     Name        = "${var.project_name}-${var.environment}-apprunner-instances-alarm"
@@ -129,7 +154,7 @@ resource "aws_cloudwatch_metric_alarm" "api_gateway_4xx" {
     Stage   = aws_api_gateway_stage.prod.stage_name
   }
 
-  alarm_actions = []
+  alarm_actions = local.alarm_actions
 
   tags = merge(var.tags, {
     Name        = "${var.project_name}-${var.environment}-api-gateway-4xx-alarm"
@@ -159,7 +184,7 @@ resource "aws_cloudwatch_metric_alarm" "api_gateway_5xx" {
     Stage   = aws_api_gateway_stage.prod.stage_name
   }
 
-  alarm_actions = []
+  alarm_actions = local.alarm_actions
 
   tags = merge(var.tags, {
     Name        = "${var.project_name}-${var.environment}-api-gateway-5xx-alarm"

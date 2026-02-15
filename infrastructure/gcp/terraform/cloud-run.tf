@@ -101,7 +101,7 @@ resource "google_cloud_run_v2_service" "ic_test_ai" {
     service_account = google_service_account.cloud_run.email
 
     scaling {
-      min_instance_count = 0
+      min_instance_count = var.container_min_instances
       max_instance_count = var.container_max_instances
     }
 
@@ -251,10 +251,19 @@ resource "google_cloud_run_v2_service" "ic_test_ai" {
 }
 
 # ------------------------------------------------------------------------------
-# Cloud Run 公開アクセス許可（Apigeeから呼び出し可能）
+# Cloud Run アクセス制御
 # ------------------------------------------------------------------------------
+#
+# 【セキュリティ注意事項】
+# allow_unauthenticated = true: allUsersに公開（Apigee無効時のデフォルト）
+# allow_unauthenticated = false: 認証済みリクエストのみ許可（Apigee有効時推奨）
+#
+# 本番環境ではApigeeを有効にし、allow_unauthenticated = false に設定することを推奨。
+# Apigee経由の場合、Cloud Run側の認証はApigeeサービスアカウントで行います。
+#
 
-resource "google_cloud_run_v2_service_iam_member" "invoker" {
+resource "google_cloud_run_v2_service_iam_member" "invoker_public" {
+  count    = var.allow_unauthenticated ? 1 : 0
   project  = google_cloud_run_v2_service.ic_test_ai.project
   location = google_cloud_run_v2_service.ic_test_ai.location
   name     = google_cloud_run_v2_service.ic_test_ai.name

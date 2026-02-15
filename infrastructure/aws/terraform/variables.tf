@@ -155,6 +155,12 @@ variable "enable_cloudwatch_alarms" {
   default     = true
 }
 
+variable "alarm_notification_email" {
+  description = "CloudWatchアラーム通知先メールアドレス（空=SNS通知無効）"
+  type        = string
+  default     = ""
+}
+
 variable "cost_alert_threshold" {
   description = "コストアラート閾値（USD/月）"
   type        = number
