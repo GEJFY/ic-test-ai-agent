@@ -234,7 +234,9 @@
     │    "ID": "CLC-01",                     "ID": "CLC-01",          │
     │    "ControlDescription": "...",        "evaluationResult": true,│
     │    "TestProcedure": "...",             "judgmentBasis": "...",  │
-    │    "EvidenceFiles": [...]              "confidence": 0.85       │
+    │    "EvidenceFiles": [...],             "confidence": 0.85,      │
+    │    "UserFeedback": "...",  (任意)      "feedbackApplied": false,│
+    │    "ReevaluationMode": "..." (任意)    "reevaluationRound": 0   │
     │  }                                   }                          │
     │                                                                  │
     │         ┌─────────────────────────────────┐                     │
@@ -461,7 +463,9 @@
             "ID": "A",
             "ControlDescription": "C",
             "TestProcedure": "D",
-            "EvidenceLink": "E"
+            "EvidenceLink": "E",
+            "Feedback": "G",
+            "ReevalCount": "H"
         },
         "api": {
             "provider": "AZURE",
@@ -469,11 +473,15 @@
             "apiKey": "your-api-key",  # pragma: allowlist secret
             "authHeader": "x-api-key"
         },
+        "feedback": {
+            "defaultMode": "judgment_only"
+        },
         "responseMapping": {
-            "evaluationResult": "F",
-            "judgmentBasis": "G",
-            "documentReference": "H",
-            "fileName": "I"
+            "evaluationResult": "I",
+            "executionPlanSummary": "J",
+            "judgmentBasis": "K",
+            "documentReference": "L",
+            "evidenceFileNames": "M"
         },
         "booleanDisplayTrue": "有効",
         "booleanDisplayFalse": "非有効"
@@ -487,9 +495,10 @@
     | `dataStartRow` | データ開始行 | 2 |
     | `sheetName` | 対象シート名（空=アクティブ） | "" |
     | `batchSize` | 1回のAPI呼び出しで処理する件数（5-20推奨） | 10 |
-    | `columns.*` | 入力列マッピング | - |
+    | `columns.*` | 入力列マッピング（Feedback, ReevalCount含む） | - |
     | `api.*` | API接続設定 | - |
-    | `responseMapping.*` | 出力列マッピング | - |
+    | `feedback.defaultMode` | フィードバック再評価モード（judgment_only/full） | "judgment_only" |
+    | `responseMapping.*` | 出力列マッピング（I列以降） | - |
     | `booleanDisplayTrue/False` | Boolean表示形式 | "有効"/"非有効" |
 
     ---

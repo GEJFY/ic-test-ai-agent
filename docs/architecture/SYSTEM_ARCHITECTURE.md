@@ -408,7 +408,28 @@ sequenceDiagram
     AH-->>Client: {results: [...]}
 ```
 
-### 4.3 相関IDの伝播フロー
+### 4.3 フィードバック再評価フロー
+
+```mermaid
+flowchart TD
+    A[Excel G列にフィードバック入力] --> B{再評価モード選択}
+    B -->|judgment_only| C[前回タスク結果を引き継ぎ]
+    B -->|full| D[証憑の再読み取りから実行]
+
+    C --> E[LLMで判断・根拠を再生成]
+    E --> F[前回結果と比較]
+
+    D --> G[通常のグラフ実行<br/>フィードバックをプロンプトに注入]
+    G --> F
+
+    F --> H[AuditResult生成<br/>feedbackApplied=true<br/>reevaluationRound++]
+    H --> I[Excel I-M列に結果書き戻し<br/>H列の再評価回数を更新]
+```
+
+- **judgment_only**: タスク実行をスキップし、前回のタスク結果をベースに判断・根拠のみを再生成（高速）
+- **full**: フィードバックを各ノードのプロンプトに注入し、証憑の再読み取りから完全に再評価
+
+### 4.4 相関IDの伝播フロー
 
 ```
 Excel VBA (SessionID生成: "20260211_143000_0001")
@@ -480,6 +501,9 @@ class AuditGraphState(TypedDict):
     judgment: Optional[Dict]          # 最終判断
     judgment_review: Optional[Dict]   # 判断レビュー結果
     judgment_revision_count: int      # 判断修正回数
+    user_feedback: Optional[str]      # ユーザーフィードバック（再評価時）
+    previous_result: Optional[Dict]   # 前回の評価結果（再評価時）
+    reevaluation_mode: Optional[str]  # 再評価モード（judgment_only/full）
     final_result: Optional[Dict]      # 最終出力
     evidence_validation: Optional[Dict]  # 証憑バリデーション結果（Layer 0）
     screening_summary: Optional[Dict]    # スクリーニング結果（Layer 3）

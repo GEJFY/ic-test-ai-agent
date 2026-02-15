@@ -173,6 +173,11 @@ class AuditGraphState(TypedDict):
     judgment_review: Optional[Dict]   # 判断レビュー結果
     judgment_revision_count: int      # 判断修正回数
 
+    # フィードバック再評価関連
+    user_feedback: Optional[str]      # ユーザーフィードバック
+    previous_result: Optional[Dict]   # 前回の評価結果
+    reevaluation_mode: Optional[str]  # 再評価モード（judgment_only/full）
+
     # 出力
     final_result: Optional[Dict]      # 最終出力
 
@@ -205,6 +210,10 @@ class AuditResult:
     confidence: float = 0.0
     plan_review_summary: str = ""
     judgment_review_summary: str = ""
+    # フィードバック再評価関連
+    feedback_applied: bool = False
+    reevaluation_round: int = 0
+    result_changed: bool = False
 
     def to_response_dict(self, include_debug: bool = True) -> dict:
         """API応答形式の辞書に変換"""
@@ -219,6 +228,9 @@ class AuditResult:
             "documentReference": self.document_reference,
             "fileName": self.file_name,
             "evidenceFiles": self.evidence_files_info,
+            "feedbackApplied": self.feedback_applied,
+            "reevaluationRound": self.reevaluation_round,
+            "resultChanged": self.result_changed,
         }
 
         if include_debug:
@@ -816,7 +828,7 @@ class GraphAuditOrchestrator:
                 "control_description": context.get("control_description", ""),
                 "test_procedure": context.get("test_procedure", ""),
                 "evidence_info": evidence_info,
-                "user_feedback_section": "",  # 将来のユーザーフィードバック対応用
+                "user_feedback_section": state.get("user_feedback") or "",
             })
 
             logger.info(f"[ノード] create_plan: 計画作成完了 - {len(result.get('execution_plan', []))}ステップ")
@@ -861,7 +873,7 @@ class GraphAuditOrchestrator:
                 "test_procedure": context.get("test_procedure", ""),
                 "evidence_info": evidence_info,
                 "execution_plan": str(execution_plan),
-                "user_feedback_section": "",  # 将来のユーザーフィードバック対応用
+                "user_feedback_section": state.get("user_feedback") or "",
             })
 
             logger.info(f"[ノード] review_plan: レビュー結果 - {result.get('review_result')}")
@@ -1104,7 +1116,7 @@ class GraphAuditOrchestrator:
                 "evidence_files": evidence_files_text,
                 "execution_plan": str(execution_plan.get("execution_plan", [])),
                 "task_results": task_results_text,
-                "user_feedback_section": "",  # 将来のユーザーフィードバック対応用
+                "user_feedback_section": state.get("user_feedback") or "",
             })
 
             logger.info(f"[ノード] aggregate_results: 判断生成完了 - "
@@ -1162,7 +1174,7 @@ class GraphAuditOrchestrator:
                 "judgment_basis": judgment.get("judgment_basis", ""),
                 "document_quotes": str(judgment.get("document_quotes", [])),
                 "confidence": judgment.get("confidence", 0.0),
-                "user_feedback_section": "",  # 将来のユーザーフィードバック対応用
+                "user_feedback_section": state.get("user_feedback") or "",
             })
 
             review_result = result.get("review_result", "承認")
@@ -1385,20 +1397,43 @@ class GraphAuditOrchestrator:
     # メイン評価処理
     # =========================================================================
 
-    async def evaluate(self, context: AuditContext) -> AuditResult:
+    async def evaluate(
+        self,
+        context: AuditContext,
+        user_feedback: Optional[str] = None,
+        reevaluation_mode: Optional[str] = None,
+        previous_result: Optional[Dict] = None,
+    ) -> AuditResult:
         """
         テスト項目を評価
 
         LangGraphを使用してセルフリフレクション付きの評価を実行します。
+        フィードバック再評価にも対応しています。
 
         Args:
             context (AuditContext): 監査コンテキスト
+            user_feedback: ユーザーフィードバック（再評価時）
+            reevaluation_mode: 再評価モード（"judgment_only" or "full"）
+            previous_result: 前回の評価結果（judgment_only時に使用）
 
         Returns:
             AuditResult: 評価結果
         """
+        is_feedback = bool(user_feedback)
         logger.info("=" * 60)
-        logger.info(f"[GraphOrchestrator] 評価開始: {context.item_id}")
+        if is_feedback:
+            logger.info(
+                f"[GraphOrchestrator] フィードバック再評価開始: {context.item_id} "
+                f"(モード: {reevaluation_mode})"
+            )
+        else:
+            logger.info(f"[GraphOrchestrator] 評価開始: {context.item_id}")
+
+        # judgment_onlyモード: タスク結果を前回から引き継いでグラフを再構築
+        if is_feedback and reevaluation_mode == "judgment_only" and previous_result:
+            return await self._evaluate_judgment_only(
+                context, user_feedback, previous_result
+            )
 
         # 証憑ファイルのバリデーション（Layer 0: 入力制御）
         validated_files, validation_result = self._validate_evidence_files(
@@ -1425,6 +1460,11 @@ class GraphAuditOrchestrator:
             ]
         }
 
+        # フィードバックセクションの構築
+        feedback_section = self._build_feedback_section(
+            user_feedback, previous_result
+        )
+
         # 初期状態を設定
         initial_state: AuditGraphState = {
             "context": context_dict,
@@ -1437,6 +1477,9 @@ class GraphAuditOrchestrator:
             "judgment": None,
             "judgment_review": None,
             "judgment_revision_count": 0,
+            "user_feedback": feedback_section,
+            "previous_result": previous_result,
+            "reevaluation_mode": reevaluation_mode,
             "final_result": None,
         }
 
@@ -1507,14 +1550,26 @@ class GraphAuditOrchestrator:
                     "base64": ef.base64_content if ef.base64_content else ""
                 })
 
+        # フィードバック再評価の情報を付与
+        prev_eval = previous_result.get("evaluationResult") if previous_result else None
+        current_eval = final_result.get("evaluation_result", False)
+
         # AuditResultを作成
         result = AuditResult(
             item_id=context.item_id,
-            evaluation_result=final_result.get("evaluation_result", False),
+            evaluation_result=current_eval,
             judgment_basis=final_result.get("judgment_basis", ""),
             document_reference=document_reference,
             file_name=context.evidence_files[0].file_name if context.evidence_files else "",
             evidence_files_info=evidence_files_info,
+            feedback_applied=is_feedback,
+            reevaluation_round=(
+                (previous_result.get("reevaluationRound", 0) + 1)
+                if is_feedback and previous_result else 0
+            ),
+            result_changed=(
+                prev_eval is not None and prev_eval != current_eval
+            ),
             task_results=task_results,
             execution_plan=execution_plan,
             confidence=final_result.get("confidence", 0.0),
@@ -1527,6 +1582,193 @@ class GraphAuditOrchestrator:
         logger.info("=" * 60)
 
         return result
+
+    # =========================================================================
+    # フィードバック再評価ヘルパー
+    # =========================================================================
+
+    def _build_feedback_section(
+        self,
+        user_feedback: Optional[str],
+        previous_result: Optional[Dict],
+    ) -> str:
+        """
+        ユーザーフィードバックセクションを構築
+
+        LLMプロンプトの {user_feedback_section} に注入するテキストを生成。
+
+        Args:
+            user_feedback: ユーザーからのフィードバックテキスト
+            previous_result: 前回の評価結果
+
+        Returns:
+            フォーマットされたフィードバックセクション（なければ空文字列）
+        """
+        if not user_feedback:
+            return ""
+
+        parts = []
+        parts.append("\n【ユーザーからのフィードバック・追加指示】")
+        parts.append("★ 以下のフィードバックを十分に考慮して再評価を行ってください ★")
+        parts.append(user_feedback.strip())
+
+        if previous_result:
+            prev_eval = previous_result.get("evaluationResult")
+            prev_basis = previous_result.get("judgmentBasis", "")
+            prev_plan = previous_result.get("executionPlanSummary", "")
+
+            parts.append("")
+            parts.append("【前回の評価結果（参考）】")
+            parts.append(f"- 評価結果: {'有効' if prev_eval else '非有効'}")
+            if prev_basis:
+                # 根拠は長いので先頭500文字まで
+                basis_preview = prev_basis[:500]
+                if len(prev_basis) > 500:
+                    basis_preview += "..."
+                parts.append(f"- 判断根拠: {basis_preview}")
+            if prev_plan:
+                parts.append(f"- 実行計画: {prev_plan[:200]}")
+
+        return "\n".join(parts)
+
+    async def _evaluate_judgment_only(
+        self,
+        context: AuditContext,
+        user_feedback: str,
+        previous_result: Dict,
+    ) -> AuditResult:
+        """
+        判断のみ再評価（judgment_only モード）
+
+        タスク実行をスキップし、前回の結果をベースに
+        判断・根拠のみをフィードバックを踏まえて再生成する。
+
+        Args:
+            context: 監査コンテキスト
+            user_feedback: ユーザーフィードバック
+            previous_result: 前回の評価結果
+
+        Returns:
+            AuditResult: 再評価結果
+        """
+        logger.info(
+            f"[GraphOrchestrator] judgment_only再評価: {context.item_id}"
+        )
+
+        # フィードバックセクションを構築
+        feedback_section = self._build_feedback_section(
+            user_feedback, previous_result
+        )
+
+        # 前回のタスク結果をフォーマット（_debugから取得）
+        prev_task_results = previous_result.get("taskResults", [])
+        task_results_text = ""
+        if prev_task_results:
+            for tr in prev_task_results:
+                task_results_text += (
+                    f"- {tr.get('taskType', 'N/A')}: {tr.get('taskName', '')}\n"
+                    f"  成功: {tr.get('success', False)}, "
+                    f"信頼度: {tr.get('confidence', 0.0)}\n"
+                    f"  根拠: {tr.get('reasoning', '')}\n\n"
+                )
+        else:
+            task_results_text = "（前回のタスク結果情報なし）"
+
+        # 証憑ファイルの情報を取得
+        evidence_files_text = self._summarize_evidence(
+            [{"file_name": ef.file_name, "mime_type": ef.mime_type}
+             for ef in context.evidence_files]
+        )
+
+        # 前回の実行計画サマリー
+        prev_plan_summary = previous_result.get("executionPlanSummary", "")
+
+        try:
+            # LLMで判断を再生成（フィードバック付き）
+            prompt = ChatPromptTemplate.from_template(JUDGMENT_PROMPT)
+            chain = prompt | self.llm | self.parser
+
+            result = await chain.ainvoke({
+                "control_description": context.control_description,
+                "test_procedure": context.test_procedure,
+                "evidence_files": evidence_files_text,
+                "execution_plan": prev_plan_summary,
+                "task_results": task_results_text,
+                "user_feedback_section": feedback_section,
+            })
+
+            logger.info(
+                f"[GraphOrchestrator] judgment_only再評価完了: "
+                f"{'有効' if result.get('evaluation_result') else '要確認'}"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[GraphOrchestrator] judgment_only再評価エラー: {e}",
+                exc_info=True
+            )
+            return self._create_fallback_result(
+                context, f"フィードバック再評価エラー: {e}"
+            )
+
+        # 判断の後処理
+        judgment_basis = self._postprocess_judgment_basis(
+            result.get("judgment_basis", ""),
+            result.get("evaluation_result", False)
+        )
+
+        # 引用をフォーマット
+        document_quotes = result.get("document_quotes", [])
+        document_reference = self._format_document_quotes(document_quotes)
+
+        # ハイライト処理
+        try:
+            temp_result = AuditResult(
+                item_id=context.item_id,
+                evaluation_result=result.get("evaluation_result", False),
+                judgment_basis=judgment_basis,
+                document_reference=document_reference,
+                file_name=(
+                    context.evidence_files[0].file_name
+                    if context.evidence_files else ""
+                ),
+                confidence=result.get("confidence", 0.0),
+            )
+            evidence_files_info = await self.highlighting_service.highlight_evidence(
+                temp_result, context
+            )
+        except Exception as e:
+            logger.error(f"[judgment_only] ハイライトエラー: {e}", exc_info=True)
+            evidence_files_info = [
+                {
+                    "fileName": ef.file_name,
+                    "originalFileName": ef.file_name,
+                    "filePath": context.evidence_link,
+                    "base64": ef.base64_content or ""
+                }
+                for ef in context.evidence_files
+            ]
+
+        # 前回の評価結果と比較
+        prev_eval = previous_result.get("evaluationResult")
+        current_eval = result.get("evaluation_result", False)
+        reeval_round = previous_result.get("reevaluationRound", 0) + 1
+
+        return AuditResult(
+            item_id=context.item_id,
+            evaluation_result=current_eval,
+            judgment_basis=judgment_basis,
+            document_reference=document_reference,
+            file_name=(
+                context.evidence_files[0].file_name
+                if context.evidence_files else ""
+            ),
+            evidence_files_info=evidence_files_info,
+            confidence=result.get("confidence", 0.0),
+            feedback_applied=True,
+            reevaluation_round=reeval_round,
+            result_changed=(prev_eval is not None and prev_eval != current_eval),
+        )
 
     # =========================================================================
     # 証憑バリデーション（Layer 0: 入力制御）

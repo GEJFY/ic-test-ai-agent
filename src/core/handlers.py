@@ -372,11 +372,27 @@ async def evaluate_single_item(
             if len(evidence_files) > 3:
                 logger.debug(f"[{item_id}] ... 他 {len(evidence_files) - 3} 件")
 
+        # フィードバック再評価の検出
+        user_feedback = item.get("UserFeedback", "").strip()
+        reevaluation_mode = item.get("ReevaluationMode", "judgment_only")
+        previous_result = item.get("PreviousResult")
+
+        if user_feedback:
+            logger.info(
+                f"[{item_id}] フィードバック再評価モード: {reevaluation_mode}, "
+                f"フィードバック: {user_feedback[:80]}..."
+            )
+
         # 評価を実行（タイムアウト付き）
         logger.info(f"[{item_id}] 評価を開始（タイムアウト: {timeout_seconds}秒）")
 
         result = await asyncio.wait_for(
-            orchestrator.evaluate(context),
+            orchestrator.evaluate(
+                context,
+                user_feedback=user_feedback if user_feedback else None,
+                reevaluation_mode=reevaluation_mode if user_feedback else None,
+                previous_result=previous_result if user_feedback else None,
+            ),
             timeout=timeout_seconds
         )
 
