@@ -52,6 +52,7 @@ gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 """
 import sys
 import os
+import asyncio
 import logging
 import traceback
 from typing import List, Dict, Any, Optional
@@ -153,6 +154,26 @@ class JobStatusResponse(BaseModel):
 # FastAPI アプリケーション
 # =============================================================================
 
+async def _background_job_worker():
+    """バックグラウンドでpending状態のジョブを処理するワーカー"""
+    from core.async_handlers import process_pending_jobs
+
+    polling_interval = int(os.getenv("JOB_WORKER_INTERVAL_SEC", "5"))
+    logger.info(f"[JobWorker] バックグラウンドワーカー開始 (polling: {polling_interval}s)")
+
+    while True:
+        try:
+            processed = await process_pending_jobs(max_jobs=5)
+            if processed > 0:
+                logger.info(f"[JobWorker] {processed}件のジョブを処理しました")
+        except asyncio.CancelledError:
+            logger.info("[JobWorker] ワーカー停止")
+            raise
+        except Exception as e:
+            logger.error(f"[JobWorker] ジョブ処理エラー: {e}")
+        await asyncio.sleep(polling_interval)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """アプリケーションのライフサイクル管理"""
@@ -164,9 +185,17 @@ async def lifespan(app: FastAPI):
     logger.info(f"[Local Server] OLLAMA_BASE_URL: {os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')}")
     logger.info("=" * 60)
 
+    # バックグラウンドジョブワーカーを開始
+    worker_task = asyncio.create_task(_background_job_worker())
+
     yield
 
-    # 終了時
+    # 終了時: ワーカーを停止
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
     logger.info("[Local Server] シャットダウン")
 
 
