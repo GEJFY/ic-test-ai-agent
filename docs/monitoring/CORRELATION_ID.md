@@ -179,7 +179,7 @@ async def main():
 ```mermaid
 sequenceDiagram
     participant Client as クライアント<br/>(Excel VBA / PowerShell)
-    participant Gateway as API Gateway<br/>(Azure Functions / Lambda / Cloud Functions)
+    participant Gateway as API Gateway<br/>(Container Apps / App Runner / Cloud Run)
     participant Backend as バックエンド<br/>(FastAPI)
     participant Core as コア処理<br/>(OCR / LLM)
     participant External as 外部API<br/>(Azure AI Foundry / Bedrock / Vertex AI)
@@ -712,11 +712,11 @@ fields @timestamp, correlation_id
 
 ```
 # 特定の相関IDでフィルタ
-resource.type="cloud_function"
+resource.type="cloud_run_revision"
 jsonPayload.correlation_id="20260209_1707484800_0001"
 
 # 特定日のリクエスト一覧（Cloud Logging フィルタ構文）
-resource.type="cloud_function"
+resource.type="cloud_run_revision"
 jsonPayload.correlation_id=~"^20260209_"
 severity>=INFO
 
@@ -728,7 +728,7 @@ SELECT
     COUNT(*) AS log_count,
     COUNTIF(severity = 'ERROR') AS error_count
 FROM
-    `project.dataset.cloud_function_logs`
+    `project.dataset.cloud_run_logs`
 WHERE
     DATE(timestamp) = '2026-02-09'
     AND JSON_VALUE(json_payload, '$.correlation_id') IS NOT NULL

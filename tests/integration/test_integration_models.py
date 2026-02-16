@@ -84,23 +84,23 @@ def get_test_summary() -> str:
 
 
 # =============================================================================
-# Azure Foundry モデルテスト
+# Azure AI Foundry モデルテスト
 # =============================================================================
 
-class TestAzureFoundryModels:
-    """Azure Foundry全モデルの結合テスト"""
+class TestAzureModels:
+    """Azure AI Foundry全モデルの結合テスト"""
 
     @pytest.fixture
-    def check_azure_foundry_config(self):
-        """Azure Foundry設定確認"""
+    def check_azure_config(self):
+        """Azure AI Foundry設定確認"""
         provider = os.getenv("LLM_PROVIDER")
-        endpoint = os.getenv("AZURE_FOUNDRY_ENDPOINT")
-        api_key = os.getenv("AZURE_FOUNDRY_API_KEY")
+        endpoint = os.getenv("AZURE_ENDPOINT") or os.getenv("AZURE_FOUNDRY_ENDPOINT")
+        api_key = os.getenv("AZURE_API_KEY") or os.getenv("AZURE_FOUNDRY_API_KEY")
 
-        if provider != "AZURE_FOUNDRY":
-            pytest.skip("LLM_PROVIDER is not AZURE_FOUNDRY")
+        if provider not in ("AZURE", "AZURE_FOUNDRY"):
+            pytest.skip("LLM_PROVIDER is not AZURE")
         if not endpoint or not api_key:
-            pytest.skip("Azure Foundry configuration is incomplete")
+            pytest.skip("Azure configuration is incomplete")
 
         return True
 
@@ -117,56 +117,56 @@ class TestAzureFoundryModels:
             assert response is not None
             assert hasattr(response, 'content')
 
-            record_test_result("AZURE_FOUNDRY", model_name, True, elapsed_ms)
+            record_test_result("AZURE", model_name, True, elapsed_ms)
             print(f"\n✅ {model_name} ({description}): {elapsed_ms:.0f}ms")
             print(f"   Response: {response.content[:50]}...")
             return True
 
         except Exception as e:
             elapsed_ms = (time.time() - start_time) * 1000
-            record_test_result("AZURE_FOUNDRY", model_name, False, elapsed_ms, str(e)[:100])
+            record_test_result("AZURE", model_name, False, elapsed_ms, str(e)[:100])
             print(f"\n❌ {model_name} ({description}): {e}")
             return False
 
     @pytest.mark.integration
     @pytest.mark.azure
     @pytest.mark.llm
-    def test_gpt_5_2(self, check_azure_foundry_config):
+    def test_gpt_5_2(self, check_azure_config):
         """GPT-5.2 フラッグシップモデルテスト"""
         assert self._test_model("gpt-5.2", "フラッグシップ")
 
     @pytest.mark.integration
     @pytest.mark.azure
     @pytest.mark.llm
-    def test_gpt_5_nano(self, check_azure_foundry_config):
+    def test_gpt_5_nano(self, check_azure_config):
         """GPT-5 Nano 高速モデルテスト"""
         assert self._test_model("gpt-5-nano", "高速・低コスト")
 
     @pytest.mark.integration
     @pytest.mark.azure
     @pytest.mark.llm
-    def test_gpt_5(self, check_azure_foundry_config):
+    def test_gpt_5(self, check_azure_config):
         """GPT-5 標準モデルテスト"""
         assert self._test_model("gpt-5", "標準")
 
     @pytest.mark.integration
     @pytest.mark.azure
     @pytest.mark.llm
-    def test_claude_opus_4_6_azure(self, check_azure_foundry_config):
+    def test_claude_opus_4_6_azure(self, check_azure_config):
         """Claude Opus 4.6 (Azure Foundry経由) テスト"""
         assert self._test_model("claude-opus-4-6", "Anthropic最高性能")
 
     @pytest.mark.integration
     @pytest.mark.azure
     @pytest.mark.llm
-    def test_claude_sonnet_4_5_azure(self, check_azure_foundry_config):
+    def test_claude_sonnet_4_5_azure(self, check_azure_config):
         """Claude Sonnet 4.5 (Azure Foundry経由) テスト"""
         assert self._test_model("claude-sonnet-4-5", "Anthropicバランス型")
 
     @pytest.mark.integration
     @pytest.mark.azure
     @pytest.mark.llm
-    def test_claude_haiku_4_5_azure(self, check_azure_foundry_config):
+    def test_claude_haiku_4_5_azure(self, check_azure_config):
         """Claude Haiku 4.5 (Azure Foundry経由) テスト"""
         assert self._test_model("claude-haiku-4-5", "Anthropic高速")
 

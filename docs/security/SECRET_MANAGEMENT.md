@@ -3,7 +3,7 @@
 > 内部統制テストAIシステム -- シークレット管理アーキテクチャと運用手順
 
 **最終更新日**: 2026-02-11
-**対象バージョン**: ic-test-ai-agent v1.x
+**対象バージョン**: ic-test-ai-agent v3.x
 **ステータス**: 本番運用ドキュメント
 
 ---
@@ -265,7 +265,7 @@ pip install azure-keyvault-secrets azure-identity
 `AzureKeyVaultProvider` は Azure SDK の `DefaultAzureCredential` を使用します。以下の順序で認証を試行します。
 
 1. **環境変数**: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`
-2. **Managed Identity**: Azure VM、App Service、Azure Functions で自動検出
+2. **Managed Identity**: Azure VM、App Service、Container Apps で自動検出
 3. **Azure CLI**: `az login` でログイン済みの場合
 4. **Visual Studio Code**: Azure拡張機能でログイン済みの場合
 5. **Azure PowerShell**: `Connect-AzAccount` でログイン済みの場合
@@ -373,7 +373,7 @@ pip install boto3
 | `AWS_ACCESS_KEY_ID` | No* | アクセスキーID | - |
 | `AWS_SECRET_ACCESS_KEY` | No* | シークレットアクセスキー | - |
 
-> *No*: IAMロールを使用する場合（EC2、ECS、Lambda等）は不要です。
+> *No*: IAMロールを使用する場合（EC2、ECS、App Runner等）は不要です。
 
 #### 認証方式
 
@@ -383,11 +383,11 @@ boto3 は以下の順序で認証情報を検索します。
 2. **環境変数**: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
 3. **共有認証情報ファイル**: `~/.aws/credentials`
 4. **AWS設定ファイル**: `~/.aws/config`
-5. **IAMロール**: EC2インスタンスプロファイル、ECSタスクロール、Lambda実行ロール
+5. **IAMロール**: EC2インスタンスプロファイル、ECSタスクロール、App Runner Instance Role
 6. **コンテナ認証情報**: ECSタスクの認証情報プロバイダー
 
 ```python
-# IAMロール認証（EC2/ECS/Lambda環境で推奨）
+# IAMロール認証（EC2/ECS/App Runner環境で推奨）
 provider = AWSSecretsManagerProvider(region_name="ap-northeast-1")
 
 # 明示的な認証情報指定（開発用途のみ）
@@ -657,7 +657,7 @@ provider = EnvironmentSecretProvider()
 
 # .env ファイルと組み合わせて使用
 # (.env ファイルは python-dotenv 等で事前にロード)
-api_key = provider.get_secret("AZURE_FOUNDRY_API_KEY")
+api_key = provider.get_secret("AZURE_API_KEY")
 
 # テスト用にシークレットを一時設定
 provider.set_secret("TEST_API_KEY", "test-value-123")
@@ -850,7 +850,7 @@ Key Vault等のシークレット名と環境変数名のマッピング:
 
 | Key Vault名 | 環境変数名 | 備考 |
 |-------------|-----------|------|
-| `azure-foundry-api-key` | `AZURE_FOUNDRY_API_KEY` | ハイフンをアンダースコアに変換、大文字化 |
+| `azure-foundry-api-key` | `AZURE_API_KEY` | ハイフンをアンダースコアに変換、大文字化 |
 | `bedrock-api-key` | `BEDROCK_API_KEY` | 同上 |
 | `vertex-ai-key` | `VERTEX_AI_KEY` | 同上 |
 
@@ -883,7 +883,7 @@ print(f"接続文字列: {connection_string}")               # 標準出力に�
 SECRET_PROVIDER=azure
 
 # 開発環境のみ: 環境変数に直接設定可
-AZURE_FOUNDRY_API_KEY=sk-dev-key-for-testing
+AZURE_API_KEY=sk-dev-key-for-testing
 ```
 
 `fallback_to_env` パラメータは開発環境での利便性のために提供されています。本番環境では `fallback_to_env=False` を指定するか、環境変数 `SECRET_PROVIDER` を正しく設定して常にクラウドプロバイダーが選択されるようにしてください。
@@ -941,7 +941,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SECRET_PROVIDER: env
-      AZURE_FOUNDRY_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
+      AZURE_API_KEY: ${{ secrets.AZURE_API_KEY }}
       BEDROCK_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
       VERTEX_AI_KEY: ${{ secrets.VERTEX_AI_KEY }}
 
@@ -1226,7 +1226,7 @@ GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa-key.json
 
 ```bash
 # ローカル開発（環境変数プロバイダー）
-export AZURE_FOUNDRY_API_KEY="sk-dev-key"  # pragma: allowlist secret
+export AZURE_API_KEY="sk-dev-key"  # pragma: allowlist secret
 python -m src.main
 
 # Azure 本番

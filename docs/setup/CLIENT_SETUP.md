@@ -1137,11 +1137,11 @@ fields @timestamp, correlation_id, @message
 
 ```
 # 特定の相関IDでフィルタ
-resource.type="cloud_function"
+resource.type="cloud_run_revision"
 jsonPayload.correlation_id="20260209_1707484800_0001"
 
 # 特定日のリクエスト一覧
-resource.type="cloud_function"
+resource.type="cloud_run_revision"
 jsonPayload.correlation_id=~"^20260209_"
 severity>=INFO
 ```

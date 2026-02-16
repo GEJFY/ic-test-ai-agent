@@ -306,10 +306,10 @@ code .env  # VS Code
 
 ```ini
 # LLM設定
-LLM_PROVIDER=AZURE_FOUNDRY
-AZURE_FOUNDRY_ENDPOINT=https://your-project.region.models.ai.azure.com
-AZURE_FOUNDRY_API_KEY=your-api-key-here
-AZURE_FOUNDRY_MODEL=gpt-5-nano
+LLM_PROVIDER=AZURE
+AZURE_ENDPOINT=https://your-project.region.models.ai.azure.com
+AZURE_API_KEY=your-api-key-here
+AZURE_MODEL=gpt-5-nano
 
 # OCR設定（PDFのテキスト抽出のみの場合は NONE でOK）
 OCR_PROVIDER=NONE
@@ -329,7 +329,7 @@ grep -E "LLM_PROVIDER|OCR_PROVIDER" .env
 
 期待される出力：
 ```
-LLM_PROVIDER=AZURE_FOUNDRY
+LLM_PROVIDER=AZURE
 OCR_PROVIDER=NONE
 ```
 
@@ -466,10 +466,10 @@ az containerapp create \
   --cpu 1.0 --memory 2.0Gi \
   --min-replicas 0 --max-replicas 3 \
   --env-vars \
-    LLM_PROVIDER=AZURE_FOUNDRY \
-    AZURE_FOUNDRY_ENDPOINT=https://your-project.region.models.ai.azure.com \
-    AZURE_FOUNDRY_API_KEY=your-api-key \
-    AZURE_FOUNDRY_MODEL=gpt-5-nano \
+    LLM_PROVIDER=AZURE \
+    AZURE_ENDPOINT=https://your-project.region.models.ai.azure.com \
+    AZURE_API_KEY=your-api-key \
+    AZURE_MODEL=gpt-5-nano \
     OCR_PROVIDER=NONE
 ```
 
@@ -913,19 +913,19 @@ ollama pull llama3.1:8b
 
 | 環境変数 | 必須 | 説明 | 設定値 | デフォルト |
 |---------|------|------|-------|-----------|
-| `LLM_PROVIDER` | **必須** | 使用するLLMプロバイダー | `AZURE_FOUNDRY`, `AZURE`, `GCP`, `AWS`, `LOCAL` | なし |
+| `LLM_PROVIDER` | **必須** | 使用するLLMプロバイダー | `AZURE`, `GCP`, `AWS`, `LOCAL` | なし |
 | `OCR_PROVIDER` | 任意 | 使用するOCRプロバイダー | `AZURE`, `AWS`, `GCP`, `TESSERACT`, `NONE` | `NONE` |
 
 ### Azure AI Foundry 設定
 
-`LLM_PROVIDER=AZURE_FOUNDRY` の場合に使用
+`LLM_PROVIDER=AZURE` の場合に使用
 
 | 環境変数 | 必須 | 説明 | 例 |
 |---------|------|------|-----|
-| `AZURE_FOUNDRY_ENDPOINT` | **必須** | AI Foundry エンドポイント | `https://your-project.region.models.ai.azure.com` |
-| `AZURE_FOUNDRY_API_KEY` | **必須** | APIキー | `xxxxxxxxxxxxxxxx` |
-| `AZURE_FOUNDRY_MODEL` | **必須** | モデル名 | `gpt-5-nano`, `gpt-5.2` |
-| `AZURE_FOUNDRY_API_VERSION` | 任意 | APIバージョン | `2024-08-01-preview` |
+| `AZURE_ENDPOINT` | **必須** | AI Foundry エンドポイント | `https://your-project.region.models.ai.azure.com` |
+| `AZURE_API_KEY` | **必須** | APIキー | `xxxxxxxxxxxxxxxx` |
+| `AZURE_MODEL` | **必須** | モデル名 | `gpt-5-nano`, `gpt-5.2` |
+| `AZURE_API_VERSION` | 任意 | APIバージョン | `2024-08-01-preview` |
 
 ### GCP Vertex AI 設定
 
@@ -1232,7 +1232,7 @@ curl -X POST http://localhost:8000/evaluate \
 
 | 用途 | プラットフォーム | LLM | OCR | 理由 |
 |-----|-----------------|-----|-----|-----|
-| **Azure統合環境** | Azure Container Apps | AZURE_FOUNDRY | AZURE | 統合管理、日本語OCR高精度 |
+| **Azure統合環境** | Azure Container Apps | AZURE | AZURE | 統合管理、日本語OCR高精度 |
 | **GCP統合環境** | Cloud Run | GCP | GCP | Gemini、高速処理 |
 | **AWS統合環境** | App Runner | AWS | AWS | Claude、豊富なサービス連携 |
 | **コスト重視** | 任意 | 任意 | TESSERACT | OSS OCR、オフライン対応 |

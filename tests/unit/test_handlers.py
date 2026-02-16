@@ -121,7 +121,7 @@ class TestGetLLMInstances:
         """LLM設定済みの場合"""
         mock_factory.get_config_status.return_value = {
             "configured": True,
-            "provider": "AZURE_FOUNDRY",
+            "provider": "AZURE",
             "model": "gpt-4o-mini"
         }
         mock_factory.create_chat_model.return_value = Mock()

@@ -93,10 +93,10 @@ EXPORTモードを使用する場合:
 
 ### Webフロントエンド
 
-- **APIエンドポイント**: Azure Functions/GCP/AWSのevaluateエンドポイントURL
+- **APIエンドポイント**: Container Apps/Cloud Run/App RunnerのevaluateエンドポイントURL
 - **APIキー**: Functions Key、Bearer Token、またはAPI Key
 - **認証ヘッダー**: プロバイダーに応じて選択
-  - Azure Functions: `x-functions-key`
+  - Azure Container Apps: `Ocp-Apim-Subscription-Key`（APIM経由）
   - GCP/Bearer Token: `Authorization`
   - AWS API Gateway: `x-api-key`
 
@@ -120,7 +120,7 @@ EXPORTモードを使用する場合:
 API側でCORSヘッダーを設定してください:
 
 ```python
-# Azure Functions の場合
+# Azure Container Apps の場合
 headers = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",

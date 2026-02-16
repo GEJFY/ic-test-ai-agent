@@ -39,21 +39,21 @@ if os.path.exists(_env_path):
 # Azure Foundry テスト
 # =============================================================================
 
-class TestAzureFoundryIntegration:
-    """Azure Foundry LLMの結合テスト"""
+class TestAzureIntegration:
+    """Azure AI Foundry LLMの結合テスト"""
 
     @pytest.fixture
     def check_azure_config(self):
-        """Azure Foundry設定確認"""
+        """Azure AI Foundry設定確認"""
         provider = os.getenv("LLM_PROVIDER")
-        endpoint = os.getenv("AZURE_FOUNDRY_ENDPOINT")
-        api_key = os.getenv("AZURE_FOUNDRY_API_KEY")
-        model = os.getenv("AZURE_FOUNDRY_MODEL")
+        endpoint = os.getenv("AZURE_ENDPOINT") or os.getenv("AZURE_FOUNDRY_ENDPOINT")
+        api_key = os.getenv("AZURE_API_KEY") or os.getenv("AZURE_FOUNDRY_API_KEY")
+        model = os.getenv("AZURE_MODEL") or os.getenv("AZURE_FOUNDRY_MODEL")
 
-        if provider != "AZURE_FOUNDRY":
-            pytest.skip("LLM_PROVIDER is not AZURE_FOUNDRY")
+        if provider not in ("AZURE", "AZURE_FOUNDRY"):
+            pytest.skip("LLM_PROVIDER is not AZURE")
         if not endpoint or not api_key or not model:
-            pytest.skip("Azure Foundry configuration is incomplete")
+            pytest.skip("Azure configuration is incomplete")
 
         return {"endpoint": endpoint, "model": model}
 
@@ -65,9 +65,9 @@ class TestAzureFoundryIntegration:
 
         status = LLMFactory.get_config_status()
 
-        assert status["provider"] == "AZURE_FOUNDRY"
+        assert status["provider"] == "AZURE"
         assert status["configured"] is True
-        print(f"\n✓ Azure Foundry設定確認: model={check_azure_config['model']}")
+        print(f"\n✓ Azure AI Foundry設定確認: model={check_azure_config['model']}")
 
     @pytest.mark.integration
     @pytest.mark.azure

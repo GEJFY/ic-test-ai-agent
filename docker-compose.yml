@@ -113,7 +113,7 @@ services:
     env_file:
       - .env
     environment:
-      - LLM_PROVIDER=AZURE_FOUNDRY
+      - LLM_PROVIDER=AZURE
       - OCR_PROVIDER=AZURE
     restart: unless-stopped
 

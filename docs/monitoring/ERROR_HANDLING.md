@@ -479,37 +479,39 @@ async def analyze_document(request: Request):
         return JSONResponse(content=body, status_code=status)
 ```
 
-### 7.4 Azure Functionsでの統合
+### 7.4 Container Appsでの統合
 
 ```python
-import azure.functions as func
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from src.core.correlation import get_or_create_correlation_id
 from src.core.error_handler import ErrorHandler
 
+app = FastAPI()
 handler = ErrorHandler()
 
-def main(req: func.HttpRequest) -> func.HttpResponse:
+@app.post("/api/analyze")
+async def analyze(request: Request):
     # 相関ID設定
-    headers = dict(req.headers)
+    headers = dict(request.headers)
     correlation_id = get_or_create_correlation_id(headers)
 
     try:
         # メイン処理
-        result = process_request(req)
-        return func.HttpResponse(
-            body=json.dumps(result),
+        data = await request.json()
+        result = process_request(data)
+        return JSONResponse(
+            content=result,
             status_code=200,
-            mimetype="application/json",
             headers={"X-Correlation-ID": correlation_id}
         )
 
     except Exception as e:
         error = handler.handle_exception(e)
         body, status = handler.to_http_response(error)
-        return func.HttpResponse(
-            body=json.dumps(body),
+        return JSONResponse(
+            content=body,
             status_code=status,
-            mimetype="application/json",
             headers={"X-Correlation-ID": correlation_id}
         )
 ```
@@ -600,7 +602,7 @@ fields @timestamp, @message, error_id, correlation_id
 
 ```
 // GCP Cloud Logging
-resource.type="cloud_function"
+resource.type="cloud_run_revision"
 jsonPayload.error_id="A1B2C3D4"
 ```
 

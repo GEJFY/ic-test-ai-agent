@@ -91,7 +91,7 @@ AIシステムによる監査:
 
 | プロバイダー | 環境変数値 | 説明 | 推奨用途 |
 |-------------|-----------|------|---------|
-| **Azure AI Foundry** | `AZURE_FOUNDRY` | Microsoft統合AIプラットフォーム | **推奨** - GPT-5.2 / GPT-5-nano利用 |
+| **Azure AI Foundry** | `AZURE` | Microsoft統合AIプラットフォーム | **推奨** - GPT-5.2 / GPT-5-nano利用 |
 | GCP Vertex AI | `GCP` | Google Cloud Gemini | Gemini 2.5 Pro / 3 Pro利用 |
 | AWS Bedrock | `AWS` | Amazon Bedrock | Claude Sonnet 4.5 / Opus 4.6利用 |
 
@@ -3299,10 +3299,10 @@ az containerapp create `
     --target-port 8000 `
     --ingress external `
     --env-vars `
-        LLM_PROVIDER=AZURE_FOUNDRY `
-        AZURE_FOUNDRY_ENDPOINT=https://your-project.openai.azure.com/ `
-        AZURE_FOUNDRY_API_KEY=your-api-key `
-        AZURE_FOUNDRY_MODEL=gpt-5-nano
+        LLM_PROVIDER=AZURE `
+        AZURE_ENDPOINT=https://your-project.openai.azure.com/ `
+        AZURE_API_KEY=your-api-key `
+        AZURE_MODEL=gpt-5-nano
 ```
 
 **ステップ4: Azure AI Foundryの設定**
@@ -3571,3 +3571,4 @@ LangGraphは、複雑なAIワークフローをグラフ構造で定義・実行
 | 2026-01-30 | 1.1.1 | Azure Table Storage 64KB制限対策を強化（全証跡ファイルをBlob Storageに保存） |
 | 2026-01-30 | 1.1.0 | Azure AD認証のみ方式に変更（APIキー廃止）、トークンキャッシュ機能追加、セットアップスクリプト整備 |
 | 2026-01-29 | 1.0.0 | 初版リリース |
+

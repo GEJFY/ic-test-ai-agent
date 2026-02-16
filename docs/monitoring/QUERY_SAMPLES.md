@@ -393,42 +393,41 @@ fields @timestamp, correlation_id, @message
 | sort @timestamp desc
 ```
 
-### 3.2 Lambda実行時間分析
+### 3.2 App Runner実行分析
 
 ```
-# Lambda関数ごとの実行時間統計
-filter @type = "REPORT"
-| fields @requestId, @duration, @billedDuration, @memorySize, @maxMemoryUsed
+# App Runnerサービスの実行統計
+fields @timestamp, @message
+| filter @message like /request_duration_ms/
+| parse @message '"metric_value":*,' as duration_ms
 | stats
-    avg(@duration) as avg_ms,
-    pct(@duration, 50) as p50_ms,
-    pct(@duration, 95) as p95_ms,
-    pct(@duration, 99) as p99_ms,
-    max(@duration) as max_ms,
-    count() as invocation_count
+    avg(duration_ms) as avg_ms,
+    pct(duration_ms, 50) as p50_ms,
+    pct(duration_ms, 95) as p95_ms,
+    pct(duration_ms, 99) as p99_ms,
+    max(duration_ms) as max_ms,
+    count() as request_count
     by bin(@timestamp, 1h)
 | sort @timestamp desc
 ```
 
 ```
-# 実行時間の長いLambda呼び出し（10秒超）
-filter @type = "REPORT"
-| filter @duration > 10000
-| fields @timestamp, @requestId, @duration, @billedDuration, @maxMemoryUsed
-| sort @duration desc
+# 実行時間の長いApp Runnerリクエスト（10秒超）
+fields @timestamp, correlation_id, @message
+| filter @message like /request_duration_ms/
+| parse @message '"metric_value":*,' as duration_ms
+| filter duration_ms > 10000
+| sort duration_ms desc
 | limit 20
 ```
 
 ```
-# Lambda Cold Start検出と影響分析
-filter @type = "REPORT"
-| fields @timestamp, @requestId, @duration, @initDuration
-| filter ispresent(@initDuration)
+# App Runner Cold Start検出と影響分析
+fields @timestamp, @message
+| filter @message like /cold_start/
 | stats
     count() as cold_starts,
-    avg(@initDuration) as avg_init_ms,
-    pct(@initDuration, 95) as p95_init_ms,
-    avg(@duration) as avg_total_ms
+    avg(duration_ms) as avg_duration_ms
     by bin(@timestamp, 1h)
 | sort @timestamp desc
 ```
@@ -468,11 +467,11 @@ fields @timestamp, correlation_id, error_code, @message
 ```
 
 ```
-# Lambda実行エラー
+# App Runner実行エラー
 filter @message like /Task timed out/
-    or @message like /Runtime.HandlerNotFound/
-    or @message like /Runtime.ImportModuleError/
-| fields @timestamp, @requestId, @message
+    or @message like /HealthCheckFailed/
+    or @message like /ContainerError/
+| fields @timestamp, correlation_id, @message
 | sort @timestamp desc
 | limit 20
 ```
@@ -533,14 +532,14 @@ fields @timestamp, @message
 
 ```
 -- 特定の相関IDでフィルタ（Cloud Logging フィルタ構文）
-resource.type="cloud_function"
+resource.type="cloud_run_revision"
     OR resource.type="cloud_run_revision"
 jsonPayload.correlation_id="20260209_1707484800_0001"
 ```
 
 ```
 -- 特定日のリクエスト（正規表現フィルタ）
-resource.type="cloud_function"
+resource.type="cloud_run_revision"
 jsonPayload.correlation_id=~"^20260209_"
 severity>=INFO
 ```
@@ -555,24 +554,24 @@ SELECT
     JSON_VALUE(json_payload, '$.error_id') AS error_id,
     JSON_VALUE(json_payload, '$.error_code') AS error_code
 FROM
-    `project.dataset.cloud_function_logs`
+    `project.dataset.cloud_run_logs`
 WHERE
     JSON_VALUE(json_payload, '$.correlation_id') = '20260209_1707484800_0001'
 ORDER BY
     timestamp ASC
 ```
 
-### 4.2 Cloud Functions実行分析
+### 4.2 Cloud Run実行分析
 
 ```
--- Cloud Functions実行ログ
-resource.type="cloud_function"
-resource.labels.function_name="ic-test-ai-analyze"
+-- Cloud Run実行ログ
+resource.type="cloud_run_revision"
+resource.labels.service_name="ic-test-ai-analyze"
 severity>=INFO
 ```
 
 ```sql
--- BigQuery: Cloud Functions実行時間統計
+-- BigQuery: Cloud Run実行時間統計
 SELECT
     DATE(timestamp) AS execution_date,
     APPROX_QUANTILES(
@@ -587,7 +586,7 @@ SELECT
     AVG(CAST(JSON_VALUE(json_payload, '$.duration_ms') AS FLOAT64)) AS avg_ms,
     COUNT(*) AS execution_count
 FROM
-    `project.dataset.cloud_function_logs`
+    `project.dataset.cloud_run_logs`
 WHERE
     DATE(timestamp) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
     AND JSON_VALUE(json_payload, '$.duration_ms') IS NOT NULL
@@ -598,7 +597,7 @@ ORDER BY
 ```
 
 ```sql
--- BigQuery: Cloud Functions Cold Start分析
+-- BigQuery: Cloud Run Cold Start分析
 SELECT
     EXTRACT(HOUR FROM timestamp) AS hour_of_day,
     COUNT(*) AS total_invocations,
@@ -610,7 +609,7 @@ SELECT
         / COUNT(*), 2
     ) AS cold_start_rate_pct
 FROM
-    `project.dataset.cloud_function_logs`
+    `project.dataset.cloud_run_logs`
 WHERE
     DATE(timestamp) = CURRENT_DATE()
 GROUP BY
@@ -623,7 +622,7 @@ ORDER BY
 
 ```
 -- Vertex AI API呼び出しログ
-resource.type="cloud_function"
+resource.type="cloud_run_revision"
 jsonPayload.event="dependency_call"
 jsonPayload.dependency_type="Vertex AI"
 ```
@@ -651,7 +650,7 @@ SELECT
         / COUNT(*), 2
     ) AS success_rate_pct
 FROM
-    `project.dataset.cloud_function_logs`
+    `project.dataset.cloud_run_logs`
 WHERE
     DATE(timestamp) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
     AND JSON_VALUE(json_payload, '$.event') = 'dependency_call'
@@ -672,7 +671,7 @@ SELECT
     ) AS estimated_tokens,
     COUNT(*) AS api_calls
 FROM
-    `project.dataset.cloud_function_logs`
+    `project.dataset.cloud_run_logs`
 WHERE
     DATE(timestamp) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
     AND JSON_VALUE(json_payload, '$.metric_name') = 'llm_api_calls_total'
@@ -686,7 +685,7 @@ ORDER BY
 
 ```
 -- エラーログフィルタ
-resource.type="cloud_function"
+resource.type="cloud_run_revision"
 severity=ERROR
 ```
 
@@ -700,7 +699,7 @@ SELECT
     MAX(timestamp) AS last_occurrence,
     ANY_VALUE(JSON_VALUE(json_payload, '$.message')) AS sample_message
 FROM
-    `project.dataset.cloud_function_logs`
+    `project.dataset.cloud_run_logs`
 WHERE
     DATE(timestamp) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
     AND severity = 'ERROR'
@@ -721,7 +720,7 @@ SELECT
         100.0 * COUNTIF(severity = 'ERROR') / COUNT(*), 2
     ) AS error_rate_pct
 FROM
-    `project.dataset.cloud_function_logs`
+    `project.dataset.cloud_run_logs`
 WHERE
     DATE(timestamp) >= DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
 GROUP BY
@@ -791,10 +790,10 @@ customMetrics
         {
             "type": "metric",
             "properties": {
-                "title": "Lambda実行回数",
+                "title": "App Runnerリクエスト数",
                 "metrics": [
-                    ["AWS/Lambda", "Invocations",
-                     "FunctionName", "ic-test-ai-analyze"]
+                    ["AWS/AppRunner", "RequestCount",
+                     "ServiceName", "ic-test-ai-analyze"]
                 ],
                 "period": 3600,
                 "stat": "Sum"
@@ -803,10 +802,10 @@ customMetrics
         {
             "type": "metric",
             "properties": {
-                "title": "Lambda処理時間 (P50/P95/P99)",
+                "title": "App Runner処理時間 (P50/P95/P99)",
                 "metrics": [
-                    ["AWS/Lambda", "Duration",
-                     "FunctionName", "ic-test-ai-analyze",
+                    ["AWS/AppRunner", "RequestLatency",
+                     "ServiceName", "ic-test-ai-analyze",
                      {"stat": "p50", "label": "P50"}],
                     ["...", {"stat": "p95", "label": "P95"}],
                     ["...", {"stat": "p99", "label": "P99"}]
@@ -817,10 +816,10 @@ customMetrics
         {
             "type": "metric",
             "properties": {
-                "title": "Lambdaエラー数",
+                "title": "App Runnerエラー数",
                 "metrics": [
-                    ["AWS/Lambda", "Errors",
-                     "FunctionName", "ic-test-ai-analyze"]
+                    ["AWS/AppRunner", "4xxStatusResponses",
+                     "ServiceName", "ic-test-ai-analyze"]
                 ],
                 "period": 3600,
                 "stat": "Sum"
@@ -845,10 +844,10 @@ customMetrics
 
 | ウィジェット | タイプ | データソース |
 |------------|--------|------------|
-| Cloud Functions実行回数 | 折れ線グラフ | `cloudfunctions.googleapis.com/function/execution_count` |
-| 実行時間（P50/P95） | 折れ線グラフ | `cloudfunctions.googleapis.com/function/execution_times` |
+| Cloud Run実行回数 | 折れ線グラフ | `run.googleapis.com/request_count` |
+| 実行時間（P50/P95） | 折れ線グラフ | `run.googleapis.com/request_latencies` |
 | エラー数 | 棒グラフ | Log-based Metric: `error_code` カウント |
-| メモリ使用量 | 折れ線グラフ | `cloudfunctions.googleapis.com/function/user_memory_bytes` |
+| メモリ使用量 | 折れ線グラフ | `run.googleapis.com/container/memory/utilizations` |
 | Vertex AI呼び出し回数 | 数値 | Log-based Metric: `vertex_ai_calls` |
 | 直近エラーログ | テーブル | Cloud Logging: `severity=ERROR` |
 
@@ -859,9 +858,9 @@ resource "google_logging_metric" "error_code_count" {
   name        = "ic-test-ai/error_code_count"
   description = "エラーコード別のエラー発生数"
   filter      = <<-EOT
-    resource.type="cloud_function"
-    severity=ERROR
-    jsonPayload.error_code!=""
+    resource.type = "cloud_run_revision"
+    severity = ERROR
+    jsonPayload.error_code != ""
   EOT
 
   metric_descriptor {
@@ -938,7 +937,7 @@ conditions:
   - displayName: "エラー率しきい値超過"
     conditionThreshold:
       filter: >
-        resource.type = "cloud_function"
+        resource.type = "cloud_run_revision"
         AND metric.type = "logging.googleapis.com/user/ic-test-ai/error_code_count"
       comparison: COMPARISON_GT
       thresholdValue: 5
@@ -978,10 +977,10 @@ customMetrics
 
 ```json
 {
-    "MetricName": "Duration",
-    "Namespace": "AWS/Lambda",
+    "MetricName": "RequestLatency",
+    "Namespace": "AWS/AppRunner",
     "Dimensions": [
-        {"Name": "FunctionName", "Value": "ic-test-ai-analyze"}
+        {"Name": "ServiceName", "Value": "ic-test-ai-analyze"}
     ],
     "ComparisonOperator": "GreaterThanThreshold",
     "Threshold": 10000,
@@ -1039,7 +1038,7 @@ conditions:
   - displayName: "LLM APIエラー率"
     conditionThreshold:
       filter: >
-        resource.type = "cloud_function"
+        resource.type = "cloud_run_revision"
         AND metric.type = "logging.googleapis.com/user/ic-test-ai/error_code_count"
         AND metric.labels.error_code = "LLM_API_ERROR"
       comparison: COMPARISON_GT

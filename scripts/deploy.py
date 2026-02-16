@@ -105,8 +105,8 @@ class Deployer:
 
         if self.platform == "azure":
             required_vars = [
-                "AZURE_FOUNDRY_API_KEY",
-                "AZURE_FOUNDRY_ENDPOINT",
+                "AZURE_API_KEY",
+                "AZURE_ENDPOINT",
                 "AZURE_DOCUMENT_INTELLIGENCE_API_KEY",
                 "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT",
             ]

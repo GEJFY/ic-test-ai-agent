@@ -209,8 +209,8 @@ curl -X POST \
   "$FUNCTION_URL/evaluate"
 
 # Cloud Loggingでログ確認
-gcloud logging read "resource.type=cloud_function \
-  resource.labels.function_name=ic-test-ai-prod-evaluate \
+gcloud logging read "resource.type=cloud_run_revision \
+  resource.labels.service_name=ic-test-ai-prod \
   jsonPayload.correlation_id=$CORRELATION_ID" \
   --limit 50 \
   --format json

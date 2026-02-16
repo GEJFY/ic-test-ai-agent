@@ -119,25 +119,25 @@ variable "container_image_tag" {
 # Azure AI / Cognitive Services 設定
 # ------------------------------------------------------------------------------
 
-variable "azure_foundry_model" {
+variable "azure_model" {
   description = "Azure AI Foundry モデル名"
   type        = string
   default     = "gpt-5-nano"
 }
 
-variable "azure_foundry_api_version" {
+variable "azure_api_version" {
   description = "Azure AI Foundry APIバージョン"
   type        = string
   default     = "2025-01-01-preview"
 }
 
-variable "azure_foundry_model_version" {
+variable "azure_model_version" {
   description = "Azure AI Foundry モデルバージョン"
   type        = string
   default     = "2025-08-07"
 }
 
-variable "azure_foundry_capacity" {
+variable "azure_capacity" {
   description = "Azure AI Foundry デプロイメント容量（TPM単位、1=1000 TPM）"
   type        = number
   default     = 1

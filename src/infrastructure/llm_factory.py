@@ -20,9 +20,10 @@ LLMインスタンス生成ファクトリーを提供します。
 ┌─────────────────┬────────────────────────────────────────────────┐
 │ プロバイダー    │ 説明                                           │
 ├─────────────────┼────────────────────────────────────────────────┤
-│ AZURE_FOUNDRY   │ Azure AI Foundry（推奨・統合AIプラットフォーム）│
+│ AZURE           │ Azure AI Foundry（統合AIプラットフォーム）     │
 │ GCP             │ Google Cloud Vertex AI（Geminiモデル）         │
 │ AWS             │ Amazon Bedrock（Claude等）                     │
+│ LOCAL           │ Ollama (ローカルLLM)                           │
 └─────────────────┴────────────────────────────────────────────────┘
 
 【使用例】
@@ -49,18 +50,19 @@ if not status['configured']:
 
 【環境変数の設定例】
 
-Azure AI Foundry の場合（推奨）:
+Azure AI Foundry の場合:
 ```bash
-export LLM_PROVIDER=AZURE_FOUNDRY
-export AZURE_FOUNDRY_ENDPOINT=https://project.region.models.ai.azure.com
-export AZURE_FOUNDRY_API_KEY=your-api-key
-export AZURE_FOUNDRY_MODEL=gpt-5-nano
+export LLM_PROVIDER=AZURE
+export AZURE_ENDPOINT=https://project.region.models.ai.azure.com
+export AZURE_API_KEY=your-api-key
+export AZURE_MODEL=gpt-5-nano
 ```
 
 【注意事項】
 - 各プロバイダーの認証情報は環境変数または.envファイルで設定
 - APIキーは決してソースコードにハードコードしないこと
 - 本番環境ではKey Vault等のシークレット管理サービスを使用推奨
+- 後方互換: LLM_PROVIDER=AZURE_FOUNDRY および AZURE_FOUNDRY_* 環境変数も利用可能
 
 ================================================================================
 """
@@ -167,7 +169,7 @@ class LLMProvider(Enum):
 
     【各プロバイダーの特徴】
     ┌──────────────────┬─────────────────────────────────────────────┐
-    │ AZURE_FOUNDRY    │ 推奨。複数モデル対応、統合管理、カタログ    │
+    │ AZURE            │ Azure AI Foundry。複数モデル対応、統合管理  │
     │ GCP              │ Gemini、Google検索連携、マルチモーダル      │
     │ AWS              │ Claude、既存AWSサービスとの統合、IAM連携    │
     │ LOCAL            │ Ollama、ローカル実行、プライバシー重視      │
@@ -176,15 +178,15 @@ class LLMProvider(Enum):
     【使用例】
     ```python
     # プロバイダーの比較
-    if provider == LLMProvider.AZURE_FOUNDRY:
+    if provider == LLMProvider.AZURE:
         print("Azure AI Foundryを使用")
 
     # 文字列との変換
-    provider = LLMProvider("AZURE_FOUNDRY")  # 文字列から列挙型へ
-    name = provider.value                    # 列挙型から文字列へ
+    provider = LLMProvider("AZURE")  # 文字列から列挙型へ
+    name = provider.value            # 列挙型から文字列へ
     ```
     """
-    AZURE_FOUNDRY = "AZURE_FOUNDRY"    # Azure AI Foundry（推奨）
+    AZURE = "AZURE"                    # Azure AI Foundry
     GCP = "GCP"                        # Google Cloud Vertex AI
     AWS = "AWS"                        # Amazon Bedrock
     LOCAL = "LOCAL"                    # Ollama (ローカルLLM)
@@ -241,10 +243,11 @@ class LLMFactory:
     # 各プロバイダーの必須環境変数
     # -------------------------------------------------------------------------
     # これらの環境変数が設定されていないと、LLMを作成できません
+    # Note: AZUREはAZURE_FOUNDRY_*もフォールバックとして読み取ります
     REQUIRED_ENV_VARS: Dict[LLMProvider, List[str]] = {
-        LLMProvider.AZURE_FOUNDRY: [
-            "AZURE_FOUNDRY_ENDPOINT",         # Foundryエンドポイント
-            "AZURE_FOUNDRY_API_KEY",          # APIキー
+        LLMProvider.AZURE: [
+            "AZURE_ENDPOINT",                 # エンドポイントURL (fallback: AZURE_FOUNDRY_ENDPOINT)
+            "AZURE_API_KEY",                  # APIキー (fallback: AZURE_FOUNDRY_API_KEY)
         ],
         LLMProvider.GCP: [
             "GCP_PROJECT_ID",                 # GCPプロジェクトID
@@ -265,7 +268,7 @@ class LLMFactory:
     # 明示的にモデルが指定されない場合に使用されるデフォルト値
     # Note: AWS Bedrockでは on-demand throughput には inference profile ID が必要
     DEFAULT_MODELS: Dict[LLMProvider, Optional[str]] = {
-        LLMProvider.AZURE_FOUNDRY: "gpt-5-nano",  # GPT-5 Nano (動作確認済み)
+        LLMProvider.AZURE: "gpt-5-nano",  # GPT-5 Nano (動作確認済み)
         LLMProvider.GCP: "gemini-3-pro-preview",  # Gemini 3 Pro (動作確認済み・globalリージョン必須)
         LLMProvider.AWS: "jp.anthropic.claude-sonnet-4-5-20250929-v1:0",  # Claude Sonnet 4.5 JP (動作確認済み)
         LLMProvider.LOCAL: "llama3.2:8b",      # Llama 3.2 8B (Ollama)
@@ -276,7 +279,7 @@ class LLMFactory:
     # -------------------------------------------------------------------------
     # 低コスト・高速応答を優先する場合に使用
     COST_EFFECTIVE_MODELS: Dict[LLMProvider, Optional[str]] = {
-        LLMProvider.AZURE_FOUNDRY: "gpt-5-nano",        # GPT-5 Nano (高速・低コスト)
+        LLMProvider.AZURE: "gpt-5-nano",        # GPT-5 Nano (高速・低コスト)
         LLMProvider.GCP: "gemini-2.5-flash-lite",       # Gemini 2.5 Flash Lite (動作確認済み)
         LLMProvider.AWS: "anthropic.claude-3-haiku-20240307-v1:0",  # Claude 3 Haiku
         LLMProvider.LOCAL: "phi4:3.8b",                 # Phi-4 3.8B (超軽量)
@@ -288,7 +291,7 @@ class LLMFactory:
     # 最高精度を求める場合に使用（コスト高）
     # Note: AWS Bedrockでは on-demand throughput には inference profile ID が必要
     HIGH_END_MODELS: Dict[LLMProvider, Optional[str]] = {
-        LLMProvider.AZURE_FOUNDRY: "gpt-5-nano",        # GPT-5 Nano (デプロイ済み)
+        LLMProvider.AZURE: "gpt-5-nano",        # GPT-5 Nano (デプロイ済み)
         LLMProvider.GCP: "gemini-3-pro-preview",        # Gemini 3 Pro (動作確認済み・globalリージョン必須)
         LLMProvider.AWS: "global.anthropic.claude-opus-4-6-v1",  # Claude Opus 4.6 (動作確認済み)
         LLMProvider.LOCAL: "llama3.2:70b",              # Llama 3.2 70B
@@ -299,7 +302,7 @@ class LLMFactory:
     # -------------------------------------------------------------------------
     # Vision（画像認識）機能をサポートするモデル
     VISION_MODELS: Dict[LLMProvider, Optional[str]] = {
-        LLMProvider.AZURE_FOUNDRY: "gpt-5-nano",        # GPT-5 NanoはVision対応
+        LLMProvider.AZURE: "gpt-5-nano",        # GPT-5 NanoはVision対応
         LLMProvider.GCP: "gemini-2.5-flash",            # Gemini 2.5はネイティブでVision対応（動作確認済み）
         LLMProvider.AWS: "anthropic.claude-3-sonnet-20240229-v1:0",  # Claude 3 Sonnet Vision対応
         LLMProvider.LOCAL: "llava:34b",                 # LLaVA 34B (Vision対応、Ollama)
@@ -309,7 +312,7 @@ class LLMFactory:
     # 利用可能なモデル一覧（プロバイダー別）
     # -------------------------------------------------------------------------
     AVAILABLE_MODELS: Dict[LLMProvider, Dict[str, str]] = {
-        LLMProvider.AZURE_FOUNDRY: {
+        LLMProvider.AZURE: {
             # GPT-5.2 シリーズ (2026年1月〜)
             "gpt-5.2": "GPT-5.2 - 企業エージェント・コーディング向けフラッグシップ",
             "gpt-5.2-codex": "GPT-5.2 Codex - コード特化モデル",
@@ -387,6 +390,40 @@ class LLMFactory:
     ]
 
     # =========================================================================
+    # Azure環境変数ヘルパー（後方互換用）
+    # =========================================================================
+
+    @classmethod
+    def _get_azure_env(cls, primary: str, fallback: str, default: str = "") -> str:
+        """
+        Azure環境変数を取得する（プライマリ → フォールバック）
+
+        AZURE_FOUNDRY_* 環境変数からの移行をサポートするため、
+        プライマリ名が未設定の場合はフォールバック名を読み取ります。
+
+        Args:
+            primary: プライマリ環境変数名（例: AZURE_ENDPOINT）
+            fallback: フォールバック環境変数名（例: AZURE_FOUNDRY_ENDPOINT）
+            default: どちらも未設定の場合のデフォルト値
+
+        Returns:
+            str: 環境変数の値
+        """
+        value = os.getenv(primary, "").strip()
+        if value:
+            return value
+
+        value = os.getenv(fallback, "").strip()
+        if value:
+            logger.warning(
+                f"[LLMFactory] 環境変数 {fallback} は非推奨です。"
+                f"{primary} に移行してください。"
+            )
+            return value
+
+        return default
+
+    # =========================================================================
     # プロバイダー取得・検証メソッド
     # =========================================================================
 
@@ -398,7 +435,8 @@ class LLMFactory:
         【処理の流れ】
         1. 環境変数 LLM_PROVIDER の値を読み取る
         2. 値が空の場合はエラーを発生
-        3. 対応プロバイダーに変換して返す
+        3. AZURE_FOUNDRYの場合はAZUREに自動変換（後方互換）
+        4. 対応プロバイダーに変換して返す
 
         Returns:
             LLMProvider: 設定されているプロバイダー
@@ -426,17 +464,25 @@ class LLMFactory:
                 "LLM_PROVIDER環境変数が設定されていません。\n"
                 "\n"
                 "【対応プロバイダー】\n"
-                "  AZURE_FOUNDRY - Azure AI Foundry（推奨）\n"
+                "  AZURE         - Azure AI Foundry\n"
                 "  GCP           - Google Cloud Vertex AI\n"
                 "  AWS           - Amazon Bedrock\n"
                 "  LOCAL         - Ollama (ローカルLLM)\n"
                 "\n"
                 "【設定方法】\n"
-                "  環境変数: export LLM_PROVIDER=AZURE_FOUNDRY\n"
-                "  .envファイル: LLM_PROVIDER=AZURE_FOUNDRY"
+                "  環境変数: export LLM_PROVIDER=AZURE\n"
+                "  .envファイル: LLM_PROVIDER=AZURE"
             )
             logger.error(f"[LLMFactory] {error_msg}")
             raise LLMConfigError(error_msg)
+
+        # 後方互換: AZURE_FOUNDRY → AZURE に自動変換
+        if provider_str == "AZURE_FOUNDRY":
+            logger.warning(
+                "[LLMFactory] LLM_PROVIDER=AZURE_FOUNDRY は非推奨です。"
+                "AZURE に自動変換しました。.envファイルを LLM_PROVIDER=AZURE に更新してください。"
+            )
+            provider_str = "AZURE"
 
         # プロバイダー名の検証と変換
         try:
@@ -469,6 +515,7 @@ class LLMFactory:
         【検証内容】
         - 必須環境変数がすべて設定されているか
         - 値が空文字でないか
+        - Azure: AZURE_FOUNDRY_* フォールバックも確認
 
         Args:
             provider: 検証するプロバイダー
@@ -479,7 +526,7 @@ class LLMFactory:
         【使用例】
         ```python
         try:
-            LLMFactory.validate_config(LLMProvider.AZURE_FOUNDRY)
+            LLMFactory.validate_config(LLMProvider.AZURE)
             print("設定OK")
         except LLMConfigError as e:
             print(f"設定エラー: {e}")
@@ -487,22 +534,37 @@ class LLMFactory:
         """
         logger.debug(f"[LLMFactory] 設定検証開始: {provider.value}")
 
-        # 必須環境変数を取得
-        required_vars = cls.REQUIRED_ENV_VARS.get(provider, [])
-        missing_vars = []
-
-        # 各環境変数をチェック
-        for var in required_vars:
-            value = os.getenv(var, "").strip()
-            if not value:
-                missing_vars.append(var)
-                logger.debug(f"[LLMFactory] 環境変数未設定: {var}")
-            else:
-                # APIキーは最初の数文字だけログに出力（セキュリティ対策）
-                if "KEY" in var or "SECRET" in var:
-                    logger.debug(f"[LLMFactory] 環境変数設定済み: {var} = ****{value[-4:]}")
+        # Azure: プライマリとフォールバック両方をチェック
+        if provider == LLMProvider.AZURE:
+            missing_vars = []
+            fallback_map = {
+                "AZURE_ENDPOINT": "AZURE_FOUNDRY_ENDPOINT",
+                "AZURE_API_KEY": "AZURE_FOUNDRY_API_KEY",  # pragma: allowlist secret
+            }
+            for primary, fallback in fallback_map.items():
+                value = cls._get_azure_env(primary, fallback)
+                if not value:
+                    missing_vars.append(primary)
+                    logger.debug(f"[LLMFactory] 環境変数未設定: {primary}")
                 else:
-                    logger.debug(f"[LLMFactory] 環境変数設定済み: {var} = {value[:50]}...")
+                    if "KEY" in primary:
+                        logger.debug(f"[LLMFactory] 環境変数設定済み: {primary} = ****{value[-4:]}")
+                    else:
+                        logger.debug(f"[LLMFactory] 環境変数設定済み: {primary} = {value[:50]}...")
+        else:
+            # その他のプロバイダー: 通常の検証
+            required_vars = cls.REQUIRED_ENV_VARS.get(provider, [])
+            missing_vars = []
+            for var in required_vars:
+                value = os.getenv(var, "").strip()
+                if not value:
+                    missing_vars.append(var)
+                    logger.debug(f"[LLMFactory] 環境変数未設定: {var}")
+                else:
+                    if "KEY" in var or "SECRET" in var:
+                        logger.debug(f"[LLMFactory] 環境変数設定済み: {var} = ****{value[-4:]}")
+                    else:
+                        logger.debug(f"[LLMFactory] 環境変数設定済み: {var} = {value[:50]}...")
 
         # 不足がある場合はエラー
         if missing_vars:
@@ -554,7 +616,7 @@ class LLMFactory:
 
         Returns:
             ChatModel: LangChainチャットモデルインスタンス
-                - AzureChatOpenAI (Azure AI Foundry)
+                - AzureChatOpenAI (Azure)
                 - ChatVertexAI (GCP)
                 - ChatBedrock (AWS)
 
@@ -597,8 +659,8 @@ class LLMFactory:
 
         try:
             # プロバイダー別にモデルを作成
-            if provider == LLMProvider.AZURE_FOUNDRY:
-                llm = cls._create_azure_foundry_model(temperature, model, **kwargs)
+            if provider == LLMProvider.AZURE:
+                llm = cls._create_azure_model(temperature, model, **kwargs)
             elif provider == LLMProvider.GCP:
                 llm = cls._create_gcp_model(temperature, model, **kwargs)
             elif provider == LLMProvider.AWS:
@@ -617,9 +679,13 @@ class LLMFactory:
 
         except ImportError as e:
             logger.error(
-                f"[LLMFactory] 必要なライブラリがインストールされていません: "
-                f"provider={provider.value}, error={e}. "
-                f"pip install -r requirements.txt を実行してください"
+                f"[LLMFactory] 必要なライブラリがインストールされていません: {e}"
+            )
+            logger.info(
+                f"[LLMFactory] 以下のコマンドでインストールしてください:\n"
+                f"  pip install langchain-openai  (Azure用)\n"
+                f"  pip install langchain-google-vertexai  (GCP用)\n"
+                f"  pip install langchain-aws  (AWS用)"
             )
             raise
 
@@ -636,7 +702,7 @@ class LLMFactory:
             raise
 
     @classmethod
-    def _create_azure_foundry_model(
+    def _create_azure_model(
         cls,
         temperature: float,
         model: Optional[str],
@@ -669,14 +735,15 @@ class LLMFactory:
 
         from langchain_openai import AzureChatOpenAI
 
-        # 環境変数から設定を取得
-        endpoint = os.getenv("AZURE_FOUNDRY_ENDPOINT")
-        api_key = os.getenv("AZURE_FOUNDRY_API_KEY")
-        api_version = os.getenv("AZURE_FOUNDRY_API_VERSION", "2024-08-01-preview")
-        model_name = model or os.getenv(
-            "AZURE_FOUNDRY_MODEL",
-            cls.DEFAULT_MODELS[LLMProvider.AZURE_FOUNDRY]
+        # 環境変数から設定を取得（AZURE_FOUNDRY_* フォールバック対応）
+        endpoint = cls._get_azure_env("AZURE_ENDPOINT", "AZURE_FOUNDRY_ENDPOINT")
+        api_key = cls._get_azure_env("AZURE_API_KEY", "AZURE_FOUNDRY_API_KEY")
+        api_version = cls._get_azure_env(
+            "AZURE_API_VERSION", "AZURE_FOUNDRY_API_VERSION", "2024-08-01-preview"
         )
+        model_name = model or cls._get_azure_env(
+            "AZURE_MODEL", "AZURE_FOUNDRY_MODEL"
+        ) or cls.DEFAULT_MODELS[LLMProvider.AZURE]
 
         logger.debug(
             f"[LLMFactory] Azure AI Foundry設定: "
@@ -992,8 +1059,8 @@ class LLMFactory:
         内部統制テストでは、スキャンされた書類や図表の分析に使用します。
 
         【対応モデル】
-        - Azure AI Foundry: GPT-5 Nano, GPT-5
-        - GCP: Gemini 1.5 Pro/Flash
+        - Azure: GPT-5 Nano, GPT-5
+        - GCP: Gemini 2.5 Flash
         - AWS: Claude 3シリーズ
 
         Args:
@@ -1027,10 +1094,11 @@ class LLMFactory:
 
         # 各プロバイダーのVision対応モデルを取得
         vision_models = {
-            LLMProvider.AZURE_FOUNDRY: os.getenv(
-                "AZURE_FOUNDRY_VISION_MODEL",
-                os.getenv("AZURE_FOUNDRY_MODEL", cls.VISION_MODELS[LLMProvider.AZURE_FOUNDRY])
-            ),
+            LLMProvider.AZURE: cls._get_azure_env(
+                "AZURE_VISION_MODEL", "AZURE_FOUNDRY_VISION_MODEL"
+            ) or cls._get_azure_env(
+                "AZURE_MODEL", "AZURE_FOUNDRY_MODEL"
+            ) or cls.VISION_MODELS[LLMProvider.AZURE],
             LLMProvider.GCP: cls.VISION_MODELS[LLMProvider.GCP],
             LLMProvider.AWS: cls.VISION_MODELS[LLMProvider.AWS],
             LLMProvider.LOCAL: os.getenv(
@@ -1094,21 +1162,29 @@ class LLMFactory:
             logger.debug("[LLMFactory] プロバイダー未設定")
             return status
 
-        # 必須環境変数をチェック
-        required_vars = cls.REQUIRED_ENV_VARS.get(provider, [])
-        for var in required_vars:
-            if not os.getenv(var, "").strip():
-                status["missing_vars"].append(var)
+        # 必須環境変数をチェック（Azure: フォールバック対応）
+        if provider == LLMProvider.AZURE:
+            fallback_map = {
+                "AZURE_ENDPOINT": "AZURE_FOUNDRY_ENDPOINT",
+                "AZURE_API_KEY": "AZURE_FOUNDRY_API_KEY",  # pragma: allowlist secret
+            }
+            for primary, fallback in fallback_map.items():
+                if not cls._get_azure_env(primary, fallback):
+                    status["missing_vars"].append(primary)
+        else:
+            required_vars = cls.REQUIRED_ENV_VARS.get(provider, [])
+            for var in required_vars:
+                if not os.getenv(var, "").strip():
+                    status["missing_vars"].append(var)
 
         # 設定完了フラグ
         status["configured"] = len(status["missing_vars"]) == 0
 
         # モデル名を取得
-        if provider == LLMProvider.AZURE_FOUNDRY:
-            status["model"] = os.getenv(
-                "AZURE_FOUNDRY_MODEL",
-                cls.DEFAULT_MODELS[LLMProvider.AZURE_FOUNDRY]
-            )
+        if provider == LLMProvider.AZURE:
+            status["model"] = cls._get_azure_env(
+                "AZURE_MODEL", "AZURE_FOUNDRY_MODEL"
+            ) or cls.DEFAULT_MODELS[LLMProvider.AZURE]
         else:
             status["model"] = cls.DEFAULT_MODELS.get(provider)
 
@@ -1144,18 +1220,18 @@ class LLMFactory:
         ```
         """
         return {
-            "AZURE_FOUNDRY": {
+            "AZURE": {
                 "name": "Azure AI Foundry",
                 "description": "Azure AI Foundry - 統合AIプラットフォーム。GPT-5.2、Phi-4、DeepSeek-R1等が利用可能。",
-                "models": list(cls.AVAILABLE_MODELS.get(LLMProvider.AZURE_FOUNDRY, {}).keys()),
-                "models_detail": cls.AVAILABLE_MODELS.get(LLMProvider.AZURE_FOUNDRY, {}),
-                "high_end": cls.HIGH_END_MODELS[LLMProvider.AZURE_FOUNDRY],
-                "cost_effective": cls.COST_EFFECTIVE_MODELS[LLMProvider.AZURE_FOUNDRY],
-                "required_env_vars": cls.REQUIRED_ENV_VARS[LLMProvider.AZURE_FOUNDRY],
+                "models": list(cls.AVAILABLE_MODELS.get(LLMProvider.AZURE, {}).keys()),
+                "models_detail": cls.AVAILABLE_MODELS.get(LLMProvider.AZURE, {}),
+                "high_end": cls.HIGH_END_MODELS[LLMProvider.AZURE],
+                "cost_effective": cls.COST_EFFECTIVE_MODELS[LLMProvider.AZURE],
+                "required_env_vars": ["AZURE_ENDPOINT", "AZURE_API_KEY"],
                 "optional_env_vars": [
-                    "AZURE_FOUNDRY_MODEL",
-                    "AZURE_FOUNDRY_VISION_MODEL",
-                    "AZURE_FOUNDRY_API_VERSION"
+                    "AZURE_MODEL",
+                    "AZURE_VISION_MODEL",
+                    "AZURE_API_VERSION"
                 ],
                 "documentation": "https://ai.azure.com/"
             },

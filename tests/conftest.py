@@ -252,11 +252,11 @@ def mock_job_queue():
 def mock_azure_env():
     """Azure環境変数モック"""
     env_vars = {
-        "LLM_PROVIDER": "AZURE_FOUNDRY",
-        "AZURE_FOUNDRY_ENDPOINT": "https://test.openai.azure.com/",
-        "AZURE_FOUNDRY_MODEL": "gpt-4o-mini",
-        "AZURE_FOUNDRY_API_KEY": "test-api-key",
-        "AZURE_FOUNDRY_API_VERSION": "2024-02-01",
+        "LLM_PROVIDER": "AZURE",
+        "AZURE_ENDPOINT": "https://test.openai.azure.com/",
+        "AZURE_MODEL": "gpt-4o-mini",
+        "AZURE_API_KEY": "test-api-key",
+        "AZURE_API_VERSION": "2024-02-01",
         "OCR_PROVIDER": "AZURE",
         "AZURE_DI_ENDPOINT": "https://test.cognitiveservices.azure.com/",
         "AZURE_DI_KEY": "test-di-key",
@@ -270,7 +270,7 @@ def mock_azure_env():
 def mock_no_env():
     """環境変数なしモック"""
     env_vars_to_remove = [
-        "LLM_PROVIDER", "AZURE_FOUNDRY_ENDPOINT", "AZURE_FOUNDRY_MODEL",
+        "LLM_PROVIDER", "AZURE_ENDPOINT", "AZURE_MODEL",
         "OCR_PROVIDER", "AZURE_DI_ENDPOINT", "AZURE_DI_KEY",
         "AZURE_STORAGE_CONNECTION_STRING"
     ]
