@@ -75,6 +75,7 @@ jobs:
         run: |
           terraform init
           terraform plan -out=tfplan \
+            -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
             -var="container_image_tag=${{ github.sha }}"
           terraform apply -auto-approve tfplan
 
