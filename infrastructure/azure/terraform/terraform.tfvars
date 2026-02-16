@@ -20,6 +20,9 @@ container_app_min_replicas = 1
 container_app_max_replicas = 5
 container_image_tag        = "latest"
 
+# Azure AI Foundry設定
+azure_foundry_capacity = 30  # 30K TPM（1だと429レート制限が頻発）
+
 # タグ
 tags = {
   Project     = "InternalControlTestAI"
